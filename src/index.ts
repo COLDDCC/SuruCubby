@@ -14,6 +14,7 @@ import { paymentRoutes } from './routes/admin/payments.ts';
 import { settingsRoutes } from './routes/admin/settings.ts';
 import { customerRoutes } from './routes/customer.ts';
 import { ITEM_STATUSES, STATUS_LABELS } from './lib/status.ts';
+import { KEY_PATTERN } from './lib/images.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -24,6 +25,23 @@ app.onError((err, c) => {
   console.error(err);
   const message = err instanceof Error ? err.message : '服务器出错了';
   return c.json({ error: message }, 500);
+});
+
+// 缓存到 R2 的图片：客户页只认自己域名下的这个地址
+app.get('/img/:key', async (c) => {
+  const key = c.req.param('key');
+  if (!KEY_PATTERN.test(key)) return c.text('找不到图片', 404);
+  const bucket = c.env.IMAGES;
+  if (!bucket) return c.text('没有配置图片存储', 404);
+  const object = await bucket.get(key);
+  if (!object) return c.text('找不到图片', 404);
+  return new Response(object.body, {
+    headers: {
+      'content-type': object.httpMetadata?.contentType ?? 'image/jpeg',
+      'cache-control': 'public, max-age=31536000, immutable',
+      etag: object.httpEtag,
+    },
+  });
 });
 
 app.get('/api/meta', (c) => c.json({ statuses: ITEM_STATUSES, statusLabels: STATUS_LABELS }));

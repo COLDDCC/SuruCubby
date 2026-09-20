@@ -9,6 +9,12 @@ export type Cell = string | number | boolean | null | undefined;
 export interface RawSheet {
   headers: Cell[];
   rows: Cell[][];
+  /**
+   * 与 rows 同形状的「单元格里藏着的地址」。
+   * 飞书表格用 =IMAGE("https://...") 渲染图片，导出成 xlsx 后单元格本身往往是空的，
+   * 地址只存在于公式或超链接里；前端把它们抽出来放这里，图片 / 商品链接两列优先用。
+   */
+  urls?: (string | null)[][];
 }
 
 export interface ParsedRow {
@@ -110,6 +116,27 @@ export function mapHeaders(headers: Cell[]): HeaderMap {
   return { index, missingColumns };
 }
 
+const URL_IN_FORMULA =
+  /(?:_xlfn\.)?(?:IMAGE|HYPERLINK|DISPIMG|_xlfn\.DISPIMG)\s*\(\s*["']([^"']+)["']/i;
+
+/**
+ * 从单元格文本里找出地址：
+ *   - 直接是 http(s) 链接
+ *   - 是 =IMAGE("...") / =HYPERLINK("...","显示文字") 这类公式（有些导出会把公式当文本写出来）
+ * 普通文字（「点击查看」之类）返回 null。
+ */
+export function extractUrlFromText(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).trim();
+  if (value === '') return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('=')) {
+    const match = URL_IN_FORMULA.exec(value);
+    if (match && /^https?:\/\//i.test(match[1])) return match[1];
+  }
+  return null;
+}
+
 function text(cell: Cell): string {
   if (cell === null || cell === undefined) return '';
   return String(cell).trim();
@@ -137,6 +164,12 @@ export function parseSheet(sheet: RawSheet): ParseResult {
     const get = (field: keyof ParsedRow): Cell => {
       const at = index[field];
       return at === undefined ? null : row[at];
+    };
+    /** 链接类的列：单元格文本 → 公式 / 超链接里的地址 */
+    const getUrl = (field: keyof ParsedRow): string | null => {
+      const at = index[field];
+      if (at === undefined) return null;
+      return extractUrlFromText(row[at]) ?? sheet.urls?.[i]?.[at] ?? null;
     };
     const isEmptyRow = row.every((cell) => text(cell) === '');
     if (isEmptyRow) {
@@ -168,8 +201,8 @@ export function parseSheet(sheet: RawSheet): ParseResult {
     rows.push({
       rowNo,
       title,
-      imageUrl: optionalText(get('imageUrl')),
-      productUrl: optionalText(get('productUrl')),
+      imageUrl: getUrl('imageUrl'),
+      productUrl: getUrl('productUrl'),
       listPriceJpy: toJpy(get('listPriceJpy')),
       actualPriceJpy: toJpy(get('actualPriceJpy')),
       cn,

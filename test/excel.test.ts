@@ -97,3 +97,39 @@ test('从商品页里抓 og:image，相对地址会补全', () => {
   assert.equal(extractOgImage(reversed, 'https://x/'), 'https://cdn/x.png');
   assert.equal(extractOgImage('<html></html>', 'https://x/'), null);
 });
+
+import { extractUrlFromText } from '../src/lib/excel.ts';
+
+test('飞书的 =IMAGE("...") 公式能认出图片地址', () => {
+  assert.equal(
+    extractUrlFromText('=IMAGE("https://img.feishu.cn/a.png")'),
+    'https://img.feishu.cn/a.png',
+  );
+  assert.equal(extractUrlFromText('=_xlfn.IMAGE("https://x/a.png",1)'), 'https://x/a.png');
+  assert.equal(
+    extractUrlFromText('=HYPERLINK("https://suruga-ya.jp/p/1","商品页")'),
+    'https://suruga-ya.jp/p/1',
+  );
+  assert.equal(extractUrlFromText('https://x/a.png'), 'https://x/a.png');
+  assert.equal(extractUrlFromText('点击查看'), null);
+  assert.equal(extractUrlFromText(''), null);
+  assert.equal(extractUrlFromText(null), null);
+});
+
+test('单元格是空的时候，用公式 / 超链接里抽出来的地址兜底', () => {
+  const result = parseSheet({
+    headers: HEADERS,
+    rows: [
+      ['手办', null, '点击查看', null, 1800, '阿狸', '98.5'],
+      ['盒蛋', '=IMAGE("https://img/b.png")', null, null, 900, '阿狸', '45'],
+    ],
+    urls: [
+      [null, 'https://img/a.png', 'https://suruga-ya.jp/p/1', null, null, null, null],
+      [null, null, null, null, null, null, null],
+    ],
+  });
+  assert.equal(result.rows[0].imageUrl, 'https://img/a.png');
+  assert.equal(result.rows[0].productUrl, 'https://suruga-ya.jp/p/1');
+  assert.equal(result.rows[1].imageUrl, 'https://img/b.png');
+  assert.equal(result.rows[1].productUrl, null);
+});

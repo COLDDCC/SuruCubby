@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { fetchOgImage } from '../../lib/ogImage.ts';
+import { cacheImage, isHttpUrl } from '../../lib/images.ts';
 import { nowIso } from '../../lib/db.ts';
 
 export const batchRoutes = new Hono<{ Bindings: Env }>();
@@ -68,38 +69,81 @@ batchRoutes.patch('/:id', async (c) => {
 });
 
 /**
- * 补封面图：对这一批里「有商品链接、但没有图片」的物品，去抓商品页的 og:image。
- * 一次最多处理 20 件，抓不到就算了（客户页会显示占位图）。
+ * 固化封面图：对这一批里还没有站内图片的物品，
+ *   1. 有外链图片地址就用它（飞书的 =IMAGE("...") 公式在导入时已经被抽出来了）；
+ *   2. 没有就去商品链接的页面抓 og:image；
+ *   3. 绑了 R2 就把图抓下来存进自己的桶，图片地址换成 /img/{key}，从此不怕对方改地址或防盗链；
+ *      没绑 R2 就退回直接外链。
+ * 一次最多处理 20 件，按钮可以反复点直到 left 为 0。
  */
-batchRoutes.post('/:id/fetch-images', async (c) => {
+batchRoutes.post('/:id/images', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
+  const bucket = c.env.IMAGES;
+  const limit = 20;
+
   const rows = await c.env.DB.prepare(
-    `SELECT id, product_url AS productUrl FROM items
-      WHERE batch_id = ? AND image_url IS NULL AND product_url IS NOT NULL
-      LIMIT 20`,
+    `SELECT id, image_url AS imageUrl, product_url AS productUrl FROM items
+      WHERE batch_id = ?
+        AND (image_url IS NULL OR image_url NOT LIKE '/img/%')
+        AND (image_url IS NOT NULL OR product_url IS NOT NULL)
+      ORDER BY id
+      LIMIT ?`,
   )
-    .bind(id)
-    .all<{ id: number; productUrl: string }>();
+    .bind(id, limit)
+    .all<{ id: number; imageUrl: string | null; productUrl: string | null }>();
 
   const at = nowIso();
   const statements: D1PreparedStatement[] = [];
-  let filled = 0;
+  const failures: Array<{ itemId: number; reason: string }> = [];
+  let cached = 0;
+  let linked = 0;
+
   for (const row of rows.results) {
-    const image = await fetchOgImage(row.productUrl);
-    if (!image) continue;
-    filled += 1;
-    statements.push(
-      c.env.DB.prepare('UPDATE items SET image_url = ?, updated_at = ? WHERE id = ?').bind(image, at, row.id),
-    );
+    let source = isHttpUrl(row.imageUrl) ? row.imageUrl : null;
+    if (!source && row.productUrl) source = await fetchOgImage(row.productUrl);
+    if (!source) {
+      failures.push({ itemId: row.id, reason: '商品页里也没找到图' });
+      continue;
+    }
+    if (bucket) {
+      const result = await cacheImage(bucket, source);
+      if (result.path) {
+        cached += 1;
+        statements.push(
+          c.env.DB.prepare('UPDATE items SET image_url = ?, updated_at = ? WHERE id = ?').bind(
+            result.path,
+            at,
+            row.id,
+          ),
+        );
+        continue;
+      }
+      failures.push({ itemId: row.id, reason: result.reason ?? '抓取失败' });
+    }
+    if (source !== row.imageUrl) {
+      linked += 1;
+      statements.push(
+        c.env.DB.prepare('UPDATE items SET image_url = ?, updated_at = ? WHERE id = ?').bind(source, at, row.id),
+      );
+    }
   }
   if (statements.length > 0) await c.env.DB.batch(statements);
 
   const left = await c.env.DB.prepare(
     `SELECT COUNT(*) AS count FROM items
-      WHERE batch_id = ? AND image_url IS NULL AND product_url IS NOT NULL`,
+      WHERE batch_id = ?
+        AND (image_url IS NULL OR image_url NOT LIKE '/img/%')
+        AND (image_url IS NOT NULL OR product_url IS NOT NULL)`,
   )
     .bind(id)
     .first<{ count: number }>();
 
-  return c.json({ tried: rows.results.length, filled, left: left?.count ?? 0 });
+  return c.json({
+    r2: Boolean(bucket),
+    tried: rows.results.length,
+    cached,
+    linked,
+    failures,
+    left: left?.count ?? 0,
+  });
 });

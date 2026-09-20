@@ -11,6 +11,7 @@
  */
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 
 const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8787';
 const PASSWORD = process.env.E2E_PASSWORD || 'test-admin-pw';
@@ -366,4 +367,77 @@ test('QQ 连错 5 次会锁定 15 分钟', async () => {
     });
   }
   assert.equal(last.status, 429);
+});
+
+test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，之后只走自己的域名', async () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const server = http.createServer((req, res) => {
+    if (req.url === '/a.png' || req.url === '/og.png') {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(png);
+    } else if (req.url === '/p/1') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><head><meta property="og:image" content="/og.png"></head></html>');
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const origin = `http://127.0.0.1:${port}`;
+
+  try {
+    const cn = `图片测试${stamp}`;
+    const imported = await call('POST', '/api/admin/import/commit', {
+      fileHash: `hash-${stamp}-img`,
+      batchName: `图片批次 ${stamp}`,
+      sheet: {
+        headers: HEADERS,
+        rows: [
+          // 飞书导出后单元格里就是这么一串公式
+          ['公式图片', `=IMAGE("${origin}/a.png")`, null, null, 1000, cn, '10'],
+          // 没有图片列，只有商品链接 → 去抓 og:image
+          ['靠商品页补图', null, `${origin}/p/1`, null, 1000, cn, '10'],
+        ],
+      },
+      assignments: [{ cn, newCustomer: { qq: `${stamp + 7}`.slice(-9), nickname: cn } }],
+    });
+
+    const result = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
+    assert.equal(result.tried, 2, '两件都该被处理');
+    if (result.r2) {
+      assert.equal(result.cached, 2, `应该抓下来两张：${JSON.stringify(result.failures)}`);
+    } else {
+      assert.equal(result.linked, 1, '没绑 R2 时至少把 og:image 外链补上');
+    }
+    assert.equal(result.left, 0);
+
+    const detail = await call('GET', `/api/admin/batches/${imported.batchId}`);
+    for (const item of detail.items) {
+      if (result.r2) {
+        assert.match(item.imageUrl, /^\/img\/[0-9a-f]{32}\.png$/, item.title);
+        const res = await fetch(`${BASE}${item.imageUrl}`);
+        assert.equal(res.status, 200);
+        assert.equal(res.headers.get('content-type'), 'image/png');
+        assert.equal((await res.arrayBuffer()).byteLength, png.byteLength);
+      } else {
+        assert.ok(item.imageUrl.startsWith(origin), item.title);
+      }
+    }
+
+    // 再点一次不会重复抓
+    const again = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
+    assert.equal(again.tried, result.r2 ? 0 : 1);
+  } finally {
+    server.close();
+  }
+});
+
+test('/img/ 只认规范 key，乱传路径拿不到东西', async () => {
+  const res = await fetch(`${BASE}/img/..%2F..%2Fsecret`);
+  assert.equal(res.status, 404);
 });

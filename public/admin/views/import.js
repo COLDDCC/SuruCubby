@@ -1,5 +1,6 @@
 import { api } from '/admin/api.js';
 import { bindActions, escapeHtml, money, toast } from '/admin/ui.js';
+import { collectCellUrls } from '/admin/sheet.js';
 
 const LOCAL_XLSX = '/vendor/xlsx.full.min.js';
 const CDN_XLSX = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
@@ -68,9 +69,21 @@ async function handleFile(file, view) {
     const hash = await sha256(buffer);
     const wb = XLSX.read(buffer, { type: 'array' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+    // blankrows: true —— 中间的空行也要占位，否则后面所有行的「Excel 行号」和
+    // 从公式里抽出来的地址都会对不上号
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
     if (rows.length < 2) throw new Error('这张表没有数据行');
-    state.sheet = { headers: rows[0], rows: rows.slice(1) };
+    const body = rows.slice(1);
+    while (body.length > 0 && body[body.length - 1].every((cell) => cell === null || String(cell).trim() === '')) {
+      body.pop(); // 末尾的空行没必要发给服务端
+    }
+    if (body.length === 0) throw new Error('这张表没有数据行');
+    const colCount = Math.max(rows[0].length, ...body.map((r) => r.length));
+    state.sheet = {
+      headers: rows[0],
+      rows: body,
+      urls: collectCellUrls(ws, body.length, colCount),
+    };
     state.fileName = file.name;
     state.fileHash = hash;
     const nameInput = document.getElementById('batchName');

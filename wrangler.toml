@@ -14,6 +14,12 @@ database_name = "surucubby"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
+# 图片缓存桶：部署前先执行 `npx wrangler r2 bucket create surucubby-images`。
+# 不想用 R2 就把下面三行注释掉——图片会退回直接外链，其它功能不受影响。
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "surucubby-images"
+
 # 机密通过 `npx wrangler secret put` 设置：
 #   ADMIN_PASSWORD   后台登录密码
 #   SESSION_SECRET   Cookie 签名密钥（随便一串长随机字符串）

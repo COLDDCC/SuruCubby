@@ -62,8 +62,8 @@ export async function render(view, [id]) {
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·
         共 ${data.items.length} 件
       </p>
-      <p class="small"><button class="small plain" data-action="fetchImages">给没图的物品补封面</button>
-        <span class="small muted">从商品链接的页面抓 og:image，一次 20 件</span></p>
+      <p class="small"><button class="small plain" data-action="fetchImages">固化封面图</button>
+        <span class="small muted">缺图的去商品页抓 og:image；绑了 R2 就把图存进自己的桶，一次 20 件</span></p>
       <p class="small">关联包裹：${
         data.packages.length
           ? data.packages.map((p) => `<a href="#/packages/${p.id}">${escapeHtml(p.name)}</a>`).join('、')
@@ -77,12 +77,13 @@ export async function render(view, [id]) {
       el.disabled = true;
       el.textContent = '正在抓…';
       try {
-        const result = await api.post(`/api/admin/batches/${id}/fetch-images`);
-        toast(`补上 ${result.filled} 张，还差 ${result.left} 件`);
+        const result = await api.post(`/api/admin/batches/${id}/images`);
+        const done = result.cached ? `存进 R2 ${result.cached} 张` : `补上外链 ${result.linked} 张`;
+        toast(`${done}，还差 ${result.left} 件${result.r2 ? '' : '（没绑 R2，只能外链）'}`);
         render(view, [id]);
       } catch (err) {
         el.disabled = false;
-        el.textContent = '给没图的物品补封面';
+        el.textContent = '固化封面图';
         toast(err.message, true);
       }
     },

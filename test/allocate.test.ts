@@ -45,3 +45,24 @@ test('运费为 0 时人人都是 0', () => {
   );
   assert.equal(result.diffFen, 0);
 });
+
+import { imageKey, isCached, isHttpUrl, KEY_PATTERN } from '../src/lib/images.ts';
+
+test('图片 key 由源地址决定，同一张图不会存两份', async () => {
+  const a = await imageKey('https://img/a.png', 'image/png');
+  const b = await imageKey('https://img/a.png', 'image/png');
+  const c = await imageKey('https://img/b.png', 'image/png');
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.match(a, KEY_PATTERN);
+  assert.ok(a.endsWith('.png'));
+  assert.ok((await imageKey('https://img/a', 'image/jpeg; charset=utf-8')).endsWith('.jpg'));
+});
+
+test('区分站内缓存路径和外链', () => {
+  assert.ok(isCached('/img/abc.png'));
+  assert.ok(!isCached('https://img/a.png'));
+  assert.ok(isHttpUrl('https://img/a.png'));
+  assert.ok(!isHttpUrl('/img/abc.png'));
+  assert.ok(!KEY_PATTERN.test('../../secret'));
+});
