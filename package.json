@@ -8,7 +8,7 @@
     "db:local": "wrangler d1 migrations apply surucubby --local",
     "db:remote": "wrangler d1 migrations apply surucubby --remote",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs",
+    "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs test/xlsx.test.mjs",
     "test:e2e": "node --test test/e2e.test.mjs"
   },
   "repository": {

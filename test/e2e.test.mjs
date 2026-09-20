@@ -369,7 +369,7 @@ test('QQ 连错 5 次会锁定 15 分钟', async () => {
   assert.equal(last.status, 429);
 });
 
-test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，之后只走自己的域名', async () => {
+test('图片：=IMAGE("...") 公式认得出来，抓下来存进 R2，之后只走自己的域名', async () => {
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     'base64',
@@ -398,7 +398,7 @@ test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，�
       sheet: {
         headers: HEADERS,
         rows: [
-          // 飞书导出后单元格里就是这么一串公式
+          // 在线版 Excel 存出来的单元格里就是这么一串公式
           ['公式图片', `=IMAGE("${origin}/a.png")`, null, null, 1000, cn, '10'],
           // 没有图片列，只有商品链接 → 去抓 og:image
           ['靠商品页补图', null, `${origin}/p/1`, null, 1000, cn, '10'],

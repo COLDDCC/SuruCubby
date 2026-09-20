@@ -1,4 +1,4 @@
-/** 前端从工作表里抽地址的逻辑（飞书 =IMAGE 公式就靠它） */
+/** 前端从工作表里抽地址的逻辑（在线版 Excel 的 =IMAGE 公式就靠它） */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cellUrl, collectCellUrls, encodeCell } from '../public/admin/sheet.js';

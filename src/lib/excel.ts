@@ -11,7 +11,7 @@ export interface RawSheet {
   rows: Cell[][];
   /**
    * 与 rows 同形状的「单元格里藏着的地址」。
-   * 飞书表格用 =IMAGE("https://...") 渲染图片，导出成 xlsx 后单元格本身往往是空的，
+   * 在线版 Excel / 飞书表格用 =IMAGE("https://...") 渲染图片，存成 xlsx 后单元格本身往往是空的，
    * 地址只存在于公式或超链接里；前端把它们抽出来放这里，图片 / 商品链接两列优先用。
    */
   urls?: (string | null)[][];
