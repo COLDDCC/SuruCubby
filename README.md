@@ -31,12 +31,18 @@ npm run dev                        # http://127.0.0.1:8787
 ## 部署到 Cloudflare
 
 ```bash
+npm install
+npx wrangler login                          # 浏览器里授权一次 Cloudflare 账号
+
 npx wrangler d1 create surucubby            # 把返回的 database_id 填进 wrangler.toml
 npm run db:remote                           # 在线上库建表
+npm run deploy                              # 先部署，Worker 才存在
+
 npx wrangler secret put ADMIN_PASSWORD      # 后台密码
 npx wrangler secret put SESSION_SECRET      # Cookie 签名密钥，随便一串长随机字符串
-npm run deploy
 ```
+
+密码和密钥设好就立刻生效，不用再 deploy 一次。以后改代码只要 `npm run deploy`。
 
 部署完**务必绑定自己的域名**（Workers 控制台 → 该 Worker → Settings → Domains & Routes）。
 `*.workers.dev` 在国内经常打不开。
