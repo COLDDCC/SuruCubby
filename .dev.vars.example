@@ -1,0 +1,2 @@
+ADMIN_PASSWORD="改成你自己的后台密码"
+SESSION_SECRET="改成一串长随机字符串"

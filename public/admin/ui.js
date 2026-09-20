@@ -1,0 +1,92 @@
+import { escapeHtml, toast } from '/shared.js';
+
+export { escapeHtml, toast };
+export * from '/shared.js';
+
+/** 简易弹窗，返回 Promise：确定 → true，取消 → false。 */
+export function confirmBox(message, { okText = '确定', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = `
+      <div class="modal">
+        <p>${escapeHtml(message)}</p>
+        <div class="row" style="justify-content:flex-end">
+          <button class="plain" data-no>取消</button>
+          <button ${danger ? 'class="danger"' : ''} data-yes>${escapeHtml(okText)}</button>
+        </div>
+      </div>`;
+    const close = (value) => {
+      back.remove();
+      resolve(value);
+    };
+    back.querySelector('[data-no]').onclick = () => close(false);
+    back.querySelector('[data-yes]').onclick = () => close(true);
+    back.onclick = (e) => {
+      if (e.target === back) close(false);
+    };
+    document.body.appendChild(back);
+  });
+}
+
+/** 输入框弹窗，取消返回 null。 */
+export function promptBox(message, defaultValue = '', { okText = '确定', type = 'text' } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = `
+      <div class="modal">
+        <p>${escapeHtml(message)}</p>
+        <input style="width:100%" type="${type}" value="${escapeHtml(defaultValue)}">
+        <div class="row" style="justify-content:flex-end;margin-top:12px">
+          <button class="plain" data-no>取消</button>
+          <button data-yes>${escapeHtml(okText)}</button>
+        </div>
+      </div>`;
+    const input = back.querySelector('input');
+    const close = (value) => {
+      back.remove();
+      resolve(value);
+    };
+    back.querySelector('[data-no]').onclick = () => close(null);
+    back.querySelector('[data-yes]').onclick = () => close(input.value.trim());
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') close(input.value.trim());
+    };
+    document.body.appendChild(back);
+    input.focus();
+    input.select();
+  });
+}
+
+/** 打开一个自定义弹窗，内容由 render(close) 提供。 */
+export function openModal(render) {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  const box = document.createElement('div');
+  box.className = 'modal';
+  back.appendChild(box);
+  const close = () => back.remove();
+  back.onclick = (e) => {
+    if (e.target === back) close();
+  };
+  document.body.appendChild(back);
+  render(box, close);
+  return close;
+}
+
+export function empty(text) {
+  return `<p class="empty">${escapeHtml(text)}</p>`;
+}
+
+/** 给容器里所有 [data-action] 元素绑定点击事件。 */
+export function bindActions(root, handlers) {
+  root.querySelectorAll('[data-action]').forEach((el) => {
+    const handler = handlers[el.dataset.action];
+    if (!handler) return;
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      handler(el.dataset, el, e);
+    });
+  });
+}

@@ -1,0 +1,35 @@
+{
+  "name": "surucubby",
+  "version": "1.0.0",
+  "description": "骏河屋拼团「个人仓库」：Excel 导入、客户专属页、称重分摊、收款与寄出管理",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply surucubby --local",
+    "db:remote": "wrangler d1 migrations apply surucubby --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/*.test.ts\"",
+    "test:e2e": "node --test test/e2e.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/COLDDCC/SuruCubby.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/COLDDCC/SuruCubby/issues"
+  },
+  "homepage": "https://github.com/COLDDCC/SuruCubby#readme",
+  "dependencies": {
+    "hono": "^4.13.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260920.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.135.0"
+  },
+  "private": true,
+  "type": "module"
+}
