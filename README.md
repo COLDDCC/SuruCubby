@@ -51,6 +51,21 @@ npx wrangler secret put SESSION_SECRET      # Cookie 签名密钥，随便一串
 
 可选但国内建议做：把 SheetJS 自托管到 `public/vendor/xlsx.full.min.js`，见 [`public/vendor/README.md`](public/vendor/README.md)。没有这份文件时导入页会回退到官方 CDN。
 
+## 先看看长什么样（不用部署）
+
+```bash
+npm run dev                      # 另开一个终端
+node scripts/seed-demo.mjs       # 灌一份演示数据（10 件、4 个客户、已分摊运费）
+node scripts/build-preview.mjs   # 产出 preview-build/
+```
+
+`preview-build/` 是一个纯静态包：真页面、真样式、真解析代码，配一份从接口导出来的
+假数据 + 一个拦掉 fetch 的假后端（`scripts/preview/mock.js`）。用任意静态服务器打开
+就能点：客户页、后台待办、称重台（点封面认领、填重量、算分摊都真能操作），
+还有一个「把你的团购表拖进来」的面板，用线上同一份解析代码当场告诉你列认没认出来。
+
+演示数据里客户的专属链接和 QQ 号，`scripts/seed-demo.mjs` 跑完会打印出来。
+
 ## 日常怎么用
 
 1. **导入**（后台 → 导入）：选 Excel → 填批次名 → 看预览。

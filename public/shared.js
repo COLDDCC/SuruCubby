@@ -79,8 +79,9 @@ export function toast(message, isError = false) {
  */
 export function thumb(item) {
   if (!item.imageUrl) return '<div class="noimg">无图</div>';
-  const proxied = item.id ? `/img/i/${item.id}` : item.imageUrl;
-  const fallback = item.imageUrl.startsWith('/') ? '' : item.imageUrl;
+  const inline = item.imageUrl.startsWith('data:');
+  const proxied = item.id && !inline ? `/img/i/${item.id}` : item.imageUrl;
+  const fallback = inline || item.imageUrl.startsWith('/') ? '' : item.imageUrl;
   return `<img src="${escapeHtml(proxied)}" alt="" loading="lazy"
            data-fallback="${escapeHtml(fallback)}"
            onerror="(function(el){var f=el.dataset.fallback;if(f&&el.src.indexOf(f)!==0){el.dataset.fallback='';el.src=f;return;}el.replaceWith(Object.assign(document.createElement('div'),{className:'noimg',textContent:'无图'}));})(this)">`;

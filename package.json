@@ -9,7 +9,9 @@
     "db:remote": "wrangler d1 migrations apply surucubby --remote",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs test/xlsx.test.mjs",
-    "test:e2e": "node --test test/e2e.test.mjs"
+    "test:e2e": "node --test test/e2e.test.mjs",
+    "seed": "node scripts/seed-demo.mjs",
+    "preview": "node scripts/build-preview.mjs"
   },
   "repository": {
     "type": "git",

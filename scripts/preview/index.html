@@ -1,0 +1,397 @@
+<title>骏河屋拼团仓库</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #eef1f5;
+    --panel: #ffffff;
+    --ink: #1a1e25;
+    --muted: #68727f;
+    --line: #dde2ea;
+    --accent: #2f6fed;
+    --accent-soft: #e6edfc;
+    --warn: #a4691a;
+    --warn-soft: #fbf0d9;
+    --bad: #c8382f;
+    --good: #14744a;
+    --shell: #cfd6e0;
+    color-scheme: light;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --ground: #13161b;
+      --panel: #1c2027;
+      --ink: #e7eaee;
+      --muted: #98a2ae;
+      --line: #2c323b;
+      --accent: #6d9bff;
+      --accent-soft: #1d2a44;
+      --warn: #d8a748;
+      --warn-soft: #33290f;
+      --bad: #ef6a60;
+      --good: #4cba86;
+      --shell: #2c323b;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #13161b;
+    --panel: #1c2027;
+    --ink: #e7eaee;
+    --muted: #98a2ae;
+    --line: #2c323b;
+    --accent: #6d9bff;
+    --accent-soft: #1d2a44;
+    --warn: #d8a748;
+    --warn-soft: #33290f;
+    --bad: #ef6a60;
+    --good: #4cba86;
+    --shell: #2c323b;
+    color-scheme: dark;
+  }
+
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding-block: 28px 56px; padding-left: 16px; padding-right: 16px; }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  }
+  h1 { font-size: 27px; margin: 6px 0 8px; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0 0 6px; }
+  .demo-note {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--warn-soft); color: var(--warn);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; margin-top: 10px;
+  }
+  .demo-note::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .tabs { display: flex; gap: 4px; margin: 26px 0 16px; background: var(--panel);
+          border: 1px solid var(--line); border-radius: 12px; padding: 4px; width: fit-content; max-width: 100%; flex-wrap: wrap; }
+  .tabs button {
+    font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--muted);
+    padding: 7px 15px; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+  .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .stage { display: grid; grid-template-columns: minmax(0, 375px) minmax(0, 1fr); gap: 28px; align-items: start; }
+  @media (max-width: 720px) { .stage { grid-template-columns: 1fr; } }
+
+  .phone {
+    border: 1px solid var(--shell); border-radius: 26px; background: var(--panel);
+    padding: 8px; box-shadow: 0 18px 40px rgb(20 28 44 / .13); width: 100%;
+  }
+  .phone .bar {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: var(--muted);
+    padding: 4px 10px 8px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  .phone iframe {
+    width: 100%; height: 660px; border: 0; border-radius: 18px; background: var(--ground); display: block;
+  }
+
+  .notes h2 { font-size: 15px; margin: 0 0 10px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin-bottom: 9px; color: var(--muted); }
+  .notes li b { color: var(--ink); font-weight: 600; }
+  .switch { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .switch button {
+    font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  }
+  .switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .drop {
+    border: 1.5px dashed var(--line); border-radius: 12px; padding: 26px 18px; text-align: center;
+    background: var(--panel); cursor: pointer;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+  .drop strong { font-size: 15px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
+                   font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .scroll { overflow-x: auto; }
+  .ok { color: var(--good); }
+  .no { color: var(--bad); }
+  .dim { color: var(--muted); }
+  .kv { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 14px; }
+  .kv div { font-size: 13px; color: var(--muted); }
+  .kv b { display: block; font-size: 19px; color: var(--ink);
+          font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 600; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 14px; }
+  code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .92em;
+         background: var(--accent-soft); color: var(--accent); padding: 1px 5px; border-radius: 5px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">骏河屋拼团 · 个人仓库</div>
+    <h1>先点着看看</h1>
+    <p class="lede">
+      每个客户有一个自己的电子仓库页面，看得到买了什么、到了哪一步、还欠多少钱；
+      你在后台批量导入、改状态、拆包称重、分摊国际运费、记收款。
+    </p>
+    <div class="demo-note">下面的东西都是假的演示数据，随便点</div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-customer" aria-selected="true">客户看到的</button>
+    <button role="tab" id="tab-admin" aria-selected="false">你的后台</button>
+    <button role="tab" id="tab-check" aria-selected="false">验一下你的表</button>
+  </div>
+
+  <section class="stage" id="stage-frame">
+    <div class="phone">
+      <div class="bar"><span id="url-bar">你的域名/w/nMirvg…</span><span>演示</span></div>
+      <iframe id="frame" title="页面预览"></iframe>
+      <p id="frame-fallback" hidden class="dim" style="padding:18px;font-size:13px;margin:0">
+        这个环境不让页面里再嵌页面。把仓库拉下来跑
+        <code>node scripts/build-preview.mjs</code>，用任意静态服务器打开
+        <code>preview-build/</code> 就能看同样的东西。
+      </p>
+    </div>
+    <div class="notes">
+      <div class="switch" id="switch" hidden>
+        <button data-who="k" aria-pressed="true">小K（还欠钱）</button>
+        <button data-who="ali" aria-pressed="false">阿狸（已付清 / 已寄出）</button>
+      </div>
+      <h2 id="notes-title">客户打开链接看到什么</h2>
+      <ul id="notes-list"></ul>
+    </div>
+  </section>
+
+  <section class="stage" id="stage-check" hidden>
+    <div style="grid-column: 1 / -1">
+      <div class="card">
+        <div class="drop" id="drop">
+          <strong>把你的团购表拖进来</strong>
+          <p>或者点一下选文件 · 只认 .xlsx / .xls，别用 CSV（公式和超链接会丢）</p>
+          <p>文件不会上传到任何地方，全部在你自己的浏览器里解析</p>
+          <input type="file" id="file" accept=".xlsx,.xls" hidden>
+        </div>
+        <div id="check-result"></div>
+        <p class="hint">
+          这里跑的是线上同一份解析代码：按表头文字认列、金额换算到分、
+          从 <code>=IMAGE("…")</code> 公式和超链接里把图片地址抽出来。
+        </p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script type="module">
+  import { parseSheet, mapHeaders, groupByCn } from './excel.js';
+  import { collectCellUrls } from './admin/sheet.js';
+
+  const NOTES = {
+    customer: {
+      title: '客户打开链接看到什么',
+      url: '你的域名/w/nMirvg…',
+      items: [
+        '<b>链接 + QQ 号双重验证</b>：第一次打开要输自己的 QQ 号（演示里已经验过了），之后 180 天不用再输。输错 5 次锁 15 分钟。',
+        '<b>合计待付最醒目</b>：货款、国际运费、国内运费分开列，谁欠多少一眼看清。',
+        '<b>按状态分组</b>：在日本 / 运输中 / 国内在库等你发货 / 已寄出。每件写明实际价格、应付人民币、货款有没有付。',
+        '<b>国际运费按摞列</b>：你这一摞多重、分摊多少、包含哪几件，点开就能看。',
+        '页面上只有他自己的东西，别人的一概看不到。',
+      ],
+    },
+    admin: {
+      title: '你的后台（手机上也能用）',
+      url: '你的域名/admin/',
+      items: [
+        '<b>首页是四张待办清单</b>：货款未付、国际运费未付、国内运费未付、待退款，外加国内在库（按积压天数倒序）。点「已收款」就记一笔。',
+        '<b>称重台是拆包时的主力页</b>：顶部常驻「应有 N 件 / 已找到 M 件」，拿起一件点它的封面就算找到，找不到点「缺件」。',
+        '<b>分摊会先给预览</b>：每人重量、占比、应付运费、尾差。尾差算你的，不摊给客户。',
+        '<b>导入</b>：一张表一个批次，不认识的名字标黄要先指认，认过一次以后永远记得。',
+        '去「称重台」那一页点几下封面，再填个重量试试——这个预览是真能操作的。',
+      ],
+    },
+  };
+
+  const frame = document.getElementById('frame');
+  const urlBar = document.getElementById('url-bar');
+  const notesTitle = document.getElementById('notes-title');
+  const notesList = document.getElementById('notes-list');
+  const switcher = document.getElementById('switch');
+  const stageFrame = document.getElementById('stage-frame');
+  const stageCheck = document.getElementById('stage-check');
+  const tabs = {
+    customer: document.getElementById('tab-customer'),
+    admin: document.getElementById('tab-admin'),
+    check: document.getElementById('tab-check'),
+  };
+
+  let who = 'k';
+
+  function paintNotes(key) {
+    const note = NOTES[key];
+    notesTitle.textContent = note.title;
+    notesList.innerHTML = note.items.map((t) => `<li>${t}</li>`).join('');
+    urlBar.textContent = note.url;
+  }
+
+  let frameLoaded = false;
+  frame.addEventListener('load', () => {
+    frameLoaded = true;
+    document.getElementById('frame-fallback').hidden = true;
+  });
+  setTimeout(() => {
+    if (!frameLoaded) {
+      frame.hidden = true;
+      document.getElementById('frame-fallback').hidden = false;
+    }
+  }, 3500);
+
+  function show(key) {
+    for (const [name, button] of Object.entries(tabs)) {
+      button.setAttribute('aria-selected', String(name === key));
+    }
+    stageCheck.hidden = key !== 'check';
+    stageFrame.hidden = key === 'check';
+    switcher.hidden = key !== 'customer';
+    if (key === 'check') return;
+    paintNotes(key);
+    frame.src = key === 'customer' ? `./customer-page.html?who=${who}` : './admin.html';
+  }
+
+  tabs.customer.onclick = () => show('customer');
+  tabs.admin.onclick = () => show('admin');
+  tabs.check.onclick = () => show('check');
+
+  switcher.querySelectorAll('button').forEach((button) => {
+    button.onclick = () => {
+      who = button.dataset.who;
+      switcher.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+      frame.src = `./customer-page.html?who=${who}`;
+    };
+  });
+
+  show('customer');
+
+  /* —— 验表 —— */
+  const FIELDS = [
+    ['title', '名称', true],
+    ['cn', 'cn（归属客户）', true],
+    ['goodsFeeFen', '应付人民币金额', true],
+    ['imageUrl', '图片', false],
+    ['productUrl', '商品链接', false],
+    ['listPriceJpy', '平时价格', false],
+    ['actualPriceJpy', '实际价格', false],
+  ];
+
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('file');
+  const result = document.getElementById('check-result');
+
+  drop.onclick = () => fileInput.click();
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) check(e.dataTransfer.files[0]);
+  };
+  fileInput.onchange = () => fileInput.files[0] && check(fileInput.files[0]);
+
+  const money = (fen) => `¥${Math.floor(fen / 100)}.${String(Math.abs(fen % 100)).padStart(2, '0')}`;
+  const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function check(file) {
+    result.innerHTML = '<p class="dim" style="margin-top:16px">正在解析…</p>';
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
+      if (rows.length < 2) throw new Error('这张表没有数据行');
+      const body = rows.slice(1);
+      while (body.length && body[body.length - 1].every((c) => c === null || String(c).trim() === '')) body.pop();
+      const colCount = Math.max(rows[0].length, ...body.map((r) => r.length));
+      const urls = collectCellUrls(ws, body.length, colCount);
+      const map = mapHeaders(rows[0]);
+      const parsed = parseSheet({ headers: rows[0], rows: body, urls });
+
+      if (parsed.missingColumns.length) {
+        result.innerHTML = `<p class="no" style="margin-top:18px">
+          表头里缺这些列：<b>${esc(parsed.missingColumns.join('、'))}</b>。
+          把表头文字发我，我可以加上你的写法。</p>`;
+        return;
+      }
+
+      const groups = groupByCn(parsed.rows);
+      const withImage = parsed.rows.filter((r) => r.imageUrl).length;
+      const imageCol = map.index.imageUrl;
+      const fromFormula = imageCol === undefined ? 0 : urls.filter((line) => line[imageCol]).length;
+      const withLink = parsed.rows.filter((r) => r.productUrl).length;
+      const total = parsed.rows.reduce((sum, r) => sum + r.goodsFeeFen, 0);
+
+      result.innerHTML = `
+        <div class="kv" style="margin-top:20px">
+          <div>工作表<b>${esc(wb.SheetNames[0])}</b></div>
+          <div>可导入<b>${parsed.rows.length} 件</b></div>
+          <div>客户<b>${groups.length} 位</b></div>
+          <div>合计<b>${money(total)}</b></div>
+          <div>认出封面<b>${withImage} / ${parsed.rows.length}</b></div>
+        </div>
+        ${fromFormula ? `<p class="ok" style="font-size:13px;margin:0 0 14px">
+            其中 ${fromFormula} 行的图片地址是从 IMAGE() 公式或超链接里抽出来的——只读单元格值的话这些会全丢。</p>` : ''}
+        <div class="scroll"><table>
+          <thead><tr><th>要找的列</th><th>表里对上的表头</th></tr></thead>
+          <tbody>${FIELDS.map(([field, label, required]) => {
+            const at = map.index[field];
+            return `<tr><td>${esc(label)}</td><td>${
+              at === undefined
+                ? `<span class="${required ? 'no' : 'dim'}">${required ? '没找到' : '没有（可不填）'}</span>`
+                : `<span class="ok">✓</span> ${esc(rows[0][at])}`
+            }</td></tr>`;
+          }).join('')}</tbody>
+        </table></div>
+
+        ${parsed.errors.length ? `<p class="no" style="font-size:13px;margin:16px 0 4px">
+            ${parsed.errors.length} 行有问题，导入会被挡住：</p>
+            <ul style="font-size:13px;margin:0;color:var(--bad)">${parsed.errors
+              .slice(0, 8)
+              .map((e) => `<li>第 ${e.rowNo} 行：${esc(e.reason)}</li>`)
+              .join('')}</ul>` : ''}
+        ${parsed.skipped.length ? `<p class="dim" style="font-size:13px;margin:16px 0 4px">
+            跳过 / 留意 ${parsed.skipped.length} 行：${esc(parsed.skipped.slice(0, 4).map((s) => `第${s.rowNo}行 ${s.reason}`).join('；'))}</p>` : ''}
+
+        <p style="font-size:13px;margin:20px 0 6px" class="dim">前几行解析成这样：</p>
+        <div class="scroll"><table>
+          <thead><tr><th>行</th><th>名称</th><th>客户</th><th class="num">应付</th><th class="num">实际价</th><th>图</th><th>链接</th></tr></thead>
+          <tbody>${parsed.rows.slice(0, 8).map((r) => `<tr>
+            <td class="num dim">${r.rowNo}</td>
+            <td>${esc(r.title)}</td>
+            <td>${esc(r.cn)}</td>
+            <td class="num">${money(r.goodsFeeFen)}</td>
+            <td class="num dim">${r.actualPriceJpy === null ? '—' : '¥' + r.actualPriceJpy.toLocaleString()}</td>
+            <td>${r.imageUrl ? '<span class="ok">✓</span>' : '<span class="dim">—</span>'}</td>
+            <td>${r.productUrl ? '<span class="ok">✓</span>' : '<span class="dim">—</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+
+        <div class="scroll" style="margin-top:16px"><table>
+          <thead><tr><th>Excel 里的名字</th><th class="num">件数</th><th class="num">小计</th></tr></thead>
+          <tbody>${groups.map((g) => `<tr>
+            <td>${esc(g.cn)}</td><td class="num">${g.count}</td><td class="num">${money(g.subtotalFen)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    } catch (err) {
+      result.innerHTML = `<p class="no" style="margin-top:16px">解析失败：${esc(err.message)}</p>`;
+    }
+  }
+</script>
