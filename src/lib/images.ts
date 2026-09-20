@@ -77,3 +77,42 @@ export async function cacheImage(bucket: R2Bucket, sourceUrl: string): Promise<C
   });
   return { path: `${CACHED_PREFIX}${key}` };
 }
+
+/**
+ * 不想花钱开 R2 时的免费做法：图片经过自己的 Worker 转一道，
+ * 结果放进 Cloudflare 边缘缓存（caches.default）。
+ *   - 页面只引用自己域名下的 /img/i/{itemId}，换图床不用改数据；
+ *   - 命中边缘缓存后不再回源，国内访问走就近节点；
+ *   - 只代理数据库里存着的地址，不是开放代理。
+ * 代价：边缘缓存会过期，对方把图删了就真没了（那种情况要永久保存还是得开 R2）。
+ */
+export async function proxyImage(sourceUrl: string): Promise<Response> {
+  if (!isHttpUrl(sourceUrl)) return new Response('地址不对', { status: 404 });
+  let upstream: Response;
+  try {
+    upstream = await fetch(sourceUrl, {
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; SuruCubby/1.0)', accept: 'image/*' },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return new Response('图片取不回来', { status: 504 });
+  }
+  if (!upstream.ok) return new Response('对方没给图', { status: 502 });
+
+  const contentType = upstream.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('image/')) {
+    return new Response('返回的不是图片', { status: 502 });
+  }
+  if (Number(upstream.headers.get('content-length') ?? '0') > MAX_BYTES) {
+    return new Response('图片太大', { status: 502 });
+  }
+
+  const headers = new Headers({
+    'content-type': contentType,
+    // 商品图基本不会变，缓一周；真换了图可以改数据库里的地址
+    'cache-control': 'public, max-age=604800',
+  });
+  const etag = upstream.headers.get('etag');
+  if (etag) headers.set('etag', etag);
+  return new Response(upstream.body, { status: 200, headers });
+}

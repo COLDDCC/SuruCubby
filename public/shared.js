@@ -72,10 +72,16 @@ export function toast(message, isError = false) {
   setTimeout(() => el.remove(), isError ? 4200 : 2200);
 }
 
+/**
+ * 封面图统一走自己域名下的 /img/i/{id}：Worker 转一道 + 边缘缓存，
+ * 国内快一些，换图床也不用改页面。万一代理不通（对方防盗链等），
+ * 自动退回直接外链，再不行才显示「无图」。
+ */
 export function thumb(item) {
-  if (item.imageUrl) {
-    return `<img src="${escapeHtml(item.imageUrl)}" alt="" loading="lazy"
-             onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'noimg',textContent:'无图'}))">`;
-  }
-  return '<div class="noimg">无图</div>';
+  if (!item.imageUrl) return '<div class="noimg">无图</div>';
+  const proxied = item.id ? `/img/i/${item.id}` : item.imageUrl;
+  const fallback = item.imageUrl.startsWith('/') ? '' : item.imageUrl;
+  return `<img src="${escapeHtml(proxied)}" alt="" loading="lazy"
+           data-fallback="${escapeHtml(fallback)}"
+           onerror="(function(el){var f=el.dataset.fallback;if(f&&el.src.indexOf(f)!==0){el.dataset.fallback='';el.src=f;return;}el.replaceWith(Object.assign(document.createElement('div'),{className:'noimg',textContent:'无图'}));})(this)">`;
 }

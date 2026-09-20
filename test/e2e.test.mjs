@@ -408,7 +408,8 @@ test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，�
     });
 
     const result = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
-    assert.equal(result.tried, 2, '两件都该被处理');
+    // 没开 R2 时只需要处理「压根没有图」的那件；开了 R2 两件都要抓进桶
+    assert.equal(result.tried, result.r2 ? 2 : 1);
     if (result.r2) {
       assert.equal(result.cached, 2, `应该抓下来两张：${JSON.stringify(result.failures)}`);
     } else {
@@ -431,7 +432,19 @@ test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，�
 
     // 再点一次不会重复抓
     const again = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
-    assert.equal(again.tried, result.r2 ? 0 : 1);
+    assert.equal(again.tried, 0, '处理过的不该再抓一遍');
+
+    // 页面用的是 /img/i/{id}：Worker 转一道 + 边缘缓存，不用开图床
+    const first = detail.items.find((i) => i.title === '公式图片');
+    const proxied = await fetch(`${BASE}/img/i/${first.id}`);
+    assert.equal(proxied.status, 200);
+    assert.equal(proxied.headers.get('content-type'), 'image/png');
+    assert.equal((await proxied.arrayBuffer()).byteLength, png.byteLength);
+    assert.match(proxied.headers.get('cache-control') ?? '', /max-age=/);
+
+    // 再取一次（可能命中边缘缓存）结果一样
+    const twice = await fetch(`${BASE}/img/i/${first.id}`);
+    assert.equal(twice.status, 200);
   } finally {
     server.close();
   }
@@ -440,4 +453,11 @@ test('图片：飞书 =IMAGE("...") 公式认得出来，抓下来存进 R2，�
 test('/img/ 只认规范 key，乱传路径拿不到东西', async () => {
   const res = await fetch(`${BASE}/img/..%2F..%2Fsecret`);
   assert.equal(res.status, 404);
+});
+
+test('图片代理只认库里存着的物品，不是开放代理', async () => {
+  const missing = await fetch(`${BASE}/img/i/99999999`);
+  assert.equal(missing.status, 404);
+  const bad = await fetch(`${BASE}/img/i/abc`);
+  assert.equal(bad.status, 404);
 });

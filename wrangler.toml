@@ -14,11 +14,13 @@ database_name = "surucubby"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
-# 图片缓存桶：部署前先执行 `npx wrangler r2 bucket create surucubby-images`。
-# 不想用 R2 就把下面三行注释掉——图片会退回直接外链，其它功能不受影响。
-[[r2_buckets]]
-binding = "IMAGES"
-bucket_name = "surucubby-images"
+# 图片默认不用花钱：页面引用 /img/i/{id}，Worker 转一道后进 Cloudflare 边缘缓存。
+# 想让图片永久留在自己手上（对方删图也不怕），才需要开 R2：
+#   npx wrangler r2 bucket create surucubby-images
+# 然后把下面三行的注释去掉。R2 有免费额度，但开通要在账号里绑支付方式。
+# [[r2_buckets]]
+# binding = "IMAGES"
+# bucket_name = "surucubby-images"
 
 # 机密通过 `npx wrangler secret put` 设置：
 #   ADMIN_PASSWORD   后台登录密码

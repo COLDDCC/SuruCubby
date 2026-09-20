@@ -14,7 +14,7 @@ import { paymentRoutes } from './routes/admin/payments.ts';
 import { settingsRoutes } from './routes/admin/settings.ts';
 import { customerRoutes } from './routes/customer.ts';
 import { ITEM_STATUSES, STATUS_LABELS } from './lib/status.ts';
-import { KEY_PATTERN } from './lib/images.ts';
+import { KEY_PATTERN, isHttpUrl, proxyImage } from './lib/images.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,6 +25,45 @@ app.onError((err, c) => {
   console.error(err);
   const message = err instanceof Error ? err.message : '服务器出错了';
   return c.json({ error: message }, 500);
+});
+
+/**
+ * 物品封面：页面统一引用 /img/i/{itemId}，真正的地址在数据库里。
+ * 图片经 Worker 转一道后放进边缘缓存，不用花钱开图床；只代理库里存着的地址。
+ */
+app.get('/img/i/:id', async (c) => {
+  const id = Number.parseInt(c.req.param('id'), 10);
+  if (!Number.isInteger(id) || id <= 0) return c.text('找不到图片', 404);
+
+  const cache = caches.default;
+  const cacheKey = new Request(new URL(c.req.url).toString(), { method: 'GET' });
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit;
+
+  const row = await c.env.DB.prepare('SELECT image_url AS imageUrl FROM items WHERE id = ?')
+    .bind(id)
+    .first<{ imageUrl: string | null }>();
+  if (!row?.imageUrl) return c.text('这件东西没有图', 404);
+
+  // 已经存进 R2 的直接走 R2，不用回源
+  if (row.imageUrl.startsWith('/img/') && c.env.IMAGES) {
+    const object = await c.env.IMAGES.get(row.imageUrl.slice('/img/'.length));
+    if (!object) return c.text('找不到图片', 404);
+    const response = new Response(object.body, {
+      headers: {
+        'content-type': object.httpMetadata?.contentType ?? 'image/jpeg',
+        'cache-control': 'public, max-age=31536000, immutable',
+        etag: object.httpEtag,
+      },
+    });
+    c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+    return response;
+  }
+  if (!isHttpUrl(row.imageUrl)) return c.text('找不到图片', 404);
+
+  const response = await proxyImage(row.imageUrl);
+  if (response.ok) c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
 });
 
 // 缓存到 R2 的图片：客户页只认自己域名下的这个地址

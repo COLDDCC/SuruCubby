@@ -81,17 +81,23 @@ batchRoutes.post('/:id/images', async (c) => {
   const bucket = c.env.IMAGES;
   const limit = 20;
 
+  // 还需要处理的是哪些：
+  //   没开 R2 —— 只管「压根没有图」的（去商品页抓 og:image）；已有外链的就算完成了，
+  //              页面走 /img/i/{id} 代理 + 边缘缓存，不用再动。
+  //   开了 R2 —— 只要还没进桶（不是 /img/ 开头）就都要处理。
+  const pending = bucket
+    ? `(image_url IS NULL OR image_url NOT LIKE '/img/%')
+         AND (image_url IS NOT NULL OR product_url IS NOT NULL)`
+    : 'image_url IS NULL AND product_url IS NOT NULL';
+
   const rows = await c.env.DB.prepare(
     `SELECT id, image_url AS imageUrl, product_url AS productUrl FROM items
-      WHERE batch_id = ?
-        AND (image_url IS NULL OR image_url NOT LIKE '/img/%')
-        AND (image_url IS NOT NULL OR product_url IS NOT NULL)
+      WHERE batch_id = ? AND ${pending}
       ORDER BY id
       LIMIT ?`,
   )
     .bind(id, limit)
     .all<{ id: number; imageUrl: string | null; productUrl: string | null }>();
-
   const at = nowIso();
   const statements: D1PreparedStatement[] = [];
   const failures: Array<{ itemId: number; reason: string }> = [];
@@ -130,10 +136,7 @@ batchRoutes.post('/:id/images', async (c) => {
   if (statements.length > 0) await c.env.DB.batch(statements);
 
   const left = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM items
-      WHERE batch_id = ?
-        AND (image_url IS NULL OR image_url NOT LIKE '/img/%')
-        AND (image_url IS NOT NULL OR product_url IS NOT NULL)`,
+    `SELECT COUNT(*) AS count FROM items WHERE batch_id = ? AND ${pending}`,
   )
     .bind(id)
     .first<{ count: number }>();
