@@ -16,7 +16,7 @@ customerRoutes.get('/', async (c) => {
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
             (SELECT COALESCE(SUM(i.goods_fee_fen), 0) FROM items i
               WHERE i.customer_id = c.id AND i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')) AS goodsUnpaidFen,
-            (SELECT COALESCE(SUM(g.intl_fee_fen), 0) FROM weigh_groups g
+            (SELECT COALESCE(SUM(g.intl_fee_fen - COALESCE((SELECT SUM(i.intl_fee_fen) FROM items i WHERE i.weigh_group_id=g.id AND i.intl_paid=1),0)), 0) FROM weigh_groups g
               WHERE g.customer_id = c.id AND g.fee_paid = 0 AND g.intl_fee_fen IS NOT NULL) AS intlUnpaidFen,
             (SELECT COALESCE(SUM(s.fee_fen), 0) FROM shipments s
               WHERE s.customer_id = c.id AND s.fee_paid = 0) AS domesticUnpaidFen
@@ -150,6 +150,14 @@ customerRoutes.post('/merge', async (c) => {
     .bind(targetId, sourceId)
     .all<{ sourceGroupId: number; targetGroupId: number }>();
 
+  if (conflicts.results.length) {
+    const charged = await db.prepare(`SELECT id FROM weigh_groups WHERE customer_id IN (?,?) AND (intl_fee_fen IS NOT NULL OR fee_paid=1) LIMIT 1`).bind(sourceId,targetId).first();
+    if (charged) throw badRequest('已有运费账目的客户不能合并，请先核对并撤销相关收款和分摊');
+  }
+  const addressCount = await db.prepare('SELECT COUNT(*) AS n FROM addresses WHERE customer_id IN (?,?)').bind(sourceId,targetId).first<{n:number}>();
+  if ((addressCount?.n ?? 0)>3) throw badRequest('合并后地址超过3个，请先删除多余地址');
+  const active = await db.prepare(`SELECT id FROM shipping_requests WHERE customer_id IN (?,?) AND status IN ('pending','paid') LIMIT 1`).bind(sourceId,targetId).first();
+  if (active) throw badRequest('有待处理发货申请，不能合并');
   const statements: D1PreparedStatement[] = [];
   for (const conflict of conflicts.results) {
     statements.push(
@@ -170,6 +178,8 @@ customerRoutes.post('/merge', async (c) => {
   statements.push(
     db.prepare('UPDATE weigh_groups SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('UPDATE items SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
+    db.prepare('UPDATE addresses SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
+    db.prepare('UPDATE shipping_requests SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('UPDATE shipments SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('UPDATE payments SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db

@@ -24,7 +24,7 @@ batchRoutes.get('/', async (c) => {
 batchRoutes.get('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
   const batch = await c.env.DB.prepare(
-    'SELECT id, name, ordered_at AS orderedAt, source_file AS sourceFile, created_at AS createdAt FROM batches WHERE id = ?',
+    'SELECT id, name, ordered_at AS orderedAt, source_file AS sourceFile, created_at AS createdAt,order_no AS orderNo,japan_tracking_no AS japanTrackingNo FROM batches WHERE id = ?',
   )
     .bind(id)
     .first();
@@ -57,7 +57,7 @@ batchRoutes.get('/:id', async (c) => {
 
 batchRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
-  const body = await readJson<{ name?: string; orderedAt?: string }>(c);
+  const body = await readJson<{ name?: string; orderedAt?: string; orderNo?:string; japanTrackingNo?:string }>(c);
   const name = optionalString(body.name);
   const orderedAt = optionalString(body.orderedAt);
   await c.env.DB.prepare(
@@ -65,6 +65,7 @@ batchRoutes.patch('/:id', async (c) => {
   )
     .bind(name, orderedAt, id)
     .run();
+  if(body.orderNo!==undefined||body.japanTrackingNo!==undefined) await c.env.DB.prepare('UPDATE batches SET order_no=COALESCE(?,order_no),japan_tracking_no=COALESCE(?,japan_tracking_no) WHERE id=?').bind(optionalString(body.orderNo),optionalString(body.japanTrackingNo),id).run();
   return c.json({ ok: true });
 });
 

@@ -16,14 +16,17 @@ import { customerRoutes } from './routes/customer.ts';
 import { ITEM_STATUSES, STATUS_LABELS } from './lib/status.ts';
 import { KEY_PATTERN, isHttpUrl, proxyImage } from './lib/images.ts';
 
+import { mutationGuard } from './lib/mutations.ts';
+import { requestAdminRoutes, requestCustomerRoutes } from './routes/admin/requests.ts';
 const app = new Hono<{ Bindings: Env }>();
+app.use('/api/*', mutationGuard);
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
     return c.json({ error: err.message, ...err.extra }, err.status as 400);
   }
   console.error(err);
-  const message = err instanceof Error ? err.message : '服务器出错了';
+  const message = '服务器出错了，请稍后重试';
   return c.json({ error: message }, 500);
 });
 
@@ -99,8 +102,10 @@ app.route('/api/admin/customers', adminCustomerRoutes);
 app.route('/api/admin/shipments', shipmentRoutes);
 app.route('/api/admin/payments', paymentRoutes);
 app.route('/api/admin/settings', settingsRoutes);
+app.route('/api/admin/requests', requestAdminRoutes);
 
 app.route('/api/w', customerRoutes);
+app.route('/api/w', requestCustomerRoutes);
 
 /**
  * 取一个静态资源并把内容直接返回。

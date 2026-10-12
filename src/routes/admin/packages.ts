@@ -88,6 +88,11 @@ packageRoutes.patch('/:id', async (c) => {
   )
     .bind(optionalString(body.name), optionalString(body.trackingNo), id)
     .run();
+  if(optionalString(body.trackingNo)){
+    const pkg=await c.env.DB.prepare('SELECT allocated_at AS a FROM packages WHERE id=?').bind(id).first<{a:string|null}>();
+    if(pkg && !pkg.a){const rows=await c.env.DB.prepare("SELECT id,status FROM items WHERE package_id=? AND status IN ('ordered','jp_warehouse','intl_transit','cn_arrived')").bind(id).all<{id:number;status:string}>(); const at=nowIso();
+      await c.env.DB.batch([c.env.DB.prepare("UPDATE packages SET status='intl_transit' WHERE id=?").bind(id),...rows.results.flatMap(i=>[c.env.DB.prepare("UPDATE items SET status='intl_transit',updated_at=? WHERE id=?").bind(at,i.id),statusLogStmt(c.env.DB,i.id,i.status,'intl_transit',at)])]);}
+  }
   return c.json({ ok: true });
 });
 
@@ -141,6 +146,7 @@ packageRoutes.post('/:id/batches', async (c) => {
   const body = await readJson<{ batchIds?: unknown; moveItems?: boolean }>(c);
   const batchIds = Array.isArray(body.batchIds) ? body.batchIds.map((v) => requireInt(v, '批次 ID')) : [];
   const db = c.env.DB;
+  await assertMovable(db, id, undefined, batchIds);
   const statements: D1PreparedStatement[] = [
     db.prepare('DELETE FROM package_batches WHERE package_id = ?').bind(id),
   ];
@@ -154,7 +160,7 @@ packageRoutes.post('/:id/batches', async (c) => {
       statements.push(
         db
           .prepare(
-            `UPDATE items SET package_id = ?, updated_at = ?
+            `UPDATE items SET package_id = ?, weigh_group_id=NULL, weight_g=NULL, intl_fee_fen=NULL, updated_at = ?
               WHERE batch_id = ? AND (package_id IS NULL OR status IN ('ordered','jp_warehouse','intl_transit','cn_arrived'))`,
           )
           .bind(id, nowIso(), batchId),
@@ -173,12 +179,13 @@ packageRoutes.post('/:id/items', async (c) => {
   const action = body.action === 'remove' ? 'remove' : 'add';
   const at = nowIso();
   const db = c.env.DB;
+  await assertMovable(db, id, itemIds);
   const statements = itemIds.map((itemId) =>
     action === 'add'
-      ? db.prepare('UPDATE items SET package_id = ?, updated_at = ? WHERE id = ?').bind(id, at, itemId)
+      ? db.prepare('UPDATE items SET package_id = ?, weigh_group_id=NULL, weight_g=NULL, intl_fee_fen=NULL, updated_at = ? WHERE id = ?').bind(id, at, itemId)
       : db
           .prepare(
-            'UPDATE items SET package_id = NULL, weigh_group_id = NULL, updated_at = ? WHERE id = ? AND package_id = ?',
+            'UPDATE items SET package_id = NULL, weigh_group_id = NULL, weight_g=NULL, intl_fee_fen=NULL, updated_at = ? WHERE id = ? AND package_id = ?',
           )
           .bind(at, itemId, id),
   );
@@ -186,4 +193,13 @@ packageRoutes.post('/:id/items', async (c) => {
   return c.json({ ok: true, action, count: itemIds.length });
 });
 
+async function assertMovable(db:D1Database, target:number, itemIds?:number[], batchIds?:number[]) {
+ const pkg=await db.prepare('SELECT allocated_at AS a FROM packages WHERE id=?').bind(target).first<{a:string|null}>();
+ if (!pkg) throw notFound('包裹不存在');
+ if(pkg.a) throw badRequest('目标包裹已计费，不能改商品');
+ const ids=itemIds ?? batchIds ?? [];
+ if (!ids.length) return;
+ const rows=await db.prepare(`SELECT i.id FROM items i LEFT JOIN packages p ON p.id=i.package_id WHERE ${itemIds?'i.id':'i.batch_id'} IN (${placeholders(ids.length)}) AND (p.allocated_at IS NOT NULL OR i.shipment_id IS NOT NULL OR EXISTS(SELECT 1 FROM request_items ri WHERE ri.item_id=i.id))`).bind(...ids).all();
+ if(rows.results.length) throw badRequest('有物品已计费或已申请发货，请先撤销对应流程');
+}
 packageRoutes.route('/', weighRoutes);

@@ -70,6 +70,7 @@ paymentRoutes.post('/', async (c) => {
       )
       .bind(...itemIds, customerId)
       .all<{ id: number; goodsFeeFen: number; batchId: number }>();
+    if (items.results.length !== new Set(itemIds).size) throw badRequest('所选商品已付、已取消或归属不符，请刷新后重试');
     if (items.results.length === 0) throw badRequest('这些物品已经付过款了');
 
     const amountFen = items.results.reduce((sum, i) => sum + i.goodsFeeFen, 0);
@@ -106,7 +107,10 @@ paymentRoutes.post('/', async (c) => {
     if (group.customerId !== customerId) throw badRequest('这一摞不属于这位客户');
     if (group.feePaid) throw badRequest('这一摞的运费已经收过了');
     if (group.intlFeeFen === null) throw badRequest('这个包裹还没分摊运费');
+    const alreadyPartial=await db.prepare('SELECT id FROM items WHERE weigh_group_id=? AND intl_paid=1 LIMIT 1').bind(weighGroupId).first();
+    if(alreadyPartial) throw badRequest('部分商品已收运费，请通过发货申请逐件收款');
     await db.batch([
+      db.prepare('UPDATE items SET intl_paid=1 WHERE weigh_group_id=?').bind(weighGroupId),
       db
         .prepare(
           `INSERT INTO payments (id, customer_id, kind, amount_fen, ref_type, ref_id, note, paid_at)
@@ -167,8 +171,15 @@ paymentRoutes.delete('/:id', async (c) => {
       );
     }
     statements.push(db.prepare('DELETE FROM payment_items WHERE payment_id = ?').bind(id));
+  } else if(payment.kind === 'item_intl' && payment.refId!==null) {
+    const item=await db.prepare('SELECT weigh_group_id AS gid FROM items WHERE id=?').bind(payment.refId).first<{gid:number}>();
+    statements.push(db.prepare('UPDATE items SET intl_paid=0 WHERE id=?').bind(payment.refId));
+    if(item) statements.push(db.prepare('UPDATE weigh_groups SET fee_paid=0 WHERE id=?').bind(item.gid));
   } else if (payment.kind === 'intl' && payment.refId !== null) {
+    statements.push(db.prepare('UPDATE items SET intl_paid=0 WHERE weigh_group_id=?').bind(payment.refId));
     statements.push(db.prepare('UPDATE weigh_groups SET fee_paid = 0 WHERE id = ?').bind(payment.refId));
+  } else if (payment.kind === 'domestic' && payment.refId !== null && payment.refType === 'request') {
+    statements.push(db.prepare("UPDATE shipping_requests SET status='pending',paid_at=NULL WHERE id=?").bind(payment.refId));
   } else if (payment.kind === 'domestic' && payment.refId !== null) {
     statements.push(db.prepare('UPDATE shipments SET fee_paid = 0 WHERE id = ?').bind(payment.refId));
   }

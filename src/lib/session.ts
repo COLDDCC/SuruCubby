@@ -18,7 +18,7 @@ function isSecure(c: Context): boolean {
 }
 
 export async function issueAdminSession(c: Context<{ Bindings: Env }>): Promise<void> {
-  const value = await signPayload(sessionSecret(c.env), {
+  const value = await signPayload(sessionSecret(c.env)+'\0'+c.env.ADMIN_PASSWORD, {
     role: 'admin',
     exp: Date.now() + ADMIN_TTL_MS,
   });
@@ -37,7 +37,7 @@ export function clearAdminSession(c: Context<{ Bindings: Env }>): void {
 
 export async function hasAdminSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
   const payload = await verifyPayload<{ role?: string }>(
-    sessionSecret(c.env),
+    sessionSecret(c.env)+'\0'+c.env.ADMIN_PASSWORD,
     getCookie(c, ADMIN_COOKIE),
   );
   return payload?.role === 'admin';

@@ -18,6 +18,7 @@ interface PreviewBody {
   fileName?: string;
   fileHash?: string;
   sheet?: RawSheet;
+  exchangeRate?: number;
 }
 
 interface Assignment {
@@ -29,6 +30,8 @@ interface Assignment {
 interface CommitBody extends PreviewBody {
   batchName?: string;
   orderedAt?: string;
+  orderNo?: string;
+  japanTrackingNo?: string;
   packageName?: string;
   confirmDuplicate?: boolean;
   assignments?: Assignment[];
@@ -73,7 +76,7 @@ async function findDuplicate(env: Env, fileHash: string | null) {
 importRoutes.post('/preview', async (c) => {
   const body = await readJson<PreviewBody>(c);
   const sheet = requireSheet(body);
-  const parsed = parseSheet(sheet);
+  const parsed = parseSheet(sheet, body.exchangeRate);
   if (parsed.missingColumns.length > 0) {
     return c.json(
       {
@@ -112,7 +115,7 @@ importRoutes.post('/commit', async (c) => {
   const body = await readJson<CommitBody>(c);
   const sheet = requireSheet(body);
   const batchName = requireString(body.batchName, '批次名');
-  const parsed = parseSheet(sheet);
+  const parsed = parseSheet(sheet, body.exchangeRate);
   if (parsed.missingColumns.length > 0) {
     throw badRequest(`表头缺少这些列：${parsed.missingColumns.join('、')}`);
   }
@@ -148,6 +151,7 @@ importRoutes.post('/commit', async (c) => {
   const newAliases: Array<{ alias: string; customerId: number }> = [];
   const createdCustomers: Array<{ id: number; qq: string; nickname: string; token: string }> = [];
 
+  const pendingQq = new Map<string, number>();
   for (const group of groups) {
     const known = aliasMap.get(group.cn);
     if (known) {
@@ -171,6 +175,9 @@ importRoutes.post('/commit', async (c) => {
     const qq = requireString(assignment.newCustomer?.qq, `「${group.cn}」的 QQ 号`);
     if (!/^\d{5,15}$/.test(qq)) throw badRequest(`「${group.cn}」的 QQ 号格式不对：${qq}`);
     const nickname = optionalString(assignment.newCustomer?.nickname) ?? group.cn;
+    if (pendingQq.has(qq)) {
+      const sameId = pendingQq.get(qq)!; resolved.set(group.cn,sameId); newAliases.push({alias:group.cn,customerId:sameId}); continue;
+    }
     const byQq = await db
       .prepare('SELECT id FROM customers WHERE qq = ?')
       .bind(qq)
@@ -183,6 +190,7 @@ importRoutes.post('/commit', async (c) => {
     const id = nextCustomerId;
     nextCustomerId += 1;
     const token = randomToken();
+    pendingQq.set(qq,id);
     createdCustomers.push({ id, qq, nickname, token });
     statements.push(
       db
@@ -256,6 +264,7 @@ importRoutes.post('/commit', async (c) => {
     itemId += 1;
   }
 
+  statements.push(db.prepare('UPDATE batches SET order_no=?,japan_tracking_no=? WHERE id=?').bind(optionalString(body.orderNo),optionalString(body.japanTrackingNo),batchId));
   await db.batch(statements);
 
   return c.json({

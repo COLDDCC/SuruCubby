@@ -46,16 +46,20 @@ export async function render(view) {
   view.innerHTML = `
     <div class="card">
       <h2>导入 Excel</h2>
-      <p class="small muted">一张表 = 一个批次。表头要有「名称 / cn / 应付人民币金额」，其余列（图片、商品链接、平时价格、实际价格）可有可无。</p>
+      <p class="small muted">一张表 = 一个日本订单。必需：名称、客户名字。数量默认1，每件独立入库。「应付人民币金额」按整行总额拆分；只有日元「价格」时按单价×数量×汇率计算，先核对预览。</p>
       <input type="file" id="file" accept=".xlsx,.xls,.csv">
       <label for="batchName">批次名</label>
       <input id="batchName" style="width:100%" placeholder="例如 9月20日 第12团">
+      <label>日本订单号</label><input id="orderNo">
+      <label>日本物流单号（可后补）</label><input id="japanTrackingNo">
+      <label>人民币/日元汇率（没有人民币金额列时必填）</label><input id="exchangeRate" inputmode="decimal" placeholder="例如 0.05"><button id="repreview" class="small plain">更新预览</button>
       <label for="orderedAt">下单日期（可不填）</label>
       <input id="orderedAt" type="date">
       <p id="status" class="small muted"></p>
     </div>
     <div id="preview"></div>`;
 
+  document.getElementById('repreview').onclick=()=>state.sheet && loadPreview(view).catch(e=>toast(e.message,true));
   document.getElementById('file').addEventListener('change', (e) => handleFile(e.target.files[0], view));
 }
 
@@ -101,6 +105,7 @@ async function loadPreview(view) {
     fileName: state.fileName,
     fileHash: state.fileHash,
     sheet: state.sheet,
+    exchangeRate: Number(document.getElementById('exchangeRate').value)||undefined,
   });
   state.preview = preview;
   if (state.customers.length === 0) {
@@ -217,8 +222,10 @@ function renderPreview(view) {
           fileName: state.fileName,
           fileHash: state.fileHash,
           sheet: state.sheet,
+    exchangeRate: Number(document.getElementById('exchangeRate').value)||undefined,
           batchName: document.getElementById('batchName').value.trim(),
           orderedAt: document.getElementById('orderedAt').value || null,
+          orderNo: document.getElementById('orderNo').value, japanTrackingNo:document.getElementById('japanTrackingNo').value,
           confirmDuplicate: Boolean(p.duplicate),
           assignments: [...state.assignments.entries()].map(([cn, a]) => ({
             cn,

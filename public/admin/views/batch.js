@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, confirmBox, escapeHtml, jpy, money, statusLabel, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, confirmBox, escapeHtml, jpy, money, statusLabel, toast, promptBox } from '/admin/ui.js';
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/batches/${id}`);
@@ -57,6 +57,7 @@ export async function render(view, [id]) {
   view.innerHTML = `
     <div class="card">
       <h2>${escapeHtml(data.batch.name)}</h2>
+      <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo||'待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo||'待填')}</button></p>
       <p class="small muted">
         导入于 ${beijingTime(data.batch.createdAt)} ·
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·
@@ -73,6 +74,7 @@ export async function render(view, [id]) {
     ${groups}`;
 
   bindActions(view, {
+    orderTracking:async()=>{const orderNo=await promptBox('日本订单号',data.batch.orderNo||'');if(orderNo===null)return;const japanTrackingNo=await promptBox('日本物流单号',data.batch.japanTrackingNo||'');if(japanTrackingNo===null)return;await api.patch(`/api/admin/batches/${id}`,{orderNo,japanTrackingNo});await render(view,[id]);},
     fetchImages: async (dataset, el) => {
       el.disabled = true;
       el.textContent = '正在抓…';

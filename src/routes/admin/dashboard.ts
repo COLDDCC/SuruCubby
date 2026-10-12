@@ -26,7 +26,7 @@ dashboardRoutes.get('/', async (c) => {
     .prepare(
       `SELECT g.id AS weighGroupId, g.customer_id AS customerId, c.nickname, c.qq,
               g.package_id AS packageId, p.name AS packageName, g.weight_g AS weightG,
-              g.intl_fee_fen AS intlFeeFen
+              g.intl_fee_fen - COALESCE((SELECT SUM(i.intl_fee_fen) FROM items i WHERE i.weigh_group_id=g.id AND i.intl_paid=1),0) AS intlFeeFen
          FROM weigh_groups g
          JOIN customers c ON c.id = g.customer_id
          JOIN packages p ON p.id = g.package_id

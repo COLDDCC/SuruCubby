@@ -27,8 +27,8 @@ export async function readJson<T>(c: Context): Promise<T> {
 }
 
 export function requireInt(value: unknown, field: string): number {
-  const n = typeof value === 'string' ? Number.parseInt(value, 10) : value;
-  if (typeof n !== 'number' || !Number.isInteger(n)) throw badRequest(`${field} 必须是整数`);
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n)) throw badRequest(`${field} 必须是整数`);
   return n;
 }
 

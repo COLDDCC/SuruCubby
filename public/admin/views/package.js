@@ -30,8 +30,9 @@ export async function render(view, [id]) {
           ).join('')}
           ${PACKAGE_BULK_STATUSES.includes(pkg.status) ? '' : `<option value="${pkg.status}" selected>${statusLabel(pkg.status)}</option>`}
         </select>
-        <button class="small plain" data-action="tracking">转运单号：${escapeHtml(pkg.trackingNo || '待填')}</button>
+        <button class="small plain" data-action="tracking">回国单号：${escapeHtml(pkg.trackingNo || '待填')}</button>
       </div>
+      <p><button data-action="moveItems" class="small plain">拆包 / 合包：移动勾选商品</button></p>
       <p class="small muted">改状态会同步包裹里所有物品，已取消 / 已退款 / 已在国内在库之后的物品不受影响。</p>
       ${
         pkg.totalFeeFen === null
@@ -52,7 +53,7 @@ export async function render(view, [id]) {
           <tbody>${g.items
             .map(
               (i) => `<tr>
-              <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
+              <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="right money">${money(i.goodsFeeFen)}</td>
               <td class="right"><button class="small plain" data-action="itemStatus" data-item="${i.id}" data-status="${i.status}">改状态</button></td>
@@ -74,8 +75,18 @@ export async function render(view, [id]) {
   });
 
   bindActions(view, {
+    moveItems: async()=>{
+      const itemIds=[...view.querySelectorAll('[data-move-item]:checked')].map(el=>Number(el.dataset.moveItem));
+      if(!itemIds.length)return toast('先勾选商品',true);
+      const d=await api.get('/api/admin/packages');const available=d.packages.filter(p=>p.id!==Number(id)&&!p.allocatedAt);
+      const target=await promptBox('目标包裹ID（'+available.map(p=>p.id+':'+p.name).join('；')+'）。输入“新建”创建包裹','');if(target===null)return;
+      let targetId=Number(target);
+      if(target==='新建'){const name=await promptBox('新包裹名称','');if(!name)return;targetId=(await api.post('/api/admin/packages',{name})).id;}
+      if(!targetId)return toast('请输入有效包裹ID',true);
+      try{await api.post(`/api/admin/packages/${targetId}/items`,{itemIds,action:'add'});await render(view,[id]);toast('已移动商品');}catch(e){toast(e.message,true);}
+    },
     tracking: async () => {
-      const value = await promptBox('转运单号', pkg.trackingNo || '');
+      const value = await promptBox('回国单号', pkg.trackingNo || '');
       if (value === null) return;
       await api.patch(`/api/admin/packages/${id}`, { trackingNo: value });
       toast('已保存');

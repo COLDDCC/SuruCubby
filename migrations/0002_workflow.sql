@@ -1,0 +1,13 @@
+ALTER TABLE batches ADD COLUMN order_no TEXT;
+ALTER TABLE batches ADD COLUMN japan_tracking_no TEXT;
+ALTER TABLE items ADD COLUMN weight_g INTEGER;
+ALTER TABLE items ADD COLUMN intl_fee_fen INTEGER;
+ALTER TABLE shipments ADD COLUMN address_snapshot TEXT;
+ALTER TABLE shipments ADD COLUMN request_id INTEGER;
+CREATE TABLE addresses (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), recipient TEXT NOT NULL, phone TEXT NOT NULL, detail TEXT NOT NULL);
+CREATE TABLE shipping_requests (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), address_snapshot TEXT NOT NULL, domestic_fee_fen INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, paid_at TEXT, shipment_id INTEGER);
+CREATE TABLE request_items (item_id INTEGER PRIMARY KEY REFERENCES items(id), request_id INTEGER NOT NULL REFERENCES shipping_requests(id));
+CREATE TABLE mutation_lock (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE admin_attempts (ip TEXT PRIMARY KEY, failures INTEGER NOT NULL, locked_until INTEGER NOT NULL);
+ALTER TABLE items ADD COLUMN intl_paid INTEGER NOT NULL DEFAULT 0;
+UPDATE items SET intl_paid=1 WHERE weigh_group_id IN (SELECT id FROM weigh_groups WHERE fee_paid=1);

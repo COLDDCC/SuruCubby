@@ -14,7 +14,7 @@ test('按表头文字定位列，顺序无所谓', () => {
 
 test('缺必填列时报出缺哪一列', () => {
   const result = parseSheet({ headers: ['名称', '图片'], rows: [] });
-  assert.deepEqual(result.missingColumns, ['cn', '应付人民币金额']);
+  assert.deepEqual(result.missingColumns, ['cn']);
 });
 
 test('一行一件，金额换算成分', () => {
@@ -63,13 +63,9 @@ test('金额看不懂 / 没填 cn 的行进 errors，挡住导入', () => {
   assert.equal(result.errors.length, 2);
 });
 
-test('金额为空按 0 元导入，并在预览里提醒', () => {
-  const result = parseSheet({
-    headers: HEADERS,
-    rows: [['赠品', null, null, null, null, '阿狸', '']],
-  });
-  assert.equal(result.rows[0].goodsFeeFen, 0);
-  assert.match(result.skipped[0].reason, /按 0 元导入/);
+test('金额为空必须明确填写，避免误算免费订单',()=>{
+ const r=parseSheet({headers:['名称','cn','应付人民币金额'],rows:[['手办','A',null]]});
+ assert.equal(r.rows.length,0);assert.equal(r.errors.length,1);
 });
 
 test('按 cn 分组算小计', () => {
@@ -132,4 +128,14 @@ test('单元格是空的时候，用公式 / 超链接里抽出来的地址兜�
   assert.equal(result.rows[0].productUrl, 'https://suruga-ya.jp/p/1');
   assert.equal(result.rows[1].imageUrl, 'https://img/b.png');
   assert.equal(result.rows[1].productUrl, null);
+});
+
+test('数量拆为独立商品，人民币行总额拆分后不丢分',()=>{
+ const r=parseSheet({headers:['名称','客户名字','数量','应付人民币金额'],rows:[['手办','A',3,'10.00']]});
+ assert.equal(r.errors.length,0);assert.equal(r.rows.length,3);assert.equal(r.rows.reduce((s,i)=>s+i.goodsFeeFen,0),1000);
+});
+test('只有日元价格时必须给汇率，不能把日元当人民币',()=>{
+ const sheet={headers:['名称','客户名字','数量','价格'],rows:[['手办','A',2,1000]]};
+ assert.equal(parseSheet(sheet).errors.length,1);
+ assert.equal(parseSheet(sheet,0.05).rows.reduce((s,i)=>s+i.goodsFeeFen,0),10000);
 });

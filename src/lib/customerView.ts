@@ -24,7 +24,10 @@ export async function buildCustomerView(env: Env, customerId: number) {
               i.goods_fee_fen AS goodsFeeFen, i.status, i.goods_paid AS goodsPaid,
               i.missing, i.exception_note AS exceptionNote, i.batch_id AS batchId,
               b.name AS batchName, i.package_id AS packageId, p.name AS packageName,
-              i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt
+              i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt,
+              i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen, i.intl_paid AS intlPaid, p.tracking_no AS returnTrackingNo,
+              b.order_no AS orderNo,b.japan_tracking_no AS japanTrackingNo,
+              (SELECT request_id FROM request_items ri WHERE ri.item_id=i.id) AS requestId
          FROM items i
          JOIN batches b ON b.id = i.batch_id
          LEFT JOIN packages p ON p.id = i.package_id
@@ -102,11 +105,11 @@ export async function buildCustomerView(env: Env, customerId: number) {
   const goodsUnpaidFen = itemRows
     .filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
     .reduce((sum, i) => sum + i.goodsFeeFen, 0);
-  const intlUnpaidFen = weighGroups.results
-    .filter((g) => !g.feePaid)
-    .reduce((sum, g) => sum + (g.intlFeeFen ?? 0), 0);
+  const unitFees=await db.prepare(`SELECT COALESCE(SUM(intl_fee_fen),0) AS n FROM items WHERE customer_id=? AND intl_paid=0 AND intl_fee_fen IS NOT NULL AND status NOT IN ('cancelled','refunded')`).bind(customerId).first<{n:number}>();
+  const intlUnpaidFen=(unitFees?.n??0)+weighGroups.results.filter(g=>!g.feePaid && !(items.results as any[]).some(i=>i.weighGroupId===g.id && i.intlFeeFen!==null)).reduce((s,g)=>s+(g.intlFeeFen??0),0);
   const shipmentRows = shipments.results as Array<{ feePaid: number; feeFen: number }>;
-  const domesticUnpaidFen = shipmentRows
+  const pendingDomestic=await db.prepare("SELECT COALESCE(SUM(domestic_fee_fen),0) AS n FROM shipping_requests WHERE customer_id=? AND status='pending'").bind(customerId).first<{n:number}>();
+  const domesticUnpaidFen = (pendingDomestic?.n??0) + shipmentRows
     .filter((s) => !s.feePaid)
     .reduce((sum, s) => sum + s.feeFen, 0);
   const stockCount = itemRows.filter((i) => i.status === 'cn_stock').length;
@@ -127,7 +130,11 @@ export async function buildCustomerView(env: Env, customerId: number) {
     shipmentItems.set(item.shipmentId, list);
   }
 
+  const addresses = await db.prepare('SELECT id,recipient,phone,detail FROM addresses WHERE customer_id=? ORDER BY id').bind(customerId).all();
+  const requests = await db.prepare('SELECT id,address_snapshot AS addressSnapshot,domestic_fee_fen AS domesticFeeFen,status,created_at AS createdAt, (SELECT COUNT(*) FROM request_items ri WHERE ri.request_id=shipping_requests.id) AS itemCount FROM shipping_requests WHERE customer_id=? ORDER BY id DESC').bind(customerId).all();
   return {
+    domesticFeeFen: Number((await db.prepare("SELECT value FROM settings WHERE key='domestic_fee_fen'").first<{value:string}>())?.value ?? 1000),
+    addresses: addresses.results, requests: requests.results,
     customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, createdAt: customer.createdAt },
     summary: {
       goodsUnpaidFen,

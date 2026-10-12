@@ -26,6 +26,7 @@ export interface ParsedRow {
   actualPriceJpy: number | null;
   cn: string;
   goodsFeeFen: number;
+  quantity?: number;
 }
 
 export interface SkippedRow {
@@ -49,6 +50,7 @@ interface ColumnSpec {
 }
 
 const COLUMNS: ColumnSpec[] = [
+  {field:'quantity',label:'数量',required:false,aliases:['数量','件数','quantity']},
   { field: 'title', label: '名称', required: true, aliases: ['名称', '商品名称', '品名', '商品名'] },
   { field: 'imageUrl', label: '图片', required: false, aliases: ['图片', '图片链接', '封面', '图'] },
   {
@@ -67,13 +69,13 @@ const COLUMNS: ColumnSpec[] = [
     field: 'actualPriceJpy',
     label: '实际价格',
     required: false,
-    aliases: ['实际价格', '实际价', '成交价格', '成交价'],
+    aliases: ['实际价格', '实际价', '成交价格', '成交价', '价格', '单价'],
   },
-  { field: 'cn', label: 'cn', required: true, aliases: ['cn', '客户', '归属', '归属人', '买家'] },
+  { field: 'cn', label: 'cn', required: true, aliases: ['cn', '客户', '客户名字', '归属', '归属人', '买家'] },
   {
     field: 'goodsFeeFen',
     label: '应付人民币金额',
-    required: true,
+    required: false,
     aliases: ['应付人民币金额', '应付人民币', '应付金额', '人民币金额', '人民币', '应付'],
   },
 ];
@@ -150,7 +152,7 @@ function optionalText(cell: Cell): string | null {
 /**
  * 解析整张表。rowNo 为 Excel 中的行号（表头算第 1 行，数据从第 2 行开始）。
  */
-export function parseSheet(sheet: RawSheet): ParseResult {
+export function parseSheet(sheet: RawSheet, exchangeRate?: number): ParseResult {
   const { index, missingColumns } = mapHeaders(sheet.headers);
   if (missingColumns.length > 0) {
     return { rows: [], skipped: [], errors: [], missingColumns };
@@ -186,19 +188,26 @@ export function parseSheet(sheet: RawSheet): ParseResult {
       errors.push({ rowNo, reason: '没有填「cn」（归属客户）' });
       return;
     }
+    const quantity = index.quantity === undefined ? 1 : Number(get('quantity'));
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000) { errors.push({rowNo,reason:'数量必须为1至1000的整数'}); return; }
     const rawFee = get('goodsFeeFen');
     let goodsFeeFen = 0;
     if (text(rawFee) !== '') {
       const parsed = toFen(rawFee);
-      if (parsed === null) {
+      if (parsed === null || parsed < 0) {
         errors.push({ rowNo, reason: `「应付人民币金额」看不懂：${text(rawFee)}` });
         return;
       }
       goodsFeeFen = parsed;
+    } else if (index.goodsFeeFen === undefined) {
+      const price = toJpy(get('actualPriceJpy'));
+      if (price === null || price < 0 || !exchangeRate || !Number.isFinite(exchangeRate) || exchangeRate <= 0) { errors.push({rowNo,reason:'没有人民币行总额时，必须填写日元单价和人民币/日元汇率'}); return; }
+      goodsFeeFen = toFen(price * quantity * exchangeRate) ?? -1;
+      if (goodsFeeFen < 0) { errors.push({rowNo,reason:'金额超出范围'}); return; }
     } else {
-      skipped.push({ rowNo, reason: '「应付人民币金额」为空，按 0 元导入' });
+      errors.push({rowNo,reason:'人民币金额不能为空，请填写明确金额（免费物品填0）'}); return;
     }
-    rows.push({
+    for (let unit=0; unit<quantity; unit++) rows.push({
       rowNo,
       title,
       imageUrl: getUrl('imageUrl'),
@@ -206,7 +215,7 @@ export function parseSheet(sheet: RawSheet): ParseResult {
       listPriceJpy: toJpy(get('listPriceJpy')),
       actualPriceJpy: toJpy(get('actualPriceJpy')),
       cn,
-      goodsFeeFen,
+      goodsFeeFen: Math.floor(goodsFeeFen/quantity) + (unit < goodsFeeFen%quantity ? 1 : 0),
     });
   });
 

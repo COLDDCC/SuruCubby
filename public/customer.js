@@ -9,7 +9,7 @@ const GROUPS = [
   {
     title: '国内在库，等你发货',
     statuses: ['cn_stock'],
-    note: '攒够了在群里说一声，每次寄出 10 元（全国包邮）。',
+    note: '勾选要寄的商品，选择地址后提交申请。扫码转账后由群主确认。',
   },
   { title: '已寄出 / 已签收', statuses: ['shipped', 'delivered'], note: '' },
 ];
@@ -73,6 +73,7 @@ function itemCard(item) {
     : '';
   return `
     <div class="item">
+      ${item.status==='cn_stock' ? `<label><input type="checkbox" data-ship-item="${item.id}" ${item.requestId ? 'disabled' : ''}>${item.requestId ? '已申请' : '发货'}</label>` : ''}
       ${thumb(item)}
       <div class="body">
         <div class="title">${title}</div>
@@ -81,8 +82,11 @@ function itemCard(item) {
           应付 <span class="money">${money(item.goodsFeeFen)}</span>
         </div>
         <div class="small row" style="gap:6px;margin-top:4px">
-          <span class="badge">${escapeHtml(statusLabel(item.status))}</span>${paid}
+          <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}
         </div>
+        ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
+        ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
+        ${item.weightG ? `<div class="small muted">${item.weightG} g · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>` : ''}
         ${note}
       </div>
     </div>`;
@@ -115,7 +119,7 @@ function render(data) {
             <div class="row" style="justify-content:space-between">
               <strong>${escapeHtml(g.packageName)}</strong>
               <span class="${g.feePaid ? 'paid' : 'unpaid'} money">
-                ${money(g.intlFeeFen)} ${g.feePaid ? '已付' : '未付'}
+                ${money(g.intlFeeFen)} ${g.feePaid ? '已付' : `待付 ${money(items.filter(i=>i.weighGroupId===g.id && !i.intlPaid && i.status!=='cancelled' && i.status!=='refunded').some(i=>i.intlFeeFen!==null) ? items.filter(i=>i.weighGroupId===g.id && !i.intlPaid && i.status!=='cancelled' && i.status!=='refunded').reduce((s,i)=>s+(i.intlFeeFen??0),0) : g.intlFeeFen)}`}
               </span>
             </div>
             <div class="small muted">你这一摞 ${Number(g.weightG || 0).toLocaleString()} g，共 ${g.items.length} 件</div>
@@ -188,12 +192,19 @@ function render(data) {
       </div>
       <p class="small muted" style="margin-bottom:0">国内在库 ${s.stockCount} 件，随时可以要求发货。</p>
     </div>
+    <div class="card"><h2>收货地址（最多3个）</h2>
+      ${(data.addresses||[]).map(a=>`<label class="row"><input name="ship-address" type="radio" value="${a.id}"><span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span><button class="small plain" data-delete-address="${a.id}">删除</button></label>`).join('')}
+      ${(data.addresses||[]).length<3 ? '<label>收件人</label><input id="recipient"><label>电话</label><input id="phone"><label>详细地址</label><input id="detail"><p><button id="add-address">保存地址</button></p>' : ''}
+      <p id="shipping-total" class="small"></p><button id="request-shipping">提交发货申请</button>
+    </div>
+    ${(data.requests||[]).length ? `<div class="card"><h2>发货申请</h2>${data.requests.map(r=>`<p>申请 #${r.id} · ${escapeHtml({pending:'待确认收款',paid:'已收款，待寄出',shipped:'已寄出',cancelled:'已取消'}[r.status])}${r.status==='pending'?` <button class="small plain" data-cancel-request="${r.id}">取消</button>`:''}</p>`).join('')}</div>`:''}
     ${groupsHtml}
     ${intlHtml}
     ${shipHtml}
     ${closedHtml}
     ${timelineHtml}
-    <p class="small muted">金额有疑问就在群里问一声。页面数据实时更新。</p>`;
+    <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>`;
+  bindWarehouse(data);
 }
 
 async function boot() {
@@ -215,3 +226,17 @@ async function boot() {
 }
 
 boot();
+
+function bindWarehouse(data){
+ const endpoint=`/api/w/${encodeURIComponent(token)}`;
+ const send=async(path,method,body)=>{const r=await api(endpoint+path,{method,headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw Error(r.data.error||'保存失败');await boot();};
+ const handle=fn=>async e=>{const el=e.currentTarget;el.disabled=true;try{await fn();}catch(err){toast(err.message,true);}finally{el.disabled=false;}};
+ app.querySelectorAll('[data-copy]').forEach(el=>el.onclick=handle(async()=>{await navigator.clipboard.writeText(el.dataset.copy);toast('单号已复制');}));
+ app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
+ app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
+ const add=app.querySelector('#add-address');if(add)add.onclick=handle(()=>send('/addresses','POST',{recipient:app.querySelector('#recipient').value,phone:app.querySelector('#phone').value,detail:app.querySelector('#detail').value}));
+ const selected=()=>[...app.querySelectorAll('[data-ship-item]:checked')].map(el=>Number(el.dataset.shipItem));
+ const refresh=()=>{const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);app.querySelector('#shipping-total').textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「已到国内」商品后提交。';};
+ app.querySelectorAll('[data-ship-item]').forEach(el=>el.onchange=refresh);refresh();
+ app.querySelector('#request-shipping').onclick=handle(()=>{const address=app.querySelector('[name="ship-address"]:checked');if(!address)throw Error('请选择收货地址');return send('/requests','POST',{itemIds:selected(),addressId:Number(address.value)});});
+}

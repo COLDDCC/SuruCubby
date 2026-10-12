@@ -18,7 +18,7 @@ export async function render(view, [id]) {
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
-      <p class="small muted">拆包时拿起一件，点一下它的封面就算「已找到」。某人的东西找齐后，堆成一摞称重量填进去。</p>
+      <p class="small muted">逐件填重量并保存。漏件请明确标记。包裹到手、全部称重算费后确认，商品才变为绿色「已到国内」。</p>
       ${
         allocated
           ? `<p class="small">已分摊：国际运费 <span class="money">${money(pkg.totalFeeFen)}</span>
@@ -34,9 +34,9 @@ export async function render(view, [id]) {
           <h3 style="margin:0">${escapeHtml(c.nickname)}
             <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ''}</span></h3>
           <div class="row">
-            <input class="small" style="width:110px" inputmode="numeric" placeholder="重量 g"
+            <input class="small" disabled style="width:110px" inputmode="numeric" placeholder="总重量 g"
                    data-weight-for="${c.customerId}" value="${c.weightG ?? ''}" ${allocated ? 'disabled' : ''}>
-            <button class="small" data-action="saveWeight" data-customer="${c.customerId}" ${allocated ? 'disabled' : ''}>存</button>
+            <button style="display:none" class="small" data-action="saveWeight" data-customer="${c.customerId}" ${allocated ? 'disabled' : ''}>存</button>
           </div>
         </div>
         ${
@@ -53,6 +53,8 @@ export async function render(view, [id]) {
                 ${thumb(i)}
                 <div class="name">${escapeHtml(i.title)}</div>
               </div>
+              <input inputmode="numeric" placeholder="单件重量 g" data-unit-weight="${i.id}" value="${i.weightG ?? ''}" ${allocated ? 'disabled' : ''}>
+              <button class="small" data-action="unitWeight" data-item="${i.id}" ${allocated ? 'disabled' : ''}>保存重量</button>
               <button class="small plain" style="width:100%;margin-top:4px"
                       data-action="missing" data-item="${i.id}" data-missing="${i.missing ? '1' : ''}">
                 ${i.missing ? '取消缺件' : '缺件'}
@@ -81,6 +83,11 @@ export async function render(view, [id]) {
   const reload = () => render(view, [id]);
 
   bindActions(view, {
+    unitWeight: async ({item},el)=>{
+      el.disabled=true;
+      try {await api.post(`/api/admin/packages/${id}/weigh/item`,{itemId:Number(item),weightG:Number(view.querySelector(`[data-unit-weight="${item}"]`).value)});await reload();}
+      catch(err){toast(err.message,true);el.disabled=false;}
+    },
     toggle: async ({ item, claimed }) => {
       try {
         await api.post(`/api/admin/packages/${id}/weigh/claim`, {
@@ -123,6 +130,7 @@ export async function render(view, [id]) {
       }
     },
     preview: async () => {
+      if(data.customers.some(c=>c.items.some(i=>!i.missing && !i.weightG))) return toast('请先填写每件商品重量，缺件要明确标记',true);
       const fee = document.getElementById('fee').value.trim();
       const declared = document.getElementById('declared').value.trim();
       if (fee === '') return toast('先填国际运费', true);

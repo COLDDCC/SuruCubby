@@ -3,16 +3,16 @@
 export const STATUS_LABELS = {
   ordered: '已下单',
   jp_warehouse: '已到日本仓',
-  intl_transit: '国际运输中',
-  cn_arrived: '已到国内，待称重',
-  cn_stock: '国内在库',
+  intl_transit: '回国中',
+  cn_arrived: '回国中',
+  cn_stock: '已到国内',
   shipped: '已寄出',
   delivered: '已签收',
   cancelled: '缺货取消',
   refunded: '已退款',
 };
 
-export const PACKAGE_BULK_STATUSES = ['ordered', 'jp_warehouse', 'intl_transit', 'cn_arrived'];
+export const PACKAGE_BULK_STATUSES = ['ordered', 'jp_warehouse', 'intl_transit'];
 
 export function statusLabel(status) {
   return STATUS_LABELS[status] || status;

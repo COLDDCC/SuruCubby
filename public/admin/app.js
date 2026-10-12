@@ -5,6 +5,7 @@ const view = document.getElementById('view');
 const nav = document.getElementById('nav');
 
 const routes = [
+  {pattern:/^\/requests$/, module:()=>import('/admin/views/requests.js')},
   { pattern: /^\/?$/, module: () => import('/admin/views/dashboard.js') },
   { pattern: /^\/import$/, module: () => import('/admin/views/import.js') },
   { pattern: /^\/batches$/, module: () => import('/admin/views/batches.js') },

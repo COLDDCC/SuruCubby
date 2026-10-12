@@ -51,6 +51,8 @@ shipmentRoutes.post('/', async (c) => {
     .bind(...itemIds, customerId)
     .all<{ id: number; status: string; weighGroupId: number | null }>();
   if (items.results.length !== itemIds.length) throw badRequest('有物品不属于这位客户');
+  const reserved=await db.prepare(`SELECT item_id FROM request_items WHERE item_id IN (${placeholders(itemIds.length)}) LIMIT 1`).bind(...itemIds).first();
+  if(reserved) throw badRequest('有商品已申请发货，请到发货申请处理');
   const notInStock = items.results.filter((i) => i.status !== 'cn_stock');
   if (notInStock.length > 0) {
     throw badRequest(`有 ${notInStock.length} 件东西不在「国内在库」状态，不能寄出`);
@@ -116,6 +118,7 @@ shipmentRoutes.patch('/:id', async (c) => {
   const shipment = await db.prepare('SELECT id FROM shipments WHERE id = ?').bind(id).first();
   if (!shipment) throw notFound('寄出记录不存在');
 
+  if (body.feePaid !== undefined) throw badRequest('请通过收款记录确认或撤销运费');
   const trackingNo = optionalString(body.trackingNo);
   const shippedAt = trackingNo && !body.shippedAt ? nowIso() : optionalString(body.shippedAt);
   await db
@@ -139,6 +142,8 @@ shipmentRoutes.delete('/:id', async (c) => {
     .bind(id)
     .first<{ id: number; feePaid: number }>();
   if (!shipment) throw notFound('寄出记录不存在');
+  const linkedRequest=await db.prepare('SELECT request_id FROM shipments WHERE id=? AND request_id IS NOT NULL').bind(id).first();
+  if(linkedRequest) throw badRequest('客户申请的寄出不能在这里撤销，请核对实际物流后处理');
   if (shipment.feePaid) throw badRequest('这次寄出的运费已经收过了，先撤销收款再撤销寄出');
 
   const items = await db

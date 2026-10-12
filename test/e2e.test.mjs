@@ -318,17 +318,15 @@ test('填单号、收国内运费', async () => {
   assert.equal(detail.shipments[0].trackingNo, 'SF123456789');
 });
 
-test('砍单：未付直接扣掉；已付进待退款清单', async () => {
-  const customerId = ctx.customers[1].id;
-  const detail = await call('GET', `/api/admin/customers/${customerId}`);
-  const item = detail.items[0];
-  await call('PATCH', `/api/admin/items/${item.id}`, { status: 'cancelled', exceptionNote: '骏河屋砍单' });
-  const after = await call('GET', `/api/admin/customers/${customerId}`);
-  assert.equal(after.summary.goodsUnpaidFen, 0, '未付的取消件应直接从应付里扣掉');
-
-  await call('PATCH', `/api/admin/items/${item.id}`, { goodsPaid: true });
-  const dashboard = await call('GET', '/api/admin/dashboard');
-  assert.ok(dashboard.pendingRefunds.some((r) => r.itemId === item.id));
+test('计费后禁止直接砍单；未计费取消件和已付退款清单仍正常',async()=>{
+ const detail=await call('GET',`/api/admin/customers/${ctx.customers[1].id}`);
+ const blocked=await call('PATCH',`/api/admin/items/${detail.items[0].id}`,{status:'cancelled'}, {raw:true});assert.equal(blocked.status,400);
+ const name=`退款${stamp}`;
+ const added=await call('POST','/api/admin/import/commit',{batchName:name,fileHash:name,sheet:{headers:HEADERS,rows:[['待退款',null,null,null,100,name,10]]},assignments:[{cn:name,customerId:ctx.customers[1].id}]});
+ const fresh=await call('GET',`/api/admin/batches/${added.batchId}`);const item=fresh.items[0];
+ await call('POST','/api/admin/payments',{customerId:ctx.customers[1].id,kind:'goods',itemIds:[item.id]});
+ await call('PATCH',`/api/admin/items/${item.id}`,{status:'cancelled'});
+ const dashboard=await call('GET','/api/admin/dashboard');assert(dashboard.pendingRefunds.some(r=>r.itemId===item.id));
 });
 
 test('重置链接后旧链接立刻失效', async () => {
@@ -339,18 +337,13 @@ test('重置链接后旧链接立刻失效', async () => {
   assert.equal(res.status, 401);
 });
 
-test('客户合并：物品、别名、称重组都挪过去', async () => {
-  const sourceId = ctx.customers[2].id;
-  const targetId = ctx.customers[1].id;
-  const before = await call('GET', `/api/admin/customers/${sourceId}`);
-  await call('POST', '/api/admin/customers/merge', { sourceId, targetId });
-  const merged = await call('GET', `/api/admin/customers/${targetId}`);
-  assert.ok(merged.aliases.includes(NAMES[2]));
-  for (const item of before.items) {
-    assert.ok(merged.items.some((i) => i.id === item.id));
-  }
-  const gone = await call('GET', `/api/admin/customers/${sourceId}`, undefined, { raw: true });
-  assert.equal(gone.status, 404);
+test('有运费账目冲突时禁止合并；没有计费的客户可安全合并',async()=>{
+ const unsafe=await call('POST','/api/admin/customers/merge',{sourceId:ctx.customers[2].id,targetId:ctx.customers[1].id},{raw:true});assert.equal(unsafe.status,400);
+ const a=await call('POST','/api/admin/customers',{qq:'5'+QQS[0],nickname:'mergeA'+stamp});
+ const b=await call('POST','/api/admin/customers',{qq:'6'+QQS[0],nickname:'mergeB'+stamp});
+ await call('POST','/api/admin/customers/merge',{sourceId:a.id,targetId:b.id});
+ const merged=await call('GET',`/api/admin/customers/${b.id}`);assert(merged.aliases.includes('mergeA'+stamp));
+ const gone=await call('GET',`/api/admin/customers/${a.id}`,undefined,{raw:true});assert.equal(gone.status,404);
 });
 
 test('QQ 连错 5 次会锁定 15 分钟', async () => {

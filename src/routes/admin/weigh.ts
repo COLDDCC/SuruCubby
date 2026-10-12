@@ -58,7 +58,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
   const items = await c.env.DB.prepare(
     `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
             i.product_url AS productUrl, i.status, i.missing, i.exception_note AS exceptionNote,
-            i.weigh_group_id AS weighGroupId, i.goods_fee_fen AS goodsFeeFen
+            i.weigh_group_id AS weighGroupId, i.goods_fee_fen AS goodsFeeFen, i.weight_g AS weightG
        FROM items i
        JOIN customers c ON c.id = i.customer_id
       WHERE i.package_id = ? AND i.status NOT IN ('cancelled', 'refunded')
@@ -292,6 +292,10 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
       itemCount: number;
     }>();
 
+  const unfinished=await env.DB.prepare(`SELECT COUNT(*) AS n FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weigh_group_id IS NULL`).bind(packageId).first<{n:number}>();
+  if(unfinished?.n) throw badRequest('还有商品未称重或未明确标记缺件，不能确认费用');
+  const weighedUnits=await env.DB.prepare(`SELECT weigh_group_id AS gid, SUM(weight_g) AS w,COUNT(*) AS n,COUNT(weight_g) AS weighted FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') GROUP BY weigh_group_id`).bind(packageId).all<{gid:number;w:number;n:number;weighted:number}>();
+  for(const u of weighedUnits.results){if(u.weighted>0 && u.weighted!==u.n) throw badRequest('还有商品未填写重量');if(u.weighted===u.n){const g=groups.results.find(g=>g.id===u.gid);if(g)g.weightG=u.w;}}
   const usable = groups.results.filter((g) => g.itemCount > 0);
   const notWeighed = usable.filter((g) => !g.weightG || g.weightG <= 0);
   if (usable.length === 0) throw badRequest('还没有任何已认领的物品，不能分摊');
@@ -335,6 +339,17 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   };
 }
 
+weighRoutes.post('/:id/weigh/item',async c=>{
+ const id=requireInt(c.req.param('id'),'包裹 ID'); const pkg=await loadPackage(c.env,id); ensureNotAllocated(pkg);
+ const body=await readJson<{itemId:unknown;weightG:unknown}>(c); const itemId=requireInt(body.itemId,'物品 ID'); const weight=requireInt(body.weightG,'重量');
+ if(weight<=0 || weight>1000000) throw badRequest('重量必须为1至1000000克');
+ const item=await c.env.DB.prepare("SELECT customer_id AS cid FROM items WHERE id=? AND package_id=? AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(itemId,id).first<{cid:number}>();
+ if(!item) throw notFound('物品不在此包裹'); const gid=await ensureGroup(c.env,id,item.cid);
+ await c.env.DB.batch([
+ c.env.DB.prepare('UPDATE items SET weight_g=?,weigh_group_id=?,missing=0,updated_at=? WHERE id=?').bind(weight,gid,nowIso(),itemId),
+ c.env.DB.prepare('UPDATE weigh_groups SET weight_g=(SELECT SUM(weight_g) FROM items WHERE weigh_group_id=? AND missing=0) WHERE id=?').bind(gid,gid)]);
+ return c.json({ok:true});
+});
 weighRoutes.post('/:id/allocate/preview', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   await loadPackage(c.env, id);
@@ -378,11 +393,22 @@ weighRoutes.post('/:id/allocate/commit', async (c) => {
       )
       .bind(id, allocation.diffFen),
   ];
+  const unitRows=await db.prepare("SELECT id,weigh_group_id AS gid,weight_g AS weight FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(id).all<{id:number;gid:number;weight:number|null}>();
+  const anyUnitWeight=unitRows.results.some(i=>i.weight!==null);
+  if(anyUnitWeight && unitRows.results.some(i=>!i.weight)) throw badRequest('请填写每件商品的重量');
   for (const row of allocation.rows) {
+    const units=unitRows.results.filter(i=>i.gid===row.weighGroupId);
+    if(anyUnitWeight) {
+      const unitAllocation=allocate(row.feeFen,units.map(i=>({id:i.id,weightG:i.weight!})));
+      let remainder=unitAllocation.diffFen;
+      for(const u of unitAllocation.rows) {
+        statements.push(db.prepare('UPDATE items SET intl_fee_fen=? WHERE id=?').bind(u.feeFen+(remainder-->0?1:0),u.id));
+      }
+    }
     statements.push(
       db
-        .prepare('UPDATE weigh_groups SET intl_fee_fen = ? WHERE id = ?')
-        .bind(row.feeFen, row.weighGroupId),
+        .prepare('UPDATE weigh_groups SET intl_fee_fen = ?, weight_g=? WHERE id = ?')
+        .bind(row.feeFen,row.weightG,row.weighGroupId),
     );
   }
   for (const item of items.results) {
@@ -402,6 +428,10 @@ weighRoutes.post('/:id/allocate/undo', async (c) => {
   if (!pkg.allocatedAt) throw badRequest('这个包裹还没分摊过');
 
   const db = c.env.DB;
+  const partial=await db.prepare('SELECT id FROM items WHERE package_id=? AND intl_paid=1 LIMIT 1').bind(id).first();
+  if(partial) throw badRequest('已有商品收过国际运费，请先撤销收款');
+  const requested=await db.prepare('SELECT ri.item_id FROM request_items ri JOIN items i ON i.id=ri.item_id WHERE i.package_id=? LIMIT 1').bind(id).first();
+  if(requested) throw badRequest('已有客户申请发货，先取消申请');
   const paid = await db
     .prepare('SELECT COUNT(*) AS count FROM weigh_groups WHERE package_id = ? AND fee_paid = 1')
     .bind(id)
@@ -430,6 +460,7 @@ weighRoutes.post('/:id/allocate/undo', async (c) => {
       )
       .bind(id),
     db.prepare('UPDATE weigh_groups SET intl_fee_fen = NULL WHERE package_id = ?').bind(id),
+    db.prepare('UPDATE items SET intl_fee_fen=NULL WHERE package_id=?').bind(id),
     db.prepare('DELETE FROM rounding_logs WHERE package_id = ?').bind(id),
   ];
   for (const item of items.results) {

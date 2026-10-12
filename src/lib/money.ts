@@ -30,7 +30,7 @@ export function decimalToScaledInt(text: string, scale: number): number | null {
   const nextDigit = frac.charCodeAt(scale) - 48;
   let value = Number(intPart) * 10 ** scale + (kept === '' ? 0 : Number(kept));
   if (nextDigit >= 5) value += 1;
-  return negative ? -value : value;
+  return Number.isSafeInteger(value) ? (negative ? -value : value) : null;
 }
 
 /** 单元格 → 分。空值返回 null（调用方决定当 0 还是报错）。 */
