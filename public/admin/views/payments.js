@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, confirmBox, empty, escapeHtml, money, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, confirmBox, empty, escapeHtml, money, toast, yen } from '/admin/ui.js';
 
 const KIND_LABELS = { goods: '货款', intl: '国际运费', item_intl: '单件国际运费', domestic: '国内运费' };
 
@@ -18,7 +18,7 @@ export async function render(view) {
             <td class="small" style="white-space:nowrap">${beijingTime(p.paidAt)}</td>
             <td><a href="#/customers/${p.customerId}">${escapeHtml(p.nickname)}</a></td>
             <td>${KIND_LABELS[p.kind] || p.kind}</td>
-            <td class="right money">${money(p.amountFen)}</td>
+            <td class="right money">${p.currency === 'JPY' ? yen(p.amount) : money(p.amount)}</td>
             <td class="small muted">${escapeHtml(p.note || '')}</td>
             <td class="right"><button class="small plain" data-action="revoke" data-id="${p.id}">撤销</button></td>
           </tr>`,

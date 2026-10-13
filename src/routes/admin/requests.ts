@@ -54,10 +54,10 @@ requestAdminRoutes.post('/:id/paid',async c=>{
  const items=await db.prepare(`SELECT i.id,i.intl_fee_fen FROM request_items ri JOIN items i ON i.id=ri.item_id WHERE ri.request_id=? AND i.intl_paid=0`).bind(id).all<any>();
  let payment=await nextId(db,'payments');const at=nowIso(); const statements:D1PreparedStatement[]=[];
  for(const i of items.results){
- statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,amount_fen,ref_type,ref_id,paid_at) VALUES(?,?,'item_intl',?,'item',?,?)").bind(payment++,r.customer_id,i.intl_fee_fen,i.id,at),db.prepare('UPDATE items SET intl_paid=1 WHERE id=?').bind(i.id));
+ statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,currency,amount,ref_type,ref_id,paid_at) VALUES(?,?,'item_intl','CNY',?,'item',?,?)").bind(payment++,r.customer_id,i.intl_fee_fen,i.id,at),db.prepare('UPDATE items SET intl_paid=1 WHERE id=?').bind(i.id));
  }
  statements.push(db.prepare(`UPDATE weigh_groups SET fee_paid=CASE WHEN EXISTS(SELECT 1 FROM items i WHERE i.weigh_group_id=weigh_groups.id AND i.intl_paid=0 AND i.missing=0 AND i.status NOT IN ('cancelled','refunded')) THEN 0 ELSE 1 END WHERE customer_id=? AND intl_fee_fen IS NOT NULL`).bind(r.customer_id));
- statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,amount_fen,ref_type,ref_id,paid_at) VALUES(?,?,'domestic',?,'request',?,?)").bind(payment++,r.customer_id,r.domestic_fee_fen,id,at));
+ statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,currency,amount,ref_type,ref_id,paid_at) VALUES(?,?,'domestic','CNY',?,'request',?,?)").bind(payment++,r.customer_id,r.domestic_fee_fen,id,at));
  statements.push(db.prepare("UPDATE shipping_requests SET status='paid',paid_at=? WHERE id=?").bind(at,id));
  await db.batch(statements);return c.json({ok:true});
 });

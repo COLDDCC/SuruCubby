@@ -1,4 +1,4 @@
-import { beijingTime, escapeHtml, jpy, money, statusLabel, thumb, toast } from '/shared.js';
+import { beijingTime, escapeHtml, jpy, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const token = decodeURIComponent(location.pathname.replace(/^\/w\//, '').replace(/\/$/, ''));
 const app = document.getElementById('app');
@@ -79,7 +79,7 @@ function itemCard(item) {
         <div class="title">${title}</div>
         <div class="small muted">
           实际价格 ${jpy(item.actualPriceJpy)} ·
-          应付 <span class="money">${money(item.goodsFeeFen)}</span>
+          应付 <span class="money">${yen(item.goodsFeeJpy)}</span>
         </div>
         <div class="small row" style="gap:6px;margin-top:4px">
           <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}
@@ -185,12 +185,12 @@ function render(data) {
         <span class="muted small">${items.length} 件</span>
       </div>
       <div class="grid" style="margin-top:12px">
-        <div class="stat"><div class="label">货款待付</div><div class="value money">${money(s.goodsUnpaidFen)}</div></div>
+        <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
         <div class="stat"><div class="label">国际运费待付</div><div class="value money">${money(s.intlUnpaidFen)}</div></div>
         <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
-        <div class="stat big"><div class="label">合计待付</div><div class="value money">${money(s.totalUnpaidFen)}</div></div>
+        <div class="stat big"><div class="label">运费待付</div><div class="value money">${money(s.freightUnpaidFen)}</div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">国内在库 ${s.stockCount} 件，随时可以要求发货。</p>
+      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。国内在库 ${s.stockCount} 件，随时可以要求发货。</p>
     </div>
     <div class="card"><h2>收货地址（最多3个）</h2>
       ${(data.addresses||[]).map(a=>`<label class="row"><input name="ship-address" type="radio" value="${a.id}"><span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span><button class="small plain" data-delete-address="${a.id}">删除</button></label>`).join('')}

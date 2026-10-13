@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, confirmBox, escapeHtml, jpy, money, statusLabel, toast, promptBox } from '/admin/ui.js';
+import { beijingTime, bindActions, confirmBox, escapeHtml, jpy, statusLabel, yen, toast, promptBox } from '/admin/ui.js';
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/batches/${id}`);
@@ -17,18 +17,18 @@ export async function render(view, [id]) {
 
   const groups = [...byCustomer.values()]
     .map((g) => {
-      const total = g.items.reduce((sum, i) => sum + i.goodsFeeFen, 0);
+      const total = g.items.reduce((sum, i) => sum + i.goodsFeeJpy, 0);
       const unpaid = g.items
         .filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
-        .reduce((sum, i) => sum + i.goodsFeeFen, 0);
+        .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
       return `
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0"><a href="#/customers/${g.customerId}">${escapeHtml(g.nickname)}</a>
             <span class="muted small">${escapeHtml(g.qq)} · ${g.items.length} 件</span></h3>
           <div class="right">
-            <div class="money">合计 ${money(total)}</div>
-            <div class="small ${unpaid ? 'unpaid' : 'paid'} money">${unpaid ? `未付 ${money(unpaid)}` : '已付清'}</div>
+            <div class="money">合计 ${yen(total)}</div>
+            <div class="small ${unpaid ? 'unpaid' : 'paid'} money">${unpaid ? `未付 ${yen(unpaid)}` : '已付清'}</div>
           </div>
         </div>
         ${
@@ -44,7 +44,7 @@ export async function render(view, [id]) {
               <td class="small muted">${i.rowNo ?? ''}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}</td>
               <td class="right small">${jpy(i.actualPriceJpy)}</td>
-              <td class="right money">${money(i.goodsFeeFen)}</td>
+              <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>
             </tr>`,

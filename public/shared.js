@@ -26,6 +26,12 @@ export function money(fen) {
   return `${sign}¥${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
 }
 
+/** 円 → "1,234円"。货款一律按日元记，和 money()（人民币分）不能混着显示。 */
+export function yen(jpy) {
+  const n = Math.trunc(Number(jpy) || 0);
+  return `${n.toLocaleString('en-US')}円`;
+}
+
 /** "12.34" → 1234（前端只做展示回填，真正的换算在服务端） */
 export function yuanToFen(text) {
   const n = Number(String(text).replace(/[^\d.-]/g, ''));

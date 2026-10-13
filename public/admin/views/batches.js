@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, empty, escapeHtml, money } from '/admin/ui.js';
+import { beijingTime, empty, escapeHtml, yen } from '/admin/ui.js';
 
 export async function render(view) {
   const data = await api.get('/api/admin/batches');
@@ -19,8 +19,8 @@ export async function render(view) {
             <td><a href="#/batches/${b.id}">${escapeHtml(b.name)}</a>
               <div class="small muted">${escapeHtml(b.sourceFile || '')}</div></td>
             <td class="right">${b.itemCount}</td>
-            <td class="right money">${money(b.amountFen)}</td>
-            <td class="right ${b.unpaidFen ? 'unpaid' : 'paid'} money">${money(b.unpaidFen)}</td>
+            <td class="right money">${yen(b.amountJpy)}</td>
+            <td class="right ${b.unpaidJpy ? 'unpaid' : 'paid'} money">${yen(b.unpaidJpy)}</td>
             <td class="small muted" style="white-space:nowrap">${beijingTime(b.createdAt)}</td>
           </tr>`,
           )

@@ -1,19 +1,21 @@
 /**
  * 端到端验收脚本：跑通「导入 → 客户页 → 改状态 → 称重分摊 → 收款 → 寄出」。
  *
- * 先另开一个终端：
- *   npx wrangler d1 migrations apply surucubby --local
- *   npx wrangler dev --port 8787
- * 再执行：
- *   node --test test/e2e.test.mjs
+ *   npm run test:e2e
  *
- * 需要 .dev.vars 里的 ADMIN_PASSWORD=test-admin-pw（或用环境变量覆盖）。
+ * 脚本会自己起一个隔离实例（8791 + .wrangler/e2e 单独库），跑完关掉。
+ * 这个测试会真的写库，所以不给 E2E_BASE 就直接拒绝，免得把测试批次写进你正在用的 8787。
+ * 需要 .dev.vars 里的 ADMIN_PASSWORD=test-admin-pw（或用 E2E_PASSWORD 覆盖）。
  */
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
-const BASE = process.env.E2E_BASE || 'http://127.0.0.1:8787';
+const BASE = process.env.E2E_BASE || refuse();
+function refuse() {
+  console.error('测试要写库，不往 8787 塞垃圾。用 npm run test:e2e，或自己给 E2E_BASE。');
+  process.exit(1);
+}
 const PASSWORD = process.env.E2E_PASSWORD || 'test-admin-pw';
 
 const jar = new Map();
@@ -47,17 +49,17 @@ async function call(method, path, body, { raw = false } = {}) {
   return data;
 }
 
-const HEADERS = ['名称', '图片', '商品链接', '平时价格', '实际价格', 'cn', '应付人民币金额'];
+const HEADERS = ['名称', '图片', '商品链接', '平时价格', '实际价格', 'cn', '应付日元金额'];
 const stamp = Date.now();
 const NAMES = [`阿狸${stamp}`, `小明${stamp}`, `小红${stamp}`];
 const QQS = [`${stamp}`.slice(-9), `${stamp + 1}`.slice(-9), `${stamp + 2}`.slice(-9)];
 const SHEET = {
   headers: HEADERS,
   rows: [
-    ['海洋堂手办', null, 'https://www.suruga-ya.jp/product/detail/1', '3,000', '1,800', NAMES[0], '¥98.50'],
-    ['GK 模型', null, null, '2,000', 1500, NAMES[0], 80],
-    ['漫画一套', null, null, null, 2600, NAMES[1], '120.00'],
-    ['手办盒蛋', null, null, null, 900, NAMES[2], '45.5'],
+    ['海洋堂手办', null, 'https://www.suruga-ya.jp/product/detail/1', '3,000', '1,800', NAMES[0], '1,800'],
+    ['GK 模型', null, null, '2,000', 1500, NAMES[0], 1500],
+    ['漫画一套', null, null, null, 2600, NAMES[1], '2600'],
+    ['手办盒蛋', null, null, null, 900, NAMES[2], '900'],
     ['', null, null, null, null, NAMES[2], '10'],
   ],
 };
@@ -88,7 +90,7 @@ test('预览：未匹配的名字要标出来，空名称行被跳过', async ()
   });
   assert.equal(preview.totals.rows, 4);
   assert.equal(preview.totals.customers, 3);
-  assert.equal(preview.totals.amountFen, 9850 + 8000 + 12000 + 4550);
+  assert.equal(preview.totals.amountJpy, 1800 + 1500 + 2600 + 900);
   assert.equal(preview.totals.unmatched, 3);
   assert.equal(preview.skipped.length, 1);
   assert.equal(preview.duplicate, null);
@@ -130,7 +132,7 @@ test('同一个文件再导会被拦住，确认后才放行', async () => {
 test('第二次用同一个名字导入时自动认人（别名生效）', async () => {
   const preview = await call('POST', '/api/admin/import/preview', {
     fileHash: `hash-${stamp}-2`,
-    sheet: { headers: HEADERS, rows: [['补货一件', null, null, null, 500, NAMES[0], '20']] },
+    sheet: { headers: HEADERS, rows: [['补货一件', null, null, null, 500, NAMES[0], '500']] },
   });
   assert.equal(preview.totals.unmatched, 0);
   assert.equal(preview.groups[0].customer.qq, QQS[0]);
@@ -160,7 +162,7 @@ test('客户页：QQ 对上后只看得到自己的东西，金额与 Excel 一�
   assert.equal(data.verified, true);
   assert.equal(data.customer.nickname, NAMES[0]);
   assert.equal(data.items.length, 2);
-  assert.equal(data.summary.goodsUnpaidFen, 9850 + 8000);
+  assert.equal(data.summary.goodsUnpaidJpy, 1800 + 1500);
   assert.ok(data.items.every((i) => i.status === 'ordered'));
   assert.ok(!JSON.stringify(data).includes(NAMES[1]), '不能出现别的客户的信息');
   ctx.cookie = res.headers.getSetCookie()[0].split(';')[0];
@@ -246,7 +248,7 @@ test('客户页能看到自己这一摞的重量和运费', async () => {
   assert.equal(data.weighGroups[0].intlFeeFen, 3333);
   assert.equal(data.weighGroups[0].items.length, 2);
   assert.equal(data.summary.intlUnpaidFen, 3333);
-  assert.equal(data.summary.totalUnpaidFen, 9850 + 8000 + 3333);
+  assert.equal(data.summary.freightUnpaidFen, 3333);
 });
 
 test('已分摊的包裹不能再乱改重量，撤销后可以', async () => {
@@ -270,13 +272,13 @@ test('货款收款与撤销', async () => {
     kind: 'goods',
     batchId: ctx.batchId,
   });
-  assert.equal(payment.amountFen, 9850 + 8000);
+  assert.equal(payment.amount, 1800 + 1500);
   let detail = await call('GET', `/api/admin/customers/${customerId}`);
-  assert.equal(detail.summary.goodsUnpaidFen, 0);
+  assert.equal(detail.summary.goodsUnpaidJpy, 0);
 
   await call('DELETE', `/api/admin/payments/${payment.id}`);
   detail = await call('GET', `/api/admin/customers/${customerId}`);
-  assert.equal(detail.summary.goodsUnpaidFen, 9850 + 8000);
+  assert.equal(detail.summary.goodsUnpaidJpy, 1800 + 1500);
   await call('POST', '/api/admin/payments', { customerId, kind: 'goods', batchId: ctx.batchId });
 });
 
@@ -314,7 +316,8 @@ test('填单号、收国内运费', async () => {
     shipmentId: ctx.shipmentId,
   });
   const detail = await call('GET', `/api/admin/customers/${ctx.customers[0].id}`);
-  assert.equal(detail.summary.totalUnpaidFen, 0);
+  assert.equal(detail.summary.goodsUnpaidJpy, 0);
+  assert.equal(detail.summary.freightUnpaidFen, 0);
   assert.equal(detail.shipments[0].trackingNo, 'SF123456789');
 });
 

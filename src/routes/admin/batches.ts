@@ -12,9 +12,9 @@ batchRoutes.get('/', async (c) => {
     `SELECT b.id, b.name, b.ordered_at AS orderedAt, b.source_file AS sourceFile,
             b.created_at AS createdAt,
             (SELECT COUNT(*) FROM items i WHERE i.batch_id = b.id) AS itemCount,
-            (SELECT COALESCE(SUM(i.goods_fee_fen), 0) FROM items i WHERE i.batch_id = b.id) AS amountFen,
-            (SELECT COALESCE(SUM(i.goods_fee_fen), 0) FROM items i
-              WHERE i.batch_id = b.id AND i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')) AS unpaidFen
+            (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i WHERE i.batch_id = b.id) AS amountJpy,
+            (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i
+              WHERE i.batch_id = b.id AND i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')) AS unpaidJpy
        FROM batches b
       ORDER BY b.id DESC`,
   ).all();
@@ -33,7 +33,7 @@ batchRoutes.get('/:id', async (c) => {
   const items = await c.env.DB.prepare(
     `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
             i.product_url AS productUrl, i.actual_price_jpy AS actualPriceJpy,
-            i.list_price_jpy AS listPriceJpy, i.goods_fee_fen AS goodsFeeFen, i.status,
+            i.list_price_jpy AS listPriceJpy, i.goods_fee_jpy AS goodsFeeJpy, i.status,
             i.goods_paid AS goodsPaid, i.missing, i.exception_note AS exceptionNote,
             i.row_no AS rowNo, i.package_id AS packageId
        FROM items i

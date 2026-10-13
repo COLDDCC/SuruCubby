@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-const base=process.env.E2E_BASE||'http://127.0.0.1:8787';
+// 会真的写库：不给 E2E_BASE 就拒绝，免得测试批次进你正在用的 8787。
+// 手动跑：npm run test:e2e 之外，用 node scripts/sandbox.mjs --state .wrangler/e2e --port 8792 -- node test/workflow.e2e.mjs
+const base=process.env.E2E_BASE||refuse();
+function refuse(){console.error('要 E2E_BASE，别写 8787。');process.exit(1);}
 const cookies=new Map();
 async function call(method,path,body,expected=200){
  const r=await fetch(base+path,{method,headers:{cookie:[...cookies].map(([k,v])=>`${k}=${v}`).join('; '),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
@@ -10,7 +13,7 @@ const stamp=Date.now(),qq=String(stamp).slice(-9),names=['A'+stamp,'B'+stamp];
 await call('POST','/api/admin/login',{password:'test-admin-pw'});
 const imported=await call('POST','/api/admin/import/commit',{
  batchName:'workflow '+stamp,orderNo:'JP-123',japanTrackingNo:'JPTRACK',fileHash:'f'+stamp,
- sheet:{headers:['名称','客户名字','数量','应付人民币金额'],rows:[['卡片',names[0],2,'10.01'],['徽章',names[1],1,'20']]},
+ sheet:{headers:['名称','客户名字','数量','应付日元金额'],rows:[['卡片',names[0],2,'1001'],['徽章',names[1],1,'20']]},
  assignments:names.map(cn=>({cn,newCustomer:{qq,nickname:cn}}))});
 assert.equal(imported.createdCustomers.length,1);assert.equal(imported.itemCount,3);
 const cid=imported.createdCustomers[0].id,token=imported.createdCustomers[0].token,pid=imported.packageId;
@@ -56,7 +59,7 @@ customer=await call('GET',`/api/w/${token}`);assert.equal(customer.summary.intlU
 await call('POST',`/api/admin/packages/${pid}/allocate/undo`,undefined,400);
 const concurrent=await Promise.all([call('GET','/api/admin/session'),call('GET','/api/admin/session')]);assert(concurrent.every(r=>r.loggedIn));
 const cross=await fetch(base+'/api/admin/login',{method:'POST',headers:{Origin:'https://other.invalid','content-type':'application/json'},body:JSON.stringify({password:'test-admin-pw'})});assert.equal(cross.status,403);
-const split=await call('POST','/api/admin/import/commit',{batchName:'split'+stamp,sheet:{headers:['名称','cn','应付人民币金额'],rows:[['拆包1',names[0],1],['拆包2',names[0],1]]}});
+const split=await call('POST','/api/admin/import/commit',{batchName:'split'+stamp,sheet:{headers:['名称','cn','应付日元金额'],rows:[['拆包1',names[0],100],['拆包2',names[0],100]]}});
 const splitData=await call('GET',`/api/admin/packages/${split.packageId}`);
 const target=await call('POST','/api/admin/packages',{name:'合包'+stamp});
 await call('POST',`/api/admin/packages/${split.packageId}/weigh/claim`,{itemId:splitData.items[0].id});

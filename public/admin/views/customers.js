@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { bindActions, empty, escapeHtml, money, openModal, promptBox, toast } from '/admin/ui.js';
+import { bindActions, empty, escapeHtml, money, openModal, promptBox, toast, yen } from '/admin/ui.js';
 
 export async function render(view, params, query = '') {
   const data = await api.get(`/api/admin/customers?q=${encodeURIComponent(query)}`);
@@ -17,14 +17,16 @@ export async function render(view, params, query = '') {
         data.customers.length
           ? data.customers
               .map((c) => {
-                const due = c.goodsUnpaidFen + c.intlUnpaidFen + c.domesticUnpaidFen;
+                const goods = c.goodsUnpaidJpy;
+                const freight = c.intlUnpaidFen + c.domesticUnpaidFen;
                 return `<div class="list-row">
             <div class="main">
               <a href="#/customers/${c.id}">${escapeHtml(c.nickname)}</a>
               <div class="small muted">QQ ${escapeHtml(c.qq)} · ${c.itemCount} 件 · 在库 ${c.stockCount}</div>
             </div>
             <div class="side">
-              <span class="${due ? 'unpaid' : 'paid'} money">${money(due)}</span>
+              <span class="${goods ? 'unpaid' : 'paid'} money">${yen(goods)}</span>
+              ${freight ? `<span class="small unpaid money">运费 ${money(freight)}</span>` : ''}
               <button class="small plain" data-action="copy" data-token="${escapeHtml(c.token)}">复制链接</button>
             </div>
           </div>`;

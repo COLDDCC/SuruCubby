@@ -130,7 +130,7 @@ function cover(title) {
 (function paintCovers(node) {
   if (Array.isArray(node)) return node.forEach(paintCovers);
   if (!node || typeof node !== 'object') return;
-  if (typeof node.title === 'string' && 'goodsFeeFen' in node) node.imageUrl = cover(node.title);
+  if (typeof node.title === 'string' && 'goodsFeeJpy' in node) node.imageUrl = cover(node.title);
   Object.values(node).forEach(paintCovers);
 })(seed);
 

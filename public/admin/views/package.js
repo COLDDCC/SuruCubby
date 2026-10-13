@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { PACKAGE_BULK_STATUSES, STATUS_LABELS, beijingTime, bindActions, escapeHtml, money, openModal, promptBox, statusLabel, toast } from '/admin/ui.js';
+import { PACKAGE_BULK_STATUSES, STATUS_LABELS, beijingTime, bindActions, escapeHtml, money, openModal, promptBox, statusLabel, toast, yen } from '/admin/ui.js';
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/packages/${id}`);
@@ -55,7 +55,7 @@ export async function render(view, [id]) {
               (i) => `<tr>
               <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
-              <td class="right money">${money(i.goodsFeeFen)}</td>
+              <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="right"><button class="small plain" data-action="itemStatus" data-item="${i.id}" data-status="${i.status}">改状态</button></td>
             </tr>`,
             )

@@ -11,13 +11,13 @@ dashboardRoutes.get('/', async (c) => {
   const goodsUnpaid = await db
     .prepare(
       `SELECT i.customer_id AS customerId, c.nickname, c.qq, i.batch_id AS batchId, b.name AS batchName,
-              COUNT(*) AS count, SUM(i.goods_fee_fen) AS amountFen
+              COUNT(*) AS count, SUM(i.goods_fee_jpy) AS amountJpy
          FROM items i
          JOIN customers c ON c.id = i.customer_id
          JOIN batches b ON b.id = i.batch_id
         WHERE i.goods_paid = 0 AND i.status NOT IN ('cancelled', 'refunded')
         GROUP BY i.customer_id, i.batch_id
-        HAVING SUM(i.goods_fee_fen) > 0
+        HAVING SUM(i.goods_fee_jpy) > 0
         ORDER BY c.nickname, b.id`,
     )
     .all();
@@ -49,7 +49,7 @@ dashboardRoutes.get('/', async (c) => {
 
   const pendingRefunds = await db
     .prepare(
-      `SELECT i.id AS itemId, i.title, i.goods_fee_fen AS goodsFeeFen, i.customer_id AS customerId,
+      `SELECT i.id AS itemId, i.title, i.goods_fee_jpy AS goodsFeeJpy, i.customer_id AS customerId,
               c.nickname, c.qq, b.name AS batchName
          FROM items i
          JOIN customers c ON c.id = i.customer_id

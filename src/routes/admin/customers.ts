@@ -14,8 +14,8 @@ customerRoutes.get('/', async (c) => {
     `SELECT c.id, c.qq, c.nickname, c.token, c.note, c.created_at AS createdAt,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id) AS itemCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
-            (SELECT COALESCE(SUM(i.goods_fee_fen), 0) FROM items i
-              WHERE i.customer_id = c.id AND i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')) AS goodsUnpaidFen,
+            (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i
+              WHERE i.customer_id = c.id AND i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')) AS goodsUnpaidJpy,
             (SELECT COALESCE(SUM(g.intl_fee_fen - COALESCE((SELECT SUM(i.intl_fee_fen) FROM items i WHERE i.weigh_group_id=g.id AND i.intl_paid=1),0)), 0) FROM weigh_groups g
               WHERE g.customer_id = c.id AND g.fee_paid = 0 AND g.intl_fee_fen IS NOT NULL) AS intlUnpaidFen,
             (SELECT COALESCE(SUM(s.fee_fen), 0) FROM shipments s
@@ -64,7 +64,7 @@ customerRoutes.get('/:id', async (c) => {
     .bind(id)
     .first<{ token: string; note: string | null }>();
   const payments = await c.env.DB.prepare(
-    `SELECT id, kind, amount_fen AS amountFen, ref_type AS refType, ref_id AS refId, note, paid_at AS paidAt
+    `SELECT id, kind, currency, amount, ref_type AS refType, ref_id AS refId, note, paid_at AS paidAt
        FROM payments WHERE customer_id = ? ORDER BY id DESC LIMIT 50`,
   )
     .bind(id)

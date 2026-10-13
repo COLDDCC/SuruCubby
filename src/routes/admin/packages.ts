@@ -53,7 +53,7 @@ packageRoutes.get('/:id', async (c) => {
 
   const items = await c.env.DB.prepare(
     `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
-            i.status, i.goods_fee_fen AS goodsFeeFen, i.missing, i.exception_note AS exceptionNote,
+            i.status, i.goods_fee_jpy AS goodsFeeJpy, i.missing, i.exception_note AS exceptionNote,
             i.weigh_group_id AS weighGroupId, i.batch_id AS batchId
        FROM items i
        JOIN customers c ON c.id = i.customer_id

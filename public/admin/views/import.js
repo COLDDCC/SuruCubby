@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { bindActions, escapeHtml, money, toast } from '/admin/ui.js';
+import { bindActions, escapeHtml, toast, yen } from '/admin/ui.js';
 import { collectCellUrls } from '/admin/sheet.js';
 
 const LOCAL_XLSX = '/vendor/xlsx.full.min.js';
@@ -37,29 +37,40 @@ let state = {
   fileName: '',
   fileHash: '',
   preview: null,
+  /** 管理员改过的列：Excel 列序号 → 用途（null 表示这列不用） */
+  columnEdits: {},
+  /** 出预览那一刻的 columnEdits 快照，用来挡住「改完没重新预览就导入」 */
+  previewedEdits: '',
   assignments: new Map(),
   customers: [],
 };
 
 export async function render(view) {
-  state = { sheet: null, fileName: '', fileHash: '', preview: null, assignments: new Map(), customers: [] };
+  state = {
+    sheet: null,
+    fileName: '',
+    fileHash: '',
+    preview: null,
+    columnEdits: {},
+    previewedEdits: '',
+    assignments: new Map(),
+    customers: [],
+  };
   view.innerHTML = `
     <div class="card">
       <h2>导入 Excel</h2>
-      <p class="small muted">一张表 = 一个日本订单。必需：名称、客户名字。数量默认1，每件独立入库。「应付人民币金额」按整行总额拆分；只有日元「价格」时按单价×数量×汇率计算，先核对预览。</p>
+      <p class="small muted">一张表 = 一个日本订单。必需：名称、cn。货款一律按日元记，不折人民币：有「实际价格」就按它算，也可以把某一列指认成「应付日元金额」。国际/国内运费仍然是人民币。</p>
       <input type="file" id="file" accept=".xlsx,.xls,.csv">
       <label for="batchName">批次名</label>
       <input id="batchName" style="width:100%" placeholder="例如 9月20日 第12团">
       <label>日本订单号</label><input id="orderNo">
       <label>日本物流单号（可后补）</label><input id="japanTrackingNo">
-      <label>人民币/日元汇率（没有人民币金额列时必填）</label><input id="exchangeRate" inputmode="decimal" placeholder="例如 0.05"><button id="repreview" class="small plain">更新预览</button>
       <label for="orderedAt">下单日期（可不填）</label>
       <input id="orderedAt" type="date">
       <p id="status" class="small muted"></p>
     </div>
     <div id="preview"></div>`;
 
-  document.getElementById('repreview').onclick=()=>state.sheet && loadPreview(view).catch(e=>toast(e.message,true));
   document.getElementById('file').addEventListener('change', (e) => handleFile(e.target.files[0], view));
 }
 
@@ -90,6 +101,7 @@ async function handleFile(file, view) {
     };
     state.fileName = file.name;
     state.fileHash = hash;
+    state.columnEdits = {};
     const nameInput = document.getElementById('batchName');
     if (!nameInput.value.trim()) nameInput.value = file.name.replace(/\.(xlsx|xls|csv)$/i, '');
     status.textContent = `${wb.SheetNames[0]}：${rows.length - 1} 行`;
@@ -105,14 +117,38 @@ async function loadPreview(view) {
     fileName: state.fileName,
     fileHash: state.fileHash,
     sheet: state.sheet,
-    exchangeRate: Number(document.getElementById('exchangeRate').value)||undefined,
+    columns: state.columnEdits,
   });
   state.preview = preview;
+  state.previewedEdits = JSON.stringify(state.columnEdits);
   if (state.customers.length === 0) {
     const data = await api.get('/api/admin/customers');
     state.customers = data.customers;
   }
   renderPreview(view);
+}
+
+function columnsCard(p) {
+  const options = (current) =>
+    [`<option value="">不使用</option>`,
+      ...p.fields.map(
+        (f) => `<option value="${f.field}" ${current === f.field ? 'selected' : ''}>${escapeHtml(f.label)}</option>`,
+      )].join('');
+  return `<div class="card">
+    <h3>列对应关系</h3>
+    <p class="small muted">程序按表头猜的，猜错了直接在下面改。表头写着「数量」但底下是 1500、4230 这种数，就把这列改成「平时价格」。</p>
+    <div class="scroll-x"><table>
+      <thead><tr><th>Excel 列</th><th>当作</th><th>第一个值</th></tr></thead>
+      <tbody>${p.columns
+        .map(
+          (col) => `<tr class="${col.field ? '' : 'highlight-row'}">
+            <td>${escapeHtml(col.header || `第 ${col.index + 1} 列`)}</td>
+            <td><select data-col="${col.index}">${options(col.field)}</select>${col.manual ? ' <span class="badge">已改</span>' : ''}</td>
+            <td class="small muted">${escapeHtml(String(state.sheet.rows.find((r) => r[col.index] !== null && String(r[col.index]).trim() !== '')?.[col.index] ?? '—')).slice(0, 40)}</td>
+          </tr>`,
+        )
+        .join('')}</tbody></table></div>
+  </div>`;
 }
 
 function renderPreview(view) {
@@ -134,16 +170,17 @@ function renderPreview(view) {
           </div>`
         : ''
     }
+    ${p.columns && p.columns.length ? columnsCard(p) : ''}
     <div class="card">
       <h3>预览</h3>
-      <p class="small">共 ${p.totals.rows} 行 · ${p.totals.customers} 位客户 · 合计 <span class="money">${money(
-        p.totals.amountFen,
+      <p class="small">共 ${p.totals.rows} 行 · ${p.totals.customers} 位客户 · 货款合计 <span class="money">${yen(
+        p.totals.amountJpy,
       )}</span>${unmatched.length ? ` · <span class="unpaid">${unmatched.length} 个名字要先处理</span>` : ''}</p>
       ${
         p.errors.length
           ? `<div class="card" style="border-color:var(--danger)">
-              <strong class="unpaid">这些行有问题，必须先在 Excel 里改好：</strong>
-              <ul class="small">${p.errors.map((e) => `<li>第 ${e.rowNo} 行：${escapeHtml(e.reason)}</li>`).join('')}</ul>
+              <strong class="unpaid">这些行有问题，改好之前不能导入：</strong>
+              <ul class="small">${p.errors.map((e) => `<li>${e.rowNo ? `第 ${e.rowNo} 行：` : ''}${escapeHtml(e.reason)}</li>`).join('')}</ul>
             </div>`
           : ''
       }
@@ -163,7 +200,7 @@ function renderPreview(view) {
             return `<tr class="${matched ? '' : 'highlight-row'}">
               <td>${escapeHtml(g.cn)}</td>
               <td class="right">${g.count}</td>
-              <td class="right money">${money(g.subtotalFen)}</td>
+              <td class="right money">${yen(g.subtotalJpy)}</td>
               <td>${
                 g.customer
                   ? `${escapeHtml(g.customer.nickname)}<div class="small muted">${escapeHtml(g.customer.qq)}</div>`
@@ -193,6 +230,17 @@ function renderPreview(view) {
       </div>
     </div>`;
 
+  box.querySelectorAll('[data-col]').forEach((select) => {
+    select.onchange = () => {
+      const at = select.dataset.col;
+      const value = select.value;
+      if (value === (state.columnEdits[at] ?? '')) return;
+      if (value === '') state.columnEdits[at] = null;
+      else state.columnEdits[at] = value;
+      loadPreview(view).catch((e) => toast(e.message, true));
+    };
+  });
+
   bindActions(box, {
     use: ({ cn }) => {
       const select = box.querySelector(`[data-pick="${CSS.escape(cn)}"]`);
@@ -216,13 +264,17 @@ function renderPreview(view) {
     commit: async (dataset, el) => {
       const confirmDup = document.getElementById('confirmDup');
       if (p.duplicate && !confirmDup?.checked) return toast('请先勾选「我确认要重复导入」', true);
+      // 预览之后又改过列的对应关系，屏幕上核对过的金额已经不是要导入的那批了
+      if (JSON.stringify(state.columnEdits) !== state.previewedEdits) {
+        return toast('列的对应关系改过了，等预览刷新完再导入', true);
+      }
       el.disabled = true;
       try {
         const result = await api.post('/api/admin/import/commit', {
           fileName: state.fileName,
           fileHash: state.fileHash,
           sheet: state.sheet,
-    exchangeRate: Number(document.getElementById('exchangeRate').value)||undefined,
+          columns: state.columnEdits,
           batchName: document.getElementById('batchName').value.trim(),
           orderedAt: document.getElementById('orderedAt').value || null,
           orderNo: document.getElementById('orderNo').value, japanTrackingNo:document.getElementById('japanTrackingNo').value,

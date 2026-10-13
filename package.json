@@ -9,8 +9,8 @@
     "db:remote": "wrangler d1 migrations apply surucubby --remote",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs test/xlsx.test.mjs",
-    "test:e2e": "node --test test/e2e.test.mjs",
-    "seed": "node scripts/seed-demo.mjs",
+    "test:e2e": "node scripts/sandbox.mjs --state .wrangler/e2e --port 8791 -- node --test test/e2e.test.mjs",
+    "seed": "node scripts/sandbox.mjs --state .wrangler/demo --port 8790 --keep -- node scripts/seed-demo.mjs",
     "preview": "node scripts/build-preview.mjs"
   },
   "repository": {

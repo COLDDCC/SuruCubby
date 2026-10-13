@@ -49,8 +49,10 @@ test('真 .xlsx：IMAGE() 公式和超链接里的图片地址都能捞出来', 
   assert.equal(parsed.rows[0].title, '手办A');
   assert.equal(parsed.rows[0].imageUrl, 'https://img.example.com/a.png');
   assert.equal(parsed.rows[0].productUrl, 'https://www.suruga-ya.jp/product/detail/1');
-  assert.equal(parsed.rows[0].goodsFeeFen, 9850);
+  assert.equal(parsed.rows[0].goodsFeeJpy, 1800);
   assert.equal(parsed.rows[0].actualPriceJpy, 1800);
+  // 货款只认日元：表里那列「应付人民币金额」不再参与算钱，免得拿旧汇率折出来的数当欠款
+  assert.equal(parsed.columns.find((col) => col.header === '应付人民币金额').field, null);
   assert.equal(parsed.rows[1].imageUrl, 'https://img.example.com/b.png');
   assert.equal(parsed.rows[1].productUrl, 'https://www.suruga-ya.jp/product/detail/2');
 });

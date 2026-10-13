@@ -47,21 +47,21 @@
   function recount(detail) {
     if (!detail) return;
     const s = detail.summary;
-    s.goodsUnpaidFen = detail.items
+    s.goodsUnpaidJpy = detail.items
       .filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
-      .reduce((sum, i) => sum + i.goodsFeeFen, 0);
+      .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
     s.intlUnpaidFen = detail.weighGroups
       .filter((g) => !g.feePaid)
       .reduce((sum, g) => sum + (g.intlFeeFen || 0), 0);
     s.domesticUnpaidFen = detail.shipments
       .filter((sh) => !sh.feePaid)
       .reduce((sum, sh) => sum + sh.feeFen, 0);
-    s.totalUnpaidFen = s.goodsUnpaidFen + s.intlUnpaidFen + s.domesticUnpaidFen;
+    s.freightUnpaidFen = s.intlUnpaidFen + s.domesticUnpaidFen;
     s.stockCount = detail.items.filter((i) => i.status === 'cn_stock').length;
     for (const b of detail.batches) {
-      b.unpaidFen = detail.items
+      b.unpaidJpy = detail.items
         .filter((i) => i.batchId === b.batchId && !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
-        .reduce((sum, i) => sum + i.goodsFeeFen, 0);
+        .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
     }
   }
 
@@ -210,15 +210,15 @@
     if (path === '/api/admin/payments' && method === 'POST') {
       const dash = state['/api/admin/dashboard'];
       const detail = customerDetail(body.customerId);
-      let amountFen = 0;
-      if (body.kind === 'goods') {
+      let amount = 0; let currency = 'CNY';
+      if (body.kind === 'goods') { currency = 'JPY';
         const ids = body.itemIds ?? null;
         if (detail) {
           for (const item of detail.items) {
             const hit = ids ? ids.includes(item.id) : item.batchId === body.batchId;
             if (hit && !item.goodsPaid && item.status !== 'cancelled' && item.status !== 'refunded') {
               item.goodsPaid = 1;
-              amountFen += item.goodsFeeFen;
+              amount += item.goodsFeeJpy;
             }
           }
         }
@@ -229,14 +229,14 @@
         const group = detail?.weighGroups.find((g) => g.id === body.weighGroupId);
         if (group) {
           group.feePaid = 1;
-          amountFen = group.intlFeeFen;
+          amount = group.intlFeeFen;
         }
         dash.intlUnpaid = dash.intlUnpaid.filter((r) => r.weighGroupId !== body.weighGroupId);
       } else {
         const shipment = detail?.shipments.find((s) => s.id === body.shipmentId);
         if (shipment) {
           shipment.feePaid = 1;
-          amountFen = shipment.feeFen;
+          amount = shipment.feeFen;
         }
         dash.domesticUnpaid = dash.domesticUnpaid.filter((r) => r.shipmentId !== body.shipmentId);
         const list = state['/api/admin/shipments'].shipments.find((s) => s.id === body.shipmentId);
@@ -249,11 +249,12 @@
         nickname: detail?.customer.nickname ?? '演示客户',
         qq: detail?.customer.qq ?? '',
         kind: body.kind,
-        amountFen,
+        currency,
+        amount,
         note: null,
         paidAt: new Date().toISOString(),
       });
-      return json({ id: 1, amountFen });
+      return json({ id: 1, amount });
     }
 
     if (path.startsWith('/api/admin/items/') && method === 'PATCH') {

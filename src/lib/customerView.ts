@@ -21,7 +21,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
     .prepare(
       `SELECT i.id, i.title, i.image_url AS imageUrl, i.product_url AS productUrl,
               i.list_price_jpy AS listPriceJpy, i.actual_price_jpy AS actualPriceJpy,
-              i.goods_fee_fen AS goodsFeeFen, i.status, i.goods_paid AS goodsPaid,
+              i.goods_fee_jpy AS goodsFeeJpy, i.status, i.goods_paid AS goodsPaid,
               i.missing, i.exception_note AS exceptionNote, i.batch_id AS batchId,
               b.name AS batchName, i.package_id AS packageId, p.name AS packageName,
               i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt,
@@ -84,9 +84,9 @@ export async function buildCustomerView(env: Env, customerId: number) {
   const batches = await db
     .prepare(
       `SELECT i.batch_id AS batchId, b.name AS batchName, COUNT(*) AS count,
-              SUM(i.goods_fee_fen) AS amountFen,
+              SUM(i.goods_fee_jpy) AS amountJpy,
               SUM(CASE WHEN i.goods_paid = 0 AND i.status NOT IN ('cancelled','refunded')
-                       THEN i.goods_fee_fen ELSE 0 END) AS unpaidFen
+                       THEN i.goods_fee_jpy ELSE 0 END) AS unpaidJpy
          FROM items i
          JOIN batches b ON b.id = i.batch_id
         WHERE i.customer_id = ?
@@ -94,17 +94,17 @@ export async function buildCustomerView(env: Env, customerId: number) {
         ORDER BY i.batch_id DESC`,
     )
     .bind(customerId)
-    .all<{ batchId: number; batchName: string; count: number; amountFen: number; unpaidFen: number }>();
+    .all<{ batchId: number; batchName: string; count: number; amountJpy: number; unpaidJpy: number }>();
 
   const itemRows = items.results as Array<{
     status: string;
     goodsPaid: number;
-    goodsFeeFen: number;
+    goodsFeeJpy: number;
     weighGroupId: number | null;
   }>;
-  const goodsUnpaidFen = itemRows
+  const goodsUnpaidJpy = itemRows
     .filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
-    .reduce((sum, i) => sum + i.goodsFeeFen, 0);
+    .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
   const unitFees=await db.prepare(`SELECT COALESCE(SUM(intl_fee_fen),0) AS n FROM items WHERE customer_id=? AND intl_paid=0 AND intl_fee_fen IS NOT NULL AND status NOT IN ('cancelled','refunded')`).bind(customerId).first<{n:number}>();
   const intlUnpaidFen=(unitFees?.n??0)+weighGroups.results.filter(g=>!g.feePaid && !(items.results as any[]).some(i=>i.weighGroupId===g.id && i.intlFeeFen!==null)).reduce((s,g)=>s+(g.intlFeeFen??0),0);
   const shipmentRows = shipments.results as Array<{ feePaid: number; feeFen: number }>;
@@ -137,10 +137,11 @@ export async function buildCustomerView(env: Env, customerId: number) {
     addresses: addresses.results, requests: requests.results,
     customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, createdAt: customer.createdAt },
     summary: {
-      goodsUnpaidFen,
+      goodsUnpaidJpy,
       intlUnpaidFen,
       domesticUnpaidFen,
-      totalUnpaidFen: goodsUnpaidFen + intlUnpaidFen + domesticUnpaidFen,
+      // 货款是日元、运费是人民币，汇率随时在变，两者不能加成一个数
+      freightUnpaidFen: intlUnpaidFen + domesticUnpaidFen,
       stockCount,
       itemCount: itemRows.length,
     },

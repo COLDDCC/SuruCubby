@@ -11,6 +11,7 @@ import {
   promptBox,
   statusLabel,
   toast,
+  yen,
 } from '/admin/ui.js';
 
 export async function render(view, [id]) {
@@ -30,11 +31,12 @@ export async function render(view, [id]) {
         </div>
       </div>
       <div class="grid" style="margin-top:12px">
-        <div class="stat"><div class="label">货款待付</div><div class="value money">${money(s.goodsUnpaidFen)}</div></div>
+        <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
         <div class="stat"><div class="label">国际运费待付</div><div class="value money">${money(s.intlUnpaidFen)}</div></div>
         <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
-        <div class="stat big"><div class="label">合计待付</div><div class="value money">${money(s.totalUnpaidFen)}</div></div>
+        <div class="stat big"><div class="label">运费待付</div><div class="value money">${money(s.freightUnpaidFen)}</div></div>
       </div>
+      <p class="small muted">货款按日元记，客户付款当天按汇率折成人民币；运费是人民币，两者不合并算总数。</p>
       <p class="small muted">别名：${data.aliases.map((a) => escapeHtml(a)).join('、') || '无'}
         <button class="small plain" data-action="addAlias">加别名</button></p>
     </div>
@@ -48,12 +50,12 @@ export async function render(view, [id]) {
                 (b) => `<div class="list-row">
           <div class="main">
             <a href="#/batches/${b.batchId}">${escapeHtml(b.batchName)}</a>
-            <div class="small muted">${b.count} 件 · 合计 ${money(b.amountFen)}</div>
+            <div class="small muted">${b.count} 件 · 合计 ${yen(b.amountJpy)}</div>
           </div>
           <div class="side">
-            <span class="${b.unpaidFen ? 'unpaid' : 'paid'} money">${b.unpaidFen ? `未付 ${money(b.unpaidFen)}` : '已付清'}</span>
+            <span class="${b.unpaidJpy ? 'unpaid' : 'paid'} money">${b.unpaidJpy ? `未付 ${yen(b.unpaidJpy)}` : '已付清'}</span>
             ${
-              b.unpaidFen
+              b.unpaidJpy
                 ? `<button class="small" data-action="payBatch" data-batch="${b.batchId}">全部已收</button>
                    <button class="small plain" data-action="paySome" data-batch="${b.batchId}">收部分</button>`
                 : ''
@@ -146,7 +148,7 @@ export async function render(view, [id]) {
             <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
             <td class="small muted">${escapeHtml(i.batchName)}</td>
             <td class="right small">${jpy(i.actualPriceJpy)}</td>
-            <td class="right money">${money(i.goodsFeeFen)}</td>
+            <td class="right money">${yen(i.goodsFeeJpy)}</td>
             <td class="small">${escapeHtml(statusLabel(i.status))}</td>
             <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>
           </tr>`,
@@ -163,7 +165,7 @@ export async function render(view, [id]) {
                 (p) => `<tr>
               <td class="small muted" style="white-space:nowrap">${beijingTime(p.paidAt)}</td>
               <td class="small">${escapeHtml(p.kind)}</td>
-              <td class="right money">${money(p.amountFen)}</td>
+              <td class="right money">${p.currency === 'JPY' ? yen(p.amount) : money(p.amount)}</td>
               <td class="right"><button class="small plain" data-action="revoke" data-id="${p.id}">撤销</button></td>
             </tr>`,
               )
@@ -224,7 +226,7 @@ export async function render(view, [id]) {
               (i) => `<label class="row" style="margin:6px 0">
             <input type="checkbox" name="pick" value="${i.id}" checked>
             <span>${escapeHtml(i.title)}</span>
-            <span class="money small muted">${money(i.goodsFeeFen)}</span></label>`,
+            <span class="money small muted">${yen(i.goodsFeeJpy)}</span></label>`,
             )
             .join('')}
           <div class="row" style="justify-content:flex-end;margin-top:12px">

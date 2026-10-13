@@ -58,7 +58,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
   const items = await c.env.DB.prepare(
     `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
             i.product_url AS productUrl, i.status, i.missing, i.exception_note AS exceptionNote,
-            i.weigh_group_id AS weighGroupId, i.goods_fee_fen AS goodsFeeFen, i.weight_g AS weightG
+            i.weigh_group_id AS weighGroupId, i.goods_fee_jpy AS goodsFeeJpy, i.weight_g AS weightG
        FROM items i
        JOIN customers c ON c.id = i.customer_id
       WHERE i.package_id = ? AND i.status NOT IN ('cancelled', 'refunded')
@@ -77,7 +77,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
       missing: number;
       exceptionNote: string | null;
       weighGroupId: number | null;
-      goodsFeeFen: number;
+      goodsFeeJpy: number;
     }>();
 
   const groups = await c.env.DB.prepare(

@@ -5,12 +5,14 @@
 <style>
   :root {
     --ground: #eef1f5;
-    --panel: #ffffff;
+    --panel: #fdfdfc;
     --ink: #1a1e25;
     --muted: #68727f;
     --line: #dde2ea;
-    --accent: #2f6fed;
-    --accent-soft: #e6edfc;
+    --accent: #0ea5e9;
+    --accent-ink: #0a6f96;
+    --accent-soft: #e0f2fe;
+    --on-accent: #0a2e42;
     --warn: #a4691a;
     --warn-soft: #fbf0d9;
     --bad: #c8382f;
@@ -25,8 +27,9 @@
       --ink: #e7eaee;
       --muted: #98a2ae;
       --line: #2c323b;
-      --accent: #6d9bff;
-      --accent-soft: #1d2a44;
+      --accent: #0ea5e9;
+      --accent-ink: #7dd3fc;
+      --accent-soft: #0b2f42;
       --warn: #d8a748;
       --warn-soft: #33290f;
       --bad: #ef6a60;
@@ -41,8 +44,9 @@
     --ink: #e7eaee;
     --muted: #98a2ae;
     --line: #2c323b;
-    --accent: #6d9bff;
-    --accent-soft: #1d2a44;
+    --accent: #0ea5e9;
+    --accent-ink: #7dd3fc;
+    --accent-soft: #0b2f42;
     --warn: #d8a748;
     --warn-soft: #33290f;
     --bad: #ef6a60;
@@ -81,7 +85,7 @@
     font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--muted);
     padding: 7px 15px; border-radius: 9px; cursor: pointer; white-space: nowrap;
   }
-  .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
   .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .stage { display: grid; grid-template-columns: minmax(0, 375px) minmax(0, 1fr); gap: 28px; align-items: start; }
@@ -108,7 +112,7 @@
     font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 8px; cursor: pointer;
     border: 1px solid var(--line); background: var(--panel); color: var(--muted);
   }
-  .switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .switch button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
 
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
   .drop {
@@ -134,7 +138,7 @@
           font-family: 'IBM Plex Mono', ui-monospace, monospace; font-weight: 600; }
   .hint { font-size: 13px; color: var(--muted); margin-top: 14px; }
   code { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: .92em;
-         background: var(--accent-soft); color: var(--accent); padding: 1px 5px; border-radius: 5px; }
+         background: var(--accent-soft); color: var(--accent-ink); padding: 1px 5px; border-radius: 5px; }
 </style>
 
 <div class="wrap">
@@ -287,7 +291,8 @@
   const FIELDS = [
     ['title', '名称', true],
     ['cn', 'cn（归属客户）', true],
-    ['goodsFeeFen', '应付人民币金额', true],
+    ['goodsFeeJpy', '应付日元金额', false],
+    ['quantity', '数量', false],
     ['imageUrl', '图片', false],
     ['productUrl', '商品链接', false],
     ['listPriceJpy', '平时价格', false],
@@ -309,6 +314,7 @@
   fileInput.onchange = () => fileInput.files[0] && check(fileInput.files[0]);
 
   const money = (fen) => `¥${Math.floor(fen / 100)}.${String(Math.abs(fen % 100)).padStart(2, '0')}`;
+  const yen = (jpy) => `${Number(jpy||0).toLocaleString('en-US')}円`;
   const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   async function check(file) {
@@ -337,14 +343,14 @@
       const imageCol = map.index.imageUrl;
       const fromFormula = imageCol === undefined ? 0 : urls.filter((line) => line[imageCol]).length;
       const withLink = parsed.rows.filter((r) => r.productUrl).length;
-      const total = parsed.rows.reduce((sum, r) => sum + r.goodsFeeFen, 0);
+      const total = parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0);
 
       result.innerHTML = `
         <div class="kv" style="margin-top:20px">
           <div>工作表<b>${esc(wb.SheetNames[0])}</b></div>
           <div>可导入<b>${parsed.rows.length} 件</b></div>
           <div>客户<b>${groups.length} 位</b></div>
-          <div>合计<b>${money(total)}</b></div>
+          <div>货款合计<b>${yen(total)}</b></div>
           <div>认出封面<b>${withImage} / ${parsed.rows.length}</b></div>
         </div>
         ${fromFormula ? `<p class="ok" style="font-size:13px;margin:0 0 14px">
@@ -377,7 +383,7 @@
             <td class="num dim">${r.rowNo}</td>
             <td>${esc(r.title)}</td>
             <td>${esc(r.cn)}</td>
-            <td class="num">${money(r.goodsFeeFen)}</td>
+            <td class="num">${yen(r.goodsFeeJpy)}</td>
             <td class="num dim">${r.actualPriceJpy === null ? '—' : '¥' + r.actualPriceJpy.toLocaleString()}</td>
             <td>${r.imageUrl ? '<span class="ok">✓</span>' : '<span class="dim">—</span>'}</td>
             <td>${r.productUrl ? '<span class="ok">✓</span>' : '<span class="dim">—</span>'}</td>
@@ -387,7 +393,7 @@
         <div class="scroll" style="margin-top:16px"><table>
           <thead><tr><th>Excel 里的名字</th><th class="num">件数</th><th class="num">小计</th></tr></thead>
           <tbody>${groups.map((g) => `<tr>
-            <td>${esc(g.cn)}</td><td class="num">${g.count}</td><td class="num">${money(g.subtotalFen)}</td>
+            <td>${esc(g.cn)}</td><td class="num">${g.count}</td><td class="num">${yen(g.subtotalJpy)}</td>
           </tr>`).join('')}</tbody>
         </table></div>`;
     } catch (err) {

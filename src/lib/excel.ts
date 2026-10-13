@@ -1,8 +1,11 @@
 /**
  * Excel 行 → 物品。前端用 SheetJS 解析成 { headers, rows }，映射与校验都放在这里，
  * 方便单元测试，也保证预览与真正导入用的是同一套规则。
+ *
+ * 钱的口径：货款一律记日元（円），不按汇率折成人民币——汇率波动由客户付款时自己承担，
+ * 群主预先折算只会在结算时吃差价。人民币只出现在国际运费和国内运费上。
  */
-import { toFen, toJpy } from './money.ts';
+import { toJpy } from "./money.ts";
 
 export type Cell = string | number | boolean | null | undefined;
 
@@ -17,6 +20,16 @@ export interface RawSheet {
   urls?: (string | null)[][];
 }
 
+export type FieldKey =
+  | "title"
+  | "imageUrl"
+  | "productUrl"
+  | "listPriceJpy"
+  | "actualPriceJpy"
+  | "goodsFeeJpy"
+  | "quantity"
+  | "cn";
+
 export interface ParsedRow {
   rowNo: number;
   title: string;
@@ -25,13 +38,21 @@ export interface ParsedRow {
   listPriceJpy: number | null;
   actualPriceJpy: number | null;
   cn: string;
-  goodsFeeFen: number;
-  quantity?: number;
+  /** 这一件应付的货款，单位：円 */
+  goodsFeeJpy: number;
 }
 
 export interface SkippedRow {
   rowNo: number;
   reason: string;
+}
+
+export interface ColumnInfo {
+  index: number;
+  header: string;
+  field: FieldKey | null;
+  /** 这一列由管理员手动指认过，不再自作主张 */
+  manual: boolean;
 }
 
 export interface ParseResult {
@@ -40,82 +61,186 @@ export interface ParseResult {
   /** 阻止导入的问题行（例如金额看不懂） */
   errors: SkippedRow[];
   missingColumns: string[];
+  columns: ColumnInfo[];
 }
 
 interface ColumnSpec {
-  field: keyof ParsedRow;
+  field: FieldKey;
   label: string;
   required: boolean;
   aliases: string[];
 }
 
 const COLUMNS: ColumnSpec[] = [
-  {field:'quantity',label:'数量',required:false,aliases:['数量','件数','quantity']},
-  { field: 'title', label: '名称', required: true, aliases: ['名称', '商品名称', '品名', '商品名'] },
-  { field: 'imageUrl', label: '图片', required: false, aliases: ['图片', '图片链接', '封面', '图'] },
   {
-    field: 'productUrl',
-    label: '商品链接',
+    field: "goodsFeeJpy",
+    label: "应付日元金额",
     required: false,
-    aliases: ['商品链接', '链接', '商品url', 'url', '地址'],
+    // 故意不收「金额 / 小计 / 应付人民币金额」这类写法：人民币金额列不能当货款用
+    aliases: [
+      "应付日元金额",
+      "日元金额",
+      "应付日元",
+      "应付円",
+      "円金额",
+      "应付金额",
+      "円",
+    ],
   },
   {
-    field: 'listPriceJpy',
-    label: '平时价格',
+    field: "listPriceJpy",
+    label: "平时价格",
     required: false,
-    aliases: ['平时价格', '平时价', '参考价格', '参考价'],
+    aliases: ["平时价格", "平时价", "原价", "参考价格", "参考价", "定价"],
   },
   {
-    field: 'actualPriceJpy',
-    label: '实际价格',
+    field: "actualPriceJpy",
+    label: "实际价格",
     required: false,
-    aliases: ['实际价格', '实际价', '成交价格', '成交价', '价格', '单价'],
+    aliases: [
+      "实际价格",
+      "实际价",
+      "成交价格",
+      "成交价",
+      "实付",
+      "价格",
+      "单价",
+    ],
   },
-  { field: 'cn', label: 'cn', required: true, aliases: ['cn', '客户', '客户名字', '归属', '归属人', '买家'] },
   {
-    field: 'goodsFeeFen',
-    label: '应付人民币金额',
+    field: "quantity",
+    label: "数量",
     required: false,
-    aliases: ['应付人民币金额', '应付人民币', '应付金额', '人民币金额', '人民币', '应付'],
+    aliases: ["数量", "件数", "个数", "quantity", "qty"],
+  },
+  {
+    field: "title",
+    label: "名称",
+    required: true,
+    aliases: ["名称", "商品名称", "品名", "商品名"],
+  },
+  {
+    field: "imageUrl",
+    label: "图片",
+    required: false,
+    aliases: ["图片", "图片链接", "封面", "图"],
+  },
+  {
+    field: "productUrl",
+    label: "商品链接",
+    required: false,
+    aliases: ["商品链接", "链接", "商品url", "url", "地址"],
+  },
+  {
+    field: "cn",
+    label: "cn",
+    required: true,
+    aliases: ["cn", "客户", "客户名字", "归属", "归属人", "买家"],
   },
 ];
 
+/** 给前端做「Excel 列 → 用途」下拉用，顺序与 label 保持一致。 */
+export const FIELD_LABELS: Array<{ field: FieldKey; label: string }> =
+  COLUMNS.map((c) => ({
+    field: c.field,
+    label: c.label,
+  }));
+
+const SPEC_BY_FIELD = new Map(COLUMNS.map((c) => [c.field, c]));
+
 export function normalizeHeader(raw: Cell): string {
-  if (raw === null || raw === undefined) return '';
+  if (raw === null || raw === undefined) return "";
   return String(raw)
     .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-    .replace(/[\s　]/g, '')
-    .replace(/[（）()：:\-_/\\]/g, '')
+    .replace(/[\s　]/g, "")
+    .replace(/[（）()：:\-_/\\]/g, "")
     .toLowerCase();
 }
 
 export interface HeaderMap {
-  index: Partial<Record<keyof ParsedRow, number>>;
+  index: Partial<Record<FieldKey, number>>;
   missingColumns: string[];
+  columns: ColumnInfo[];
 }
 
-/** 按表头文字定位列，不按列序号。 */
-export function mapHeaders(headers: Cell[]): HeaderMap {
+/**
+ * 按表头文字定位列，不按列序号。
+ * edits 是管理员在预览里改过的列：key 是 Excel 列序号，value 是用途，null 表示「这列不用」。
+ * 没出现在 edits 里的列仍然按表头自动认，所以「管理员点过」和「程序猜的」能区分开。
+ */
+export function mapHeaders(
+  headers: Cell[],
+  edits?: Record<string, FieldKey | null>,
+): HeaderMap {
   const normalized = headers.map(normalizeHeader);
-  const index: Partial<Record<keyof ParsedRow, number>> = {};
+  const headerText = headers.map((h) => text(h));
+  const fieldAt = new Map<number, FieldKey>();
+  const manual = new Set<number>();
+
+  const claim = (field: FieldKey, at: number, byHand: boolean) => {
+    for (const [otherIndex, otherField] of fieldAt) {
+      if (otherField === field && otherIndex !== at) fieldAt.delete(otherIndex);
+    }
+    fieldAt.set(at, field);
+    if (byHand) manual.add(at);
+  };
+
+  for (const [raw, field] of Object.entries(edits ?? {})) {
+    const at = Number(raw);
+    if (!Number.isInteger(at) || at < 0 || at >= headers.length) continue;
+    if (field === null || field === undefined) {
+      fieldAt.delete(at);
+      manual.add(at);
+      continue;
+    }
+    if (!SPEC_BY_FIELD.has(field) || normalized[at] === "") continue;
+    claim(field, at, true);
+  }
+
+  const claimable = (i: number) =>
+    normalized[i] !== "" && !fieldAt.has(i) && !manual.has(i);
+  const unfilled = (col: ColumnSpec) =>
+    ![...fieldAt.values()].includes(col.field);
+
+  // 分全局两轮：先让每个字段抢「表头整词等于别名」的列，剩下的才做包含匹配。
+  // 不能一个字段一轮抢到底，否则「实际价格（円）」会被排在前面的短别名「円」截走。
+  for (const col of COLUMNS) {
+    if (!unfilled(col)) continue;
+    const targets = col.aliases.map(normalizeHeader);
+    const found = normalized.findIndex(
+      (h, i) => claimable(i) && targets.includes(h),
+    );
+    if (found >= 0) claim(col.field, found, false);
+  }
+
+  for (const col of COLUMNS) {
+    if (!unfilled(col)) continue;
+    // 单字别名不做包含匹配：「平时价格（円）」含「円」，按原价列当货款会让客户多付
+    const loose = col.aliases.map(normalizeHeader).filter((a) => a.length >= 2);
+    // 退一步做包含匹配，容忍「应付人民币金额(元)」这类带后缀的表头
+    const found = normalized.findIndex(
+      (h, i) => claimable(i) && loose.some((a) => h.includes(a)),
+    );
+    if (found >= 0) claim(col.field, found, false);
+  }
+
+  const index: Partial<Record<FieldKey, number>> = {};
+  for (const [at, field] of fieldAt) index[field] = at;
+
   const missingColumns: string[] = [];
   for (const col of COLUMNS) {
-    let found = -1;
-    for (const alias of col.aliases) {
-      const target = normalizeHeader(alias);
-      found = normalized.indexOf(target);
-      if (found >= 0) break;
-    }
-    if (found < 0) {
-      // 退一步做包含匹配，容忍「应付人民币金额(元)」这类带后缀的表头
-      found = normalized.findIndex(
-        (h) => h !== '' && col.aliases.some((a) => h.includes(normalizeHeader(a))),
-      );
-    }
-    if (found >= 0) index[col.field] = found;
-    else if (col.required) missingColumns.push(col.label);
+    if (col.required && index[col.field] === undefined)
+      missingColumns.push(col.label);
   }
-  return { index, missingColumns };
+
+  const columns: ColumnInfo[] = headerText.map((header, i) => ({
+    index: i,
+    header,
+    field: fieldAt.get(i) ?? null,
+    manual: manual.has(i),
+  }));
+
+  return { index, missingColumns, columns };
 }
 
 const URL_IN_FORMULA =
@@ -130,9 +255,9 @@ const URL_IN_FORMULA =
 export function extractUrlFromText(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   const value = String(raw).trim();
-  if (value === '') return null;
+  if (value === "") return null;
   if (/^https?:\/\//i.test(value)) return value;
-  if (value.startsWith('=')) {
+  if (value.startsWith("=")) {
     const match = URL_IN_FORMULA.exec(value);
     if (match && /^https?:\/\//i.test(match[1])) return match[1];
   }
@@ -140,92 +265,177 @@ export function extractUrlFromText(raw: unknown): string | null {
 }
 
 function text(cell: Cell): string {
-  if (cell === null || cell === undefined) return '';
+  if (cell === null || cell === undefined) return "";
   return String(cell).trim();
 }
 
-function optionalText(cell: Cell): string | null {
-  const t = text(cell);
-  return t === '' ? null : t;
+/**
+ * 「数量」列里全是大于 10 的整数时，基本可以断定这列装的是价格（骏河屋的表就长这样：
+ * 表头写着数量，底下是 210、4230 这样的平时价格）。这时候绝不能按 210 件入库，
+ * 整批拦下来让管理员去指认列的用途。管理员手动指定过这一列的话就不再猜。
+ */
+function quantityLooksLikePrice(rows: Cell[][], at: number): boolean {
+  const values: number[] = [];
+  for (const row of rows) {
+    const cell = row[at];
+    if (cell === null || cell === undefined || text(cell) === "") continue;
+    const n = toJpy(cell);
+    if (n === null || !Number.isSafeInteger(n)) return false;
+    values.push(n);
+  }
+  if (values.length < 2) return false;
+  return values.every((v) => v > 10);
+}
+
+export interface ParseOptions {
+  /** 管理员改过的列：key 是 Excel 列序号，value 是用途，null 表示这列不用 */
+  columns?: Record<string, FieldKey | null>;
 }
 
 /**
  * 解析整张表。rowNo 为 Excel 中的行号（表头算第 1 行，数据从第 2 行开始）。
  */
-export function parseSheet(sheet: RawSheet, exchangeRate?: number): ParseResult {
-  const { index, missingColumns } = mapHeaders(sheet.headers);
+export function parseSheet(
+  sheet: RawSheet,
+  options: ParseOptions = {},
+): ParseResult {
+  const { index, missingColumns, columns } = mapHeaders(
+    sheet.headers,
+    options.columns,
+  );
   if (missingColumns.length > 0) {
-    return { rows: [], skipped: [], errors: [], missingColumns };
+    return { rows: [], skipped: [], errors: [], missingColumns, columns };
   }
+
+  if (
+    index.quantity !== undefined &&
+    !columns.find((c) => c.index === index.quantity)?.manual &&
+    quantityLooksLikePrice(sheet.rows, index.quantity)
+  ) {
+    const header =
+      columns.find((c) => c.index === index.quantity)?.header ?? "数量";
+    return {
+      rows: [],
+      skipped: [],
+      errors: [
+        {
+          rowNo: 0,
+          reason:
+            `「${header}」列里的数全都大于 10，不像是数量，更像是价格。` +
+            `请在上面的「列对应关系」里把这列改成「平时价格」（数量就按 1 件算），或者把 Excel 里的数量填对。`,
+        },
+      ],
+      missingColumns: [],
+      columns,
+    };
+  }
+
   const rows: ParsedRow[] = [];
   const skipped: SkippedRow[] = [];
   const errors: SkippedRow[] = [];
 
   sheet.rows.forEach((row, i) => {
     const rowNo = i + 2;
-    const get = (field: keyof ParsedRow): Cell => {
+    const get = (field: FieldKey): Cell => {
       const at = index[field];
       return at === undefined ? null : row[at];
     };
     /** 链接类的列：单元格文本 → 公式 / 超链接里的地址 */
-    const getUrl = (field: keyof ParsedRow): string | null => {
+    const getUrl = (field: FieldKey): string | null => {
       const at = index[field];
       if (at === undefined) return null;
       return extractUrlFromText(row[at]) ?? sheet.urls?.[i]?.[at] ?? null;
     };
-    const isEmptyRow = row.every((cell) => text(cell) === '');
+    const isEmptyRow = row.every((cell) => text(cell) === "");
     if (isEmptyRow) {
-      skipped.push({ rowNo, reason: '空行' });
+      skipped.push({ rowNo, reason: "空行" });
       return;
     }
-    const title = text(get('title'));
-    if (title === '') {
-      skipped.push({ rowNo, reason: '没有「名称」' });
+    const title = text(get("title"));
+    if (title === "") {
+      skipped.push({ rowNo, reason: "没有「名称」" });
       return;
     }
-    const cn = text(get('cn'));
-    if (cn === '') {
-      errors.push({ rowNo, reason: '没有填「cn」（归属客户）' });
+    const cn = text(get("cn"));
+    if (cn === "") {
+      errors.push({ rowNo, reason: "没有填「cn」（归属客户）" });
       return;
     }
-    const quantity = index.quantity === undefined ? 1 : Number(get('quantity'));
-    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000) { errors.push({rowNo,reason:'数量必须为1至1000的整数'}); return; }
-    const rawFee = get('goodsFeeFen');
-    let goodsFeeFen = 0;
-    if (text(rawFee) !== '') {
-      const parsed = toFen(rawFee);
-      if (parsed === null || parsed < 0) {
-        errors.push({ rowNo, reason: `「应付人民币金额」看不懂：${text(rawFee)}` });
+
+    let quantity = 1;
+    if (index.quantity !== undefined) {
+      const raw = get("quantity");
+      if (text(raw) !== "") {
+        const parsed = toJpy(raw);
+        if (
+          parsed === null ||
+          !Number.isSafeInteger(parsed) ||
+          parsed < 1 ||
+          parsed > 1000
+        ) {
+          errors.push({
+            rowNo,
+            reason: `「数量」必须是 1 至 1000 的整数，这一行是：${text(raw)}`,
+          });
+          return;
+        }
+        quantity = parsed;
+      }
+    }
+
+    let goodsFeeJpy: number | null = null;
+    const rawFee = get("goodsFeeJpy");
+    if (index.goodsFeeJpy !== undefined && text(rawFee) !== "") {
+      const parsed = toJpy(rawFee);
+      if (parsed === null || parsed < 0 || !Number.isSafeInteger(parsed)) {
+        errors.push({ rowNo, reason: `日元金额看不懂：${text(rawFee)}` });
         return;
       }
-      goodsFeeFen = parsed;
-    } else if (index.goodsFeeFen === undefined) {
-      const price = toJpy(get('actualPriceJpy'));
-      if (price === null || price < 0 || !exchangeRate || !Number.isFinite(exchangeRate) || exchangeRate <= 0) { errors.push({rowNo,reason:'没有人民币行总额时，必须填写日元单价和人民币/日元汇率'}); return; }
-      goodsFeeFen = toFen(price * quantity * exchangeRate) ?? -1;
-      if (goodsFeeFen < 0) { errors.push({rowNo,reason:'金额超出范围'}); return; }
+      goodsFeeJpy = parsed;
+    } else if (index.goodsFeeJpy === undefined) {
+      const price = toJpy(get("actualPriceJpy"));
+      if (price === null || price < 0) {
+        errors.push({
+          rowNo,
+          reason:
+            "这一行没有日元价格，请填「实际价格」，或把某一列指认成「应付日元金额」",
+        });
+        return;
+      }
+      goodsFeeJpy = price * quantity;
     } else {
-      errors.push({rowNo,reason:'人民币金额不能为空，请填写明确金额（免费物品填0）'}); return;
+      errors.push({ rowNo, reason: "日元金额不能为空，免费物品填 0" });
+      return;
     }
-    for (let unit=0; unit<quantity; unit++) rows.push({
-      rowNo,
-      title,
-      imageUrl: getUrl('imageUrl'),
-      productUrl: getUrl('productUrl'),
-      listPriceJpy: toJpy(get('listPriceJpy')),
-      actualPriceJpy: toJpy(get('actualPriceJpy')),
-      cn,
-      goodsFeeFen: Math.floor(goodsFeeFen/quantity) + (unit < goodsFeeFen%quantity ? 1 : 0),
-    });
+    if (!Number.isSafeInteger(goodsFeeJpy) || goodsFeeJpy > 1_000_000_000) {
+      errors.push({ rowNo, reason: "金额超出范围" });
+      return;
+    }
+
+    for (let unit = 0; unit < quantity; unit++) {
+      rows.push({
+        rowNo,
+        title,
+        imageUrl: getUrl("imageUrl"),
+        productUrl: getUrl("productUrl"),
+        listPriceJpy: toJpy(get("listPriceJpy")),
+        actualPriceJpy: toJpy(get("actualPriceJpy")),
+        cn,
+        // 一行多件时按件拆分，除不尽的零头摊在前几件上，合计与表里填的总额一分不差
+        goodsFeeJpy:
+          Math.floor(goodsFeeJpy / quantity) +
+          (unit < goodsFeeJpy % quantity ? 1 : 0),
+      });
+    }
   });
 
-  return { rows, skipped, errors, missingColumns };
+  return { rows, skipped, errors, missingColumns, columns };
 }
 
 export interface CnGroup {
   cn: string;
   count: number;
-  subtotalFen: number;
+  subtotalJpy: number;
   rowNos: number[];
 }
 
@@ -233,11 +443,18 @@ export interface CnGroup {
 export function groupByCn(rows: ParsedRow[]): CnGroup[] {
   const map = new Map<string, CnGroup>();
   for (const row of rows) {
-    const g = map.get(row.cn) ?? { cn: row.cn, count: 0, subtotalFen: 0, rowNos: [] };
+    const g = map.get(row.cn) ?? {
+      cn: row.cn,
+      count: 0,
+      subtotalJpy: 0,
+      rowNos: [],
+    };
     g.count += 1;
-    g.subtotalFen += row.goodsFeeFen;
+    g.subtotalJpy += row.goodsFeeJpy;
     g.rowNos.push(row.rowNo);
     map.set(row.cn, g);
   }
-  return [...map.values()].sort((a, b) => a.cn.localeCompare(b.cn, 'zh-Hans-CN'));
+  return [...map.values()].sort((a, b) =>
+    a.cn.localeCompare(b.cn, "zh-Hans-CN"),
+  );
 }

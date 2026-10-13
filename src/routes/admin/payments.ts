@@ -9,7 +9,7 @@ paymentRoutes.get('/', async (c) => {
   const customerId = c.req.query('customerId');
   const rows = customerId
     ? await c.env.DB.prepare(
-        `SELECT p.id, p.customer_id AS customerId, c.nickname, c.qq, p.kind, p.amount_fen AS amountFen,
+        `SELECT p.id, p.customer_id AS customerId, c.nickname, c.qq, p.kind, p.amount, p.currency,
                 p.ref_type AS refType, p.ref_id AS refId, p.note, p.paid_at AS paidAt
            FROM payments p JOIN customers c ON c.id = p.customer_id
           WHERE p.customer_id = ? ORDER BY p.id DESC LIMIT 200`,
@@ -17,7 +17,7 @@ paymentRoutes.get('/', async (c) => {
         .bind(requireInt(customerId, '客户 ID'))
         .all()
     : await c.env.DB.prepare(
-        `SELECT p.id, p.customer_id AS customerId, c.nickname, c.qq, p.kind, p.amount_fen AS amountFen,
+        `SELECT p.id, p.customer_id AS customerId, c.nickname, c.qq, p.kind, p.amount, p.currency,
                 p.ref_type AS refType, p.ref_id AS refId, p.note, p.paid_at AS paidAt
            FROM payments p JOIN customers c ON c.id = p.customer_id
           ORDER BY p.id DESC LIMIT 200`,
@@ -64,24 +64,25 @@ paymentRoutes.post('/', async (c) => {
 
     const items = await db
       .prepare(
-        `SELECT id, goods_fee_fen AS goodsFeeFen, batch_id AS batchId FROM items
+        `SELECT id, goods_fee_jpy AS goodsFeeJpy, batch_id AS batchId FROM items
           WHERE id IN (${placeholders(itemIds.length)}) AND customer_id = ? AND goods_paid = 0
             AND status NOT IN ('cancelled','refunded')`,
       )
       .bind(...itemIds, customerId)
-      .all<{ id: number; goodsFeeFen: number; batchId: number }>();
+      .all<{ id: number; goodsFeeJpy: number; batchId: number }>();
     if (items.results.length !== new Set(itemIds).size) throw badRequest('所选商品已付、已取消或归属不符，请刷新后重试');
     if (items.results.length === 0) throw badRequest('这些物品已经付过款了');
 
-    const amountFen = items.results.reduce((sum, i) => sum + i.goodsFeeFen, 0);
+    // 货款收的是円：客户按付款当天汇率自己折人民币，群主不预先垫差价
+    const amount = items.results.reduce((sum, i) => sum + i.goodsFeeJpy, 0);
     const batchIds = [...new Set(items.results.map((i) => i.batchId))];
     const statements: D1PreparedStatement[] = [
       db
         .prepare(
-          `INSERT INTO payments (id, customer_id, kind, amount_fen, ref_type, ref_id, note, paid_at)
-           VALUES (?, ?, 'goods', ?, 'batch', ?, ?, ?)`,
+          `INSERT INTO payments (id, customer_id, kind, currency, amount, ref_type, ref_id, note, paid_at)
+           VALUES (?, ?, 'goods', 'JPY', ?, 'batch', ?, ?, ?)`,
         )
-        .bind(paymentId, customerId, amountFen, batchIds.length === 1 ? batchIds[0] : null, note, at),
+        .bind(paymentId, customerId, amount, batchIds.length === 1 ? batchIds[0] : null, note, at),
     ];
     for (const item of items.results) {
       statements.push(
@@ -92,7 +93,7 @@ paymentRoutes.post('/', async (c) => {
       );
     }
     await db.batch(statements);
-    return c.json({ id: paymentId, amountFen, itemCount: items.results.length });
+    return c.json({ id: paymentId, amount, itemCount: items.results.length });
   }
 
   if (kind === 'intl') {
@@ -113,13 +114,13 @@ paymentRoutes.post('/', async (c) => {
       db.prepare('UPDATE items SET intl_paid=1 WHERE weigh_group_id=?').bind(weighGroupId),
       db
         .prepare(
-          `INSERT INTO payments (id, customer_id, kind, amount_fen, ref_type, ref_id, note, paid_at)
-           VALUES (?, ?, 'intl', ?, 'weigh_group', ?, ?, ?)`,
+          `INSERT INTO payments (id, customer_id, kind, currency, amount, ref_type, ref_id, note, paid_at)
+           VALUES (?, ?, 'intl', 'CNY', ?, 'weigh_group', ?, ?, ?)`,
         )
         .bind(paymentId, customerId, group.intlFeeFen, weighGroupId, note, at),
       db.prepare('UPDATE weigh_groups SET fee_paid = 1 WHERE id = ?').bind(weighGroupId),
     ]);
-    return c.json({ id: paymentId, amountFen: group.intlFeeFen });
+    return c.json({ id: paymentId, amount: group.intlFeeFen });
   }
 
   if (kind === 'domestic') {
@@ -136,13 +137,13 @@ paymentRoutes.post('/', async (c) => {
     await db.batch([
       db
         .prepare(
-          `INSERT INTO payments (id, customer_id, kind, amount_fen, ref_type, ref_id, note, paid_at)
-           VALUES (?, ?, 'domestic', ?, 'shipment', ?, ?, ?)`,
+          `INSERT INTO payments (id, customer_id, kind, currency, amount, ref_type, ref_id, note, paid_at)
+           VALUES (?, ?, 'domestic', 'CNY', ?, 'shipment', ?, ?, ?)`,
         )
         .bind(paymentId, customerId, shipment.feeFen, shipmentId, note, at),
       db.prepare('UPDATE shipments SET fee_paid = 1 WHERE id = ?').bind(shipmentId),
     ]);
-    return c.json({ id: paymentId, amountFen: shipment.feeFen });
+    return c.json({ id: paymentId, amount: shipment.feeFen });
   }
 
   throw badRequest('kind 只能是 goods / intl / domestic');

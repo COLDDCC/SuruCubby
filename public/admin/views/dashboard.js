@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { bindActions, confirmBox, empty, escapeHtml, money, toast } from '/admin/ui.js';
+import { bindActions, confirmBox, empty, escapeHtml, money, toast, yen } from '/admin/ui.js';
 
 function row(main, sub, right, action) {
   return `<div class="list-row">
@@ -21,7 +21,7 @@ export async function render(view) {
           row(
             customerLink(r),
             `${escapeHtml(r.batchName)} · ${r.count} 件 · QQ ${escapeHtml(r.qq)}`,
-            `<span class="unpaid money">${money(r.amountFen)}</span>`,
+            `<span class="unpaid money">${yen(r.amountJpy)}</span>`,
             `<button class="small" data-action="payGoods" data-customer="${r.customerId}" data-batch="${r.batchId}">已收款</button>`,
           ),
         )
@@ -60,7 +60,7 @@ export async function render(view) {
           row(
             `${customerLink(r)} · ${escapeHtml(r.title)}`,
             escapeHtml(r.batchName),
-            `<span class="money">${money(r.goodsFeeFen)}</span>`,
+            `<span class="money">${yen(r.goodsFeeJpy)}</span>`,
             `<button class="small" data-action="refunded" data-item="${r.itemId}">已退款</button>`,
           ),
         )

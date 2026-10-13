@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { groupByCn, parseSheet, type RawSheet, type ParsedRow } from '../../lib/excel.ts';
+import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow } from '../../lib/excel.ts';
 import { badRequest, optionalString, readJson, requireString } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
+import type { FieldKey } from '../../lib/excel.ts';
 
 export const importRoutes = new Hono<{ Bindings: Env }>();
 
@@ -18,7 +19,20 @@ interface PreviewBody {
   fileName?: string;
   fileHash?: string;
   sheet?: RawSheet;
-  exchangeRate?: number;
+  /** 管理员在预览里指认的「Excel 列 → 用途」，key 用中文用途名或英文字段名都认 */
+  columns?: Record<string, unknown>;
+}
+
+function columnOverrides(body: PreviewBody): Record<string, FieldKey | null> | undefined {
+  const raw = body.columns;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, FieldKey | null> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!/^\d+$/.test(key)) continue;
+    if (value === null) out[key] = null;
+    else if (typeof value === 'string' && value !== '') out[key] = value as FieldKey;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 interface Assignment {
@@ -76,11 +90,13 @@ async function findDuplicate(env: Env, fileHash: string | null) {
 importRoutes.post('/preview', async (c) => {
   const body = await readJson<PreviewBody>(c);
   const sheet = requireSheet(body);
-  const parsed = parseSheet(sheet, body.exchangeRate);
+  const parsed = parseSheet(sheet, { columns: columnOverrides(body) });
   if (parsed.missingColumns.length > 0) {
     return c.json(
       {
         missingColumns: parsed.missingColumns,
+        fields: FIELD_LABELS,
+        columns: parsed.columns,
         error: `表头缺少这些列：${parsed.missingColumns.join('、')}`,
       },
       400,
@@ -95,12 +111,14 @@ importRoutes.post('/preview', async (c) => {
 
   return c.json({
     missingColumns: [],
+    fields: FIELD_LABELS,
+    columns: parsed.columns,
     duplicate,
     skipped: parsed.skipped,
     errors: parsed.errors,
     totals: {
       rows: parsed.rows.length,
-      amountFen: parsed.rows.reduce((sum, r) => sum + r.goodsFeeFen, 0),
+      amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
       customers: groups.length,
       unmatched: groups.filter((g) => !aliasMap.has(g.cn)).length,
     },
@@ -115,7 +133,7 @@ importRoutes.post('/commit', async (c) => {
   const body = await readJson<CommitBody>(c);
   const sheet = requireSheet(body);
   const batchName = requireString(body.batchName, '批次名');
-  const parsed = parseSheet(sheet, body.exchangeRate);
+  const parsed = parseSheet(sheet, { columns: columnOverrides(body) });
   if (parsed.missingColumns.length > 0) {
     throw badRequest(`表头缺少这些列：${parsed.missingColumns.join('、')}`);
   }
@@ -231,7 +249,7 @@ importRoutes.post('/commit', async (c) => {
   let itemId = await nextId(db, 'items');
   const insertItem = db.prepare(
     `INSERT INTO items (id, batch_id, customer_id, package_id, row_no, title, image_url, product_url,
-                        list_price_jpy, actual_price_jpy, goods_fee_fen, status, goods_paid, created_at, updated_at)
+                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?)`,
   );
   const insertLog = db.prepare(
@@ -254,7 +272,7 @@ importRoutes.post('/commit', async (c) => {
         row.productUrl,
         row.listPriceJpy,
         row.actualPriceJpy,
-        row.goodsFeeFen,
+        row.goodsFeeJpy,
         now,
         now,
       ),
@@ -271,7 +289,7 @@ importRoutes.post('/commit', async (c) => {
     batchId,
     packageId,
     itemCount: parsed.rows.length,
-    amountFen: parsed.rows.reduce((sum, r) => sum + r.goodsFeeFen, 0),
+    amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
     customerCount: rowsByCustomer.size,
     createdCustomers,
     skipped: parsed.skipped,
