@@ -13,10 +13,24 @@ settingsRoutes.get('/', async (c) =>
   }),
 );
 
-function toIntFen(value: unknown, label: string): number {
+/** 页面上填的是「元」，进来先按元换算 */
+function yuanToFenValue(value: unknown, label: string): number {
   const fen = toFen(value);
   if (fen === null || fen < 0) throw badRequest(`${label}金额不合法`);
   return fen;
+}
+
+/** 键名带 Fen 的入参已经是「分」，不能再乘 100 */
+function requireFen(value: unknown, label: string): number {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0) throw badRequest(`${label}金额不合法`);
+  return n;
+}
+
+/** 单价为 0 会把一整箱运费静默算成 0 元，拦住；国内运费填 0 是「不收」，允许。 */
+function requirePositiveFen(value: number, label: string): number {
+  if (value <= 0) throw badRequest(`${label}要大于 0`);
+  return value;
 }
 
 settingsRoutes.post('/', async (c) => {
@@ -38,8 +52,8 @@ settingsRoutes.post('/', async (c) => {
   if (hasDomestic) {
     const fen =
       body.domesticFeeFen !== undefined && body.domesticFeeFen !== null
-        ? toIntFen(body.domesticFeeFen, '国内运费')
-        : toIntFen(body.domesticFeeYuan, '国内运费');
+        ? requireFen(body.domesticFeeFen, '国内运费')
+        : yuanToFenValue(body.domesticFeeYuan, '国内运费');
     await setSetting(c.env, 'domestic_fee_fen', String(fen));
     out.domesticFeeFen = fen;
   }
@@ -50,8 +64,9 @@ settingsRoutes.post('/', async (c) => {
   if (hasIntl) {
     const fen =
       body.intlPriceFenPerKg !== undefined && body.intlPriceFenPerKg !== null
-        ? toIntFen(body.intlPriceFenPerKg, '国际运费单价')
-        : toIntFen(body.intlPriceYuanPerKg, '国际运费单价');
+        ? requireFen(body.intlPriceFenPerKg, '国际运费单价')
+        : yuanToFenValue(body.intlPriceYuanPerKg, '国际运费单价');
+    requirePositiveFen(fen, '国际运费单价');
     await setSetting(c.env, 'intl_price_fen_per_kg', String(fen));
     out.intlPriceFenPerKg = fen;
   }

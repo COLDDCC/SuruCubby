@@ -76,9 +76,7 @@ export async function render(view, [id]) {
           <h3 style="margin:0">${escapeHtml(c.nickname)}
             <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ""}</span></h3>
           <div class="row">
-            <input class="small" disabled style="width:110px" inputmode="numeric" placeholder="总重量 g"
-                   data-weight-for="${c.customerId}" value="${c.weightG ?? ""}" ${allocated ? "disabled" : ""}>
-            <button style="display:none" class="small" data-action="saveWeight" data-customer="${c.customerId}" ${allocated ? "disabled" : ""}>存</button>
+            <span class="small muted">这一摞 ${c.weightG ? `${Number(c.weightG).toLocaleString()} g` : "还没称"}</span>
           </div>
         </div>
         ${
@@ -177,20 +175,6 @@ export async function render(view, [id]) {
       });
       toast("已标记缺件，不参与分摊");
       reload();
-    },
-    saveWeight: async ({ customer }) => {
-      const input = view.querySelector(`[data-weight-for="${customer}"]`);
-      const value = input.value.trim();
-      try {
-        await api.post(`/api/admin/packages/${id}/weigh/group`, {
-          customerId: Number(customer),
-          weightG: value === "" ? null : Number(value),
-        });
-        toast("重量已存");
-        reload();
-      } catch (err) {
-        toast(err.message, true);
-      }
     },
     savePrice: async () => {
       const value = view.querySelector("#price").value.trim();

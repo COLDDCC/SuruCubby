@@ -258,18 +258,23 @@ customerRoutes.post('/:id/password', async (c) => {
   const body = await readJson<{ password?: unknown }>(c);
   const password = optionalString(body.password);
   const db = c.env.DB;
-  if (!(await db.prepare('SELECT id FROM customers WHERE id = ?').bind(id).first())) {
-    throw notFound('客户不存在');
-  }
+  const row = await db
+    .prepare('SELECT qq, token FROM customers WHERE id = ?')
+    .bind(id)
+    .first<{ qq: string; token: string }>();
+  if (!row) throw notFound('客户不存在');
+  // 群主出手改密码＝「从头来一遍」，把他之前输错攒下的锁定一起清掉
+  const unlock = db.prepare('DELETE FROM token_attempts WHERE token IN (?, ?)').bind(`qq:${row.qq}`, row.token);
   if (password === null) {
-    await db.prepare('UPDATE customers SET password_hash = NULL WHERE id = ?').bind(id).run();
+    await db.batch([db.prepare('UPDATE customers SET password_hash = NULL WHERE id = ?').bind(id), unlock]);
     return c.json({ ok: true, reset: true });
   }
   const problem = passwordProblem(password);
   if (problem) throw badRequest(problem);
-  await db.prepare('UPDATE customers SET password_hash = ? WHERE id = ?')
-    .bind(await hashPassword(password), id)
-    .run();
+  await db.batch([
+    db.prepare('UPDATE customers SET password_hash = ? WHERE id = ?').bind(await hashPassword(password), id),
+    unlock,
+  ]);
   return c.json({ ok: true, reset: false });
 });
 
@@ -308,10 +313,16 @@ customerRoutes.patch('/:id', async (c) => {
 
 customerRoutes.post('/:id/reset-token', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
+  const row = await c.env.DB.prepare('SELECT qq, token FROM customers WHERE id = ?')
+    .bind(id)
+    .first<{ qq: string; token: string }>();
+  if (!row) throw notFound('客户不存在');
   const token = randomToken();
-  const result = await c.env.DB.prepare('UPDATE customers SET token = ? WHERE id = ?').bind(token, id).run();
-  if (!result.meta.changes) throw notFound('客户不存在');
-  await c.env.DB.prepare('DELETE FROM token_attempts WHERE token = ?').bind(token).run();
+  await c.env.DB.prepare('UPDATE customers SET token = ? WHERE id = ?').bind(token, id).run();
+  // 失败次数是按「qq:<QQ号>」记的，删旧 token 删不掉；不清的话他输错过几次就一直登不进来
+  await c.env.DB.prepare('DELETE FROM token_attempts WHERE token IN (?, ?)')
+    .bind(`qq:${row.qq}`, row.token)
+    .run();
   return c.json({ token });
 });
 

@@ -79,14 +79,25 @@ export function empty(text) {
   return `<p class="empty">${escapeHtml(text)}</p>`;
 }
 
-/** 给容器里所有 [data-action] 元素绑定点击事件。 */
+/**
+ * 给容器里所有 [data-action] 元素绑定点击事件。
+ * 统一兜错：后端 400/403 的提示必须让群主看见，以前这些报错只进 console，
+ * 点第二下「已收款」失败时页面毫无反应，看着像已经记上了。
+ */
 export function bindActions(root, handlers) {
   root.querySelectorAll('[data-action]').forEach((el) => {
     const handler = handlers[el.dataset.action];
     if (!handler) return;
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       e.preventDefault();
-      handler(el.dataset, el, e);
+      el.disabled = true;
+      try {
+        await handler(el.dataset, el, e);
+      } catch (err) {
+        toast(err?.message ? err.message : '这一步没成，刷新后重试', true);
+      } finally {
+        el.disabled = false;
+      }
     });
   });
 }

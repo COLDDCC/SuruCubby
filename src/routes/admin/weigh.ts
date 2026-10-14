@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg } from '../../lib/db.ts';
 import { allocate, feeFromWeight } from '../../lib/allocate.ts';
 import { toFen } from '../../lib/money.ts';
@@ -218,47 +218,10 @@ weighRoutes.post('/:id/weigh/missing', async (c) => {
   return c.json({ ok: true, missing });
 });
 
-/** 保存某客户这一摞的重量（可同时一次性提交已找到的物品）。 */
-weighRoutes.post('/:id/weigh/group', async (c) => {
-  const id = requireInt(c.req.param('id'), '包裹 ID');
-  const pkg = await loadPackage(c.env, id);
-  ensureNotAllocated(pkg);
-  const body = await readJson<{ customerId?: unknown; weightG?: unknown; itemIds?: unknown }>(c);
-  const customerId = requireInt(body.customerId, '客户 ID');
-
-  let weightG: number | null = null;
-  if (body.weightG !== undefined && body.weightG !== null && body.weightG !== '') {
-    weightG = requireInt(body.weightG, '重量（克）');
-    if (weightG <= 0) throw badRequest('重量要大于 0 克');
-  }
-
-  const groupId = await ensureGroup(c.env, id, customerId);
-  const at = nowIso();
-  const statements: D1PreparedStatement[] = [
-    c.env.DB.prepare('UPDATE weigh_groups SET weight_g = ? WHERE id = ?').bind(weightG, groupId),
-  ];
-
-  if (Array.isArray(body.itemIds)) {
-    const itemIds = body.itemIds.map((v) => requireInt(v, '物品 ID'));
-    statements.push(
-      c.env.DB.prepare(
-        `UPDATE items SET weigh_group_id = NULL, updated_at = ?
-          WHERE package_id = ? AND customer_id = ?`,
-      ).bind(at, id, customerId),
-    );
-    for (const itemId of itemIds) {
-      statements.push(
-        c.env.DB.prepare(
-          `UPDATE items SET weigh_group_id = ?, missing = 0, updated_at = ?
-            WHERE id = ? AND package_id = ? AND customer_id = ? AND status NOT IN ('cancelled','refunded')`,
-        ).bind(groupId, at, itemId, id, customerId),
-      );
-    }
-  }
-
-  await c.env.DB.batch(statements);
-  return c.json({ ok: true, weighGroupId: groupId, weightG });
-});
+/**
+ * 每件各自称重，一摞的总重由这件件数加出来（见 weigh/item）。
+ * 所以这里不再收「整摞重量」：直接写 weigh_groups.weight_g 会和下面的合计对不上。
+ */
 
 interface AllocateBody {
   totalFeeFen?: unknown;
@@ -277,7 +240,8 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
 
   const groups = await env.DB.prepare(
     `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, g.weight_g AS weightG,
-            (SELECT COUNT(*) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0) AS itemCount
+            (SELECT COUNT(*) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0
+               AND i.status NOT IN ('cancelled','refunded')) AS itemCount
        FROM weigh_groups g
        JOIN customers c ON c.id = g.customer_id
       WHERE g.package_id = ?
@@ -296,7 +260,12 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   const unfinished=await env.DB.prepare(`SELECT COUNT(*) AS n FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weigh_group_id IS NULL`).bind(packageId).first<{n:number}>();
   if(unfinished?.n) throw badRequest('还有商品未称重或未明确标记缺件，不能确认费用');
   const weighedUnits=await env.DB.prepare(`SELECT weigh_group_id AS gid, SUM(weight_g) AS w,COUNT(*) AS n,COUNT(weight_g) AS weighted FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') GROUP BY weigh_group_id`).bind(packageId).all<{gid:number;w:number;n:number;weighted:number}>();
-  for(const u of weighedUnits.results){if(u.weighted>0 && u.weighted!==u.n) throw badRequest('还有商品未填写重量');if(u.weighted===u.n){const g=groups.results.find(g=>g.id===u.gid);if(g)g.weightG=u.w;}}
+  // 一摞的重量只认各件之和：预览和确认走同一个口径，不会出现预览过了、确认被拦
+  for (const u of weighedUnits.results) {
+    if (u.weighted !== u.n) throw badRequest('还有商品没填重量：每件都要称，没收到的请标「缺件」');
+    const g = groups.results.find((group) => group.id === u.gid);
+    if (g) g.weightG = u.w;
+  }
   const usable = groups.results.filter((g) => g.itemCount > 0);
   const notWeighed = usable.filter((g) => !g.weightG || g.weightG <= 0);
   if (usable.length === 0) throw badRequest('还没有任何已认领的物品，不能分摊');
@@ -360,14 +329,24 @@ weighRoutes.post('/:id/weigh/item',async c=>{
  if(!item) throw notFound('物品不在此包裹'); const gid=await ensureGroup(c.env,id,item.cid);
  await c.env.DB.batch([
  c.env.DB.prepare('UPDATE items SET weight_g=?,weigh_group_id=?,missing=0,updated_at=? WHERE id=?').bind(weight,gid,nowIso(),itemId),
- c.env.DB.prepare('UPDATE weigh_groups SET weight_g=(SELECT SUM(weight_g) FROM items WHERE weigh_group_id=? AND missing=0) WHERE id=?').bind(gid,gid)]);
+ c.env.DB.prepare("UPDATE weigh_groups SET weight_g=(SELECT SUM(weight_g) FROM items WHERE weigh_group_id=? AND missing=0 AND status NOT IN ('cancelled','refunded')) WHERE id=?").bind(gid,gid)]);
  return c.json({ok:true});
 });
+/** allocate()/feeFromWeight() 是纯函数库，抛普通 Error；到接口层得变成 400，不能让群主看到「服务器出错了」 */
+async function buildAllocationOr400(env: Env, packageId: number, body: AllocateBody) {
+  try {
+    return await buildAllocation(env, packageId, body);
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw badRequest(err instanceof Error ? err.message : '分摊参数有问题');
+  }
+}
+
 weighRoutes.post('/:id/allocate/preview', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   await loadPackage(c.env, id);
   const body = await readJson<AllocateBody>(c);
-  return c.json(await buildAllocation(c.env, id, body));
+  return c.json(await buildAllocationOr400(c.env, id, body));
 });
 
 weighRoutes.post('/:id/allocate/commit', async (c) => {
@@ -375,7 +354,7 @@ weighRoutes.post('/:id/allocate/commit', async (c) => {
   const pkg = await loadPackage(c.env, id);
   ensureNotAllocated(pkg);
   const body = await readJson<AllocateBody>(c);
-  const allocation = await buildAllocation(c.env, id, body);
+  const allocation = await buildAllocationOr400(c.env, id, body);
 
   const db = c.env.DB;
   const at = nowIso();
@@ -406,22 +385,21 @@ weighRoutes.post('/:id/allocate/commit', async (c) => {
       )
       .bind(id, allocation.diffFen),
   ];
-  const unitRows=await db.prepare("SELECT id,weigh_group_id AS gid,weight_g AS weight FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(id).all<{id:number;gid:number;weight:number|null}>();
-  const anyUnitWeight=unitRows.results.some(i=>i.weight!==null);
-  if(anyUnitWeight && unitRows.results.some(i=>!i.weight)) throw badRequest('请填写每件商品的重量');
+  // 摞里的分摊要精确到每件：客户页面按件勾发货，每件都得有自己的运费。
+  // buildAllocation 已经保证每件有重量，这里再把这一摞的尾差一分不差地摊到前几件上。
+  const unitRows=await db.prepare("SELECT id,weigh_group_id AS gid,weight_g AS weight FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(id).all<{id:number;gid:number;weight:number}>();
   for (const row of allocation.rows) {
-    const units=unitRows.results.filter(i=>i.gid===row.weighGroupId);
-    if(anyUnitWeight) {
-      const unitAllocation=allocate(row.feeFen,units.map(i=>({id:i.id,weightG:i.weight!})));
-      let remainder=unitAllocation.diffFen;
-      for(const u of unitAllocation.rows) {
-        statements.push(db.prepare('UPDATE items SET intl_fee_fen=? WHERE id=?').bind(u.feeFen+(remainder-->0?1:0),u.id));
-      }
-    }
+    const units = unitRows.results.filter((i) => i.gid === row.weighGroupId);
+    const unitAllocation = allocate(row.feeFen, units.map((i) => ({ id: i.id, weightG: i.weight })));
+    unitAllocation.rows.forEach((u, k) => {
+      statements.push(
+        db.prepare('UPDATE items SET intl_fee_fen = ? WHERE id = ?').bind(u.feeFen + (k < unitAllocation.diffFen ? 1 : 0), u.id),
+      );
+    });
     statements.push(
       db
-        .prepare('UPDATE weigh_groups SET intl_fee_fen = ?, weight_g=? WHERE id = ?')
-        .bind(row.feeFen,row.weightG,row.weighGroupId),
+        .prepare('UPDATE weigh_groups SET intl_fee_fen = ?, weight_g = ? WHERE id = ?')
+        .bind(row.feeFen, row.weightG, row.weighGroupId),
     );
   }
   for (const item of items.results) {

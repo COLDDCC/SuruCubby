@@ -19,11 +19,17 @@ export function notFound(message = '没找到'): HttpError {
 }
 
 export async function readJson<T>(c: Context): Promise<T> {
+  let parsed: unknown;
   try {
-    return (await c.req.json()) as T;
+    parsed = await c.req.json();
   } catch {
     throw badRequest('请求体不是合法 JSON');
   }
+  // null / 数组 / 数字都会在下游 body.xxx 上抛 TypeError，变成 500
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw badRequest('请求体要是一个 JSON 对象');
+  }
+  return parsed as T;
 }
 
 export function requireInt(value: unknown, field: string): number {

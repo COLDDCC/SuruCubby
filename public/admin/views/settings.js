@@ -14,12 +14,19 @@ export async function render(view) {
       <p class="small muted">当前：${money(data.intlPriceFenPerKg)} / kg。称重台点「算分摊」就按这个单价从各摞重量推出这一箱的运费，不用手填；转运仓收得不一样，可以在分摊预览里改成实收金额。</p>
       <p><button id="save">保存</button></p>
     </div>`;
-  document.getElementById('save').onclick = async () => {
-    await api.post('/api/admin/settings', {
-      domesticFeeYuan: document.getElementById('fee').value.trim(),
-      intlPriceYuanPerKg: document.getElementById('price').value.trim(),
-    });
-    toast('已保存');
-    render(view);
+  document.getElementById('save').onclick = async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      const r = await api.post('/api/admin/settings', {
+        domesticFeeYuan: document.getElementById('fee').value.trim(),
+        intlPriceYuanPerKg: document.getElementById('price').value.trim(),
+      });
+      toast(`已保存：国内 ${money(r.domesticFeeFen)} / 次，国际 ${money(r.intlPriceFenPerKg)} / kg`);
+      await render(view);
+    } catch (err) {
+      toast(err.message, true);
+      button.disabled = false;
+    }
   };
 }

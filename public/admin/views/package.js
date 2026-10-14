@@ -101,19 +101,10 @@ export async function render(view, [id]) {
       const itemIds = [...view.querySelectorAll('[data-move-item]:checked')].map((el) => Number(el.dataset.moveItem));
       if (!itemIds.length) return toast('先勾选商品', true);
       const d = await api.get('/api/admin/packages');
+      // 已分摊的包裹不能收新东西：那一箱的运费早按当时的重量算完了
       const available = d.packages.filter((p) => p.id !== Number(id) && !p.allocatedAt);
-      const target = await promptBox(
-        '目标包裹ID（' + available.map((p) => p.id + ':' + p.name).join('；') + '）。输入“新建”创建包裹',
-        '',
-      );
-      if (target === null) return;
-      let targetId = Number(target);
-      if (target === '新建') {
-        const name = await promptBox('新包裹名称', '');
-        if (!name) return;
-        targetId = (await api.post('/api/admin/packages', { name })).id;
-      }
-      if (!targetId) return toast('请输入有效包裹ID', true);
+      const targetId = await pickPackage(available, `${itemIds.length} 件`);
+      if (targetId === null) return;
       try {
         await api.post(`/api/admin/packages/${targetId}/items`, { itemIds, action: 'add' });
         await render(view, [id]);
@@ -139,17 +130,28 @@ export async function render(view, [id]) {
   });
 }
 
-/** 单件改状态：给一个下拉，处理砍单、损坏这类异常。 */
+/**
+ * 单件改状态：给一个下拉，处理砍单、损坏这类异常。
+ * 只列后端收得了的状态：可发货要走称重确认、已寄出要走寄出流程，
+ * 已签收只在「已寄出 → 已签收」这一步允许。
+ */
 function pickStatus(current) {
+  const legal = Object.keys(STATUS_LABELS).filter((s) => {
+    if (s === current) return true;
+    if (s === 'cn_stock' || s === 'shipped') return false;
+    if (s === 'delivered') return current === 'shipped';
+    return true;
+  });
   return new Promise((resolve) => {
     openModal((box, close) => {
       box.innerHTML = `
         <h3>改这一件的状态</h3>
         <select id="pick" style="width:100%">
-          ${Object.keys(STATUS_LABELS)
+          ${legal
             .map((s) => `<option value="${s}" ${s === current ? 'selected' : ''}>${statusLabel(s)}</option>`)
             .join('')}
         </select>
+        <p class="small muted">要变「可发货」请去称重台算分摊；要寄出请在发货申请里填单号。</p>
         <div class="row" style="justify-content:flex-end;margin-top:12px">
           <button class="plain" data-no>取消</button><button data-yes>保存</button>
         </div>`;
@@ -161,6 +163,53 @@ function pickStatus(current) {
         const value = box.querySelector('#pick').value;
         close();
         resolve(value);
+      };
+    });
+  });
+}
+
+/** 拆包 / 合包时选目标包裹：从列表里点，别手输 ID。返回包裹 ID，取消返回 null。 */
+function pickPackage(available, hint) {
+  return new Promise((resolve) => {
+    openModal((box, close) => {
+      box.innerHTML = `
+        <h3>移到哪个包裹（${escapeHtml(hint)}）</h3>
+        <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
+          ${
+            available.length
+              ? available
+                  .map(
+                    (p, i) => `<label><input type="radio" name="to" value="${p.id}" ${i === 0 ? 'checked' : ''}>
+                      ${escapeHtml(p.name)} <span class="small muted">#${p.id}</span></label>`,
+                  )
+                  .join('')
+              : '<p class="small muted">现在没有能收东西的包裹（已分摊的不能再加），新建一个吧。</p>'
+          }
+          <label><input type="radio" name="to" value="new"> 新建一个包裹：
+            <input id="newName" placeholder="比如 10 月回国第二箱"></label>
+        </div>
+        <div class="row" style="justify-content:flex-end;margin-top:12px">
+          <button class="plain" data-no>取消</button><button data-yes>移动</button>
+        </div>`;
+      const done = (value) => {
+        close();
+        resolve(value);
+      };
+      box.querySelector('[data-no]').onclick = () => done(null);
+      box.querySelector('[data-yes]').onclick = async () => {
+        const chosen = box.querySelector('input[name="to"]:checked');
+        if (!chosen) return toast('先选一个包裹', true);
+        if (chosen.value === 'new') {
+          const name = box.querySelector('#newName').value.trim();
+          if (!name) return toast('给新包裹起个名字', true);
+          try {
+            done((await api.post('/api/admin/packages', { name })).id);
+          } catch (err) {
+            toast(err.message, true);
+          }
+          return;
+        }
+        done(Number(chosen.value));
       };
     });
   });

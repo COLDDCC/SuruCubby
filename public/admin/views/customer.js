@@ -6,7 +6,6 @@ import {
   confirmBox,
   empty,
   escapeHtml,
-  jpy,
   money,
   promptBox,
   statusLabel,
@@ -155,7 +154,7 @@ export async function render(view, [id]) {
             <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
               <div>${codeTag(i)}</div></td>
             <td class="small muted">${escapeHtml(i.batchName)}</td>
-            <td class="right small">${jpy(i.actualPriceJpy)}</td>
+            <td class="right small">${yen(i.actualPriceJpy)}</td>
             <td class="right money">${yen(i.goodsFeeJpy)}</td>
             <td class="small">${escapeHtml(statusLabel(i.status))}</td>
             <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>

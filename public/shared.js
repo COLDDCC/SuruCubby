@@ -27,8 +27,9 @@ export function money(fen) {
 }
 
 /** 円 → "1,234円"。货款一律按日元记，和 money()（人民币分）不能混着显示。 */
-export function yen(jpy) {
-  const n = Math.trunc(Number(jpy) || 0);
+export function yen(value) {
+  if (value === null || value === undefined) return '—';
+  const n = Math.trunc(Number(value) || 0);
   return `${n.toLocaleString('en-US')}円`;
 }
 
@@ -42,11 +43,6 @@ export function yuanToFen(text) {
   const n = Number(String(text).replace(/[^\d.-]/g, ''));
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100);
-}
-
-export function jpy(value) {
-  if (value === null || value === undefined) return '—';
-  return `¥${Number(value).toLocaleString('ja-JP')}`;
 }
 
 /** UTC ISO → 北京时间展示 */

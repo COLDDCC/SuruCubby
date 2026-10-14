@@ -105,7 +105,7 @@ customerRoutes.post('/login', async (c) => {
   }
 
   await clearFailures(c.env, key);
-  await issueCustomerSession(c, customer.token, customer.id);
+  await issueCustomerSession(c, customer.token, customer.id, customer.passwordHash ?? null);
   const view = await buildCustomerView(c.env, customer.id);
   return c.json({
     verified: true,
@@ -119,41 +119,40 @@ customerRoutes.post('/login', async (c) => {
 /** 登录后设自己的密码；换完就不再是「还在用初始密码」。 */
 customerRoutes.post('/:token/password', async (c) => {
   const token = c.req.param('token');
-  const customerId = await customerSession(c, token);
-  if (customerId === null) return c.json({ error: '请先登录' }, 401);
-  const body = await readJson<{ newPassword?: string }>(c);
+  const me = await customerSession(c, token);
+  if (me === null) return c.json({ error: '请先登录' }, 401);
+  const body = await readJson<{ oldPassword?: unknown; newPassword?: unknown }>(c);
   const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
   const problem = passwordProblem(newPassword);
   if (problem) throw badRequest(problem);
 
-  const result = await c.env.DB.prepare('UPDATE customers SET password_hash = ? WHERE id = ?')
-    .bind(await hashPassword(newPassword), customerId)
+  // 已经是自己的密码了，就要先验原密码：不然拿到别人登录状态的人可以直接改走
+  if (!usingInitialPassword(me.passwordHash)) {
+    const oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
+    if (!(await verifyPassword(oldPassword, me.passwordHash))) throw badRequest('原密码不对');
+  }
+
+  await c.env.DB.prepare('UPDATE customers SET password_hash = ? WHERE id = ?')
+    .bind(await hashPassword(newPassword), me.id)
     .run();
-  if (!result.meta.changes) throw badRequest('客户不存在');
-  return c.json({ ok: true });
+  // 密码一换，之前发出去的 Cookie 全都验不过去了（签名里绑了哈希），得重新登一次
+  clearCustomerSession(c, token);
+  return c.json({ ok: true, relogin: true });
 });
 
 customerRoutes.get('/:token', async (c) => {
   const token = c.req.param('token');
-  const customerId = await customerSession(c, token);
-  if (customerId === null) return c.json({ verified: false }, 401);
-
-  // token 被重置后旧 Cookie 立即失效
-  const customer = await c.env.DB.prepare(
-    'SELECT id, password_hash AS passwordHash FROM customers WHERE id = ? AND token = ?',
-  )
-    .bind(customerId, token)
-    .first<{ id: number; passwordHash: string | null }>();
-  if (!customer) {
+  const me = await customerSession(c, token);
+  if (me === null) {
     clearCustomerSession(c, token);
     return c.json({ verified: false }, 401);
   }
 
-  const view = await buildCustomerView(c.env, customerId);
+  const view = await buildCustomerView(c.env, me.id);
   if (!view) return c.json({ verified: false }, 401);
   return c.json({
     verified: true,
-    mustChange: usingInitialPassword(customer.passwordHash ?? null),
+    mustChange: usingInitialPassword(me.passwordHash),
     ...view,
     serverTime: nowIso(),
   });

@@ -71,10 +71,16 @@ itemRoutes.patch('/:id', async (c) => {
   if (!item) throw notFound('物品不存在');
 
   if (body.goodsPaid !== undefined) throw badRequest('请在收款页面记账或撤销收款');
-  if (body.status && ['cn_stock','shipped','delivered'].includes(body.status) && body.status !== item.status) throw badRequest('请通过称重确认或寄出流程设置此状态');
-  const linked = await db.prepare('SELECT weigh_group_id AS gid, shipment_id AS sid FROM items WHERE id=?').bind(id).first<{gid:number|null;sid:number|null}>();
-  const reserved = await db.prepare('SELECT item_id FROM request_items WHERE item_id=?').bind(id).first();
-  if (reserved || linked?.sid || linked?.gid && await db.prepare('SELECT id FROM weigh_groups WHERE id=? AND intl_fee_fen IS NOT NULL').bind(linked.gid).first()) throw badRequest('物品已计费或已申请发货，请先撤销对应流程');
+  // 「已签收」是寄出之后的正常一步；可发货、已寄出仍然只能走称重/寄出流程
+  const markingDelivered = body.status === 'delivered' && item.status === 'shipped';
+  if (body.status && ['cn_stock','shipped','delivered'].includes(body.status) && body.status !== item.status) {
+    if (!markingDelivered) throw badRequest('请通过称重确认或寄出流程设置此状态');
+  }
+  if (!markingDelivered) {
+    const linked = await db.prepare('SELECT weigh_group_id AS gid, shipment_id AS sid FROM items WHERE id=?').bind(id).first<{gid:number|null;sid:number|null}>();
+    const reserved = await db.prepare('SELECT item_id FROM request_items WHERE item_id=?').bind(id).first();
+    if (reserved || linked?.sid || linked?.gid && await db.prepare('SELECT id FROM weigh_groups WHERE id=? AND intl_fee_fen IS NOT NULL').bind(linked.gid).first()) throw badRequest('物品已计费或已申请发货，请先撤销对应流程');
+  }
   const at = nowIso();
   const statements: D1PreparedStatement[] = [];
 

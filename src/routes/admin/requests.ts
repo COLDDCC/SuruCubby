@@ -1,22 +1,25 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { nextId, nowIso, domesticFeeFen, statusLogStmt } from '../../lib/db.ts';
 import { clearCustomerSession, customerSession } from '../../lib/session.ts';
 import { usingInitialPassword } from '../../lib/password.ts';
 export const requestAdminRoutes=new Hono<{Bindings:Env}>();
-export const requestCustomerRoutes=new Hono<{Bindings:Env}>();
+type CustomerMe={id:number;passwordHash:string|null};
+type CustomerCtx=Context<{Bindings:Env;Variables:{customer:CustomerMe}}>;
+export const requestCustomerRoutes=new Hono<{Bindings:Env;Variables:{customer:CustomerMe}}>();
 requestCustomerRoutes.use('/:token/*',async(c,next)=>{
- const token=c.req.param('token'); const cid=await customerSession(c,token);
- const row=cid===null?null:await c.env.DB.prepare('SELECT id,password_hash AS passwordHash FROM customers WHERE id=? AND token=?').bind(cid,token).first<{id:number;passwordHash:string|null}>();
- if(!row){clearCustomerSession(c,token);return c.json({error:'请先验证身份'},401);}
+ const token=c.req.param('token'); const me=await customerSession(c,token);
+ if(!me){clearCustomerSession(c,token);return c.json({error:'请先验证身份'},401);}
  // 还拿着统一的初始密码时不让动手下单：谁都知道 123456，先改成自己的才认
- if(c.req.method!=='GET'&&usingInitialPassword(row.passwordHash)) return c.json({error:'请先点击「修改密码」设一个只有你知道的密码'},403);
+ if(c.req.method!=='GET'&&usingInitialPassword(me.passwordHash)) return c.json({error:'请先点击「修改密码」设一个只有你知道的密码'},403);
+ c.set('customer',me);
  await next();
 });
-async function identity(c:any):Promise<number>{return (await customerSession(c,c.req.param('token')))!;}
+function identity(c:CustomerCtx):number{return c.get('customer').id;}
 requestCustomerRoutes.post('/:token/addresses',async c=>{
- const cid=await identity(c); const b=await readJson<{recipient:string;phone:string;detail:string}>(c);
+ const cid=identity(c); const b=await readJson<{recipient:string;phone:string;detail:string}>(c);
  const recipient=requireString(b.recipient,'收件人'),phone=requireString(b.phone,'电话'),detail=requireString(b.detail,'地址');
  if(recipient.length>100 || phone.length>40 || detail.length>500) throw badRequest('地址内容过长');
  const count=await c.env.DB.prepare('SELECT COUNT(*) AS n FROM addresses WHERE customer_id=?').bind(cid).first<{n:number}>();
@@ -24,10 +27,10 @@ requestCustomerRoutes.post('/:token/addresses',async c=>{
  const id=await nextId(c.env.DB,'addresses'); await c.env.DB.prepare('INSERT INTO addresses VALUES(?,?,?,?,?)').bind(id,cid,recipient,phone,detail).run();return c.json({id});
 });
 requestCustomerRoutes.delete('/:token/addresses/:id',async c=>{
- await c.env.DB.prepare('DELETE FROM addresses WHERE id=? AND customer_id=?').bind(requireInt(c.req.param('id'),'地址 ID'),await identity(c)).run();return c.json({ok:true});
+ await c.env.DB.prepare('DELETE FROM addresses WHERE id=? AND customer_id=?').bind(requireInt(c.req.param('id'),'地址 ID'),identity(c)).run();return c.json({ok:true});
 });
 requestCustomerRoutes.post('/:token/requests',async c=>{
- const cid=await identity(c),db=c.env.DB;
+ const cid=identity(c),db=c.env.DB;
  const b=await readJson<{itemIds:number[];addressId:number}>(c);
  if(!Array.isArray(b.itemIds)||!b.itemIds.length||b.itemIds.length>500) throw badRequest('请勾选1至500件商品');
  const ids=[...new Set(b.itemIds.map(x=>requireInt(x,'物品 ID')))];
@@ -39,7 +42,7 @@ requestCustomerRoutes.post('/:token/requests',async c=>{
  await db.batch([db.prepare('INSERT INTO shipping_requests(id,customer_id,address_snapshot,domestic_fee_fen,status,created_at) VALUES(?,?,?,?,?,?)').bind(id,cid,JSON.stringify(address),await domesticFeeFen(c.env),'pending',nowIso()),...ids.map(i=>db.prepare('INSERT INTO request_items VALUES(?,?)').bind(i,id))]);return c.json({id});
 });
 requestCustomerRoutes.delete('/:token/requests/:id',async c=>{
- const id=requireInt(c.req.param('id'),'申请 ID'),cid=await identity(c);
+ const id=requireInt(c.req.param('id'),'申请 ID'),cid=identity(c);
  const r=await c.env.DB.prepare('SELECT status FROM shipping_requests WHERE id=? AND customer_id=?').bind(id,cid).first<{status:string}>();
  if(!r||r.status!=='pending') throw badRequest('仅未确认收款的申请可以取消');
  await c.env.DB.batch([c.env.DB.prepare('DELETE FROM request_items WHERE request_id=?').bind(id),c.env.DB.prepare("UPDATE shipping_requests SET status='cancelled' WHERE id=?").bind(id)]);return c.json({ok:true});
@@ -60,7 +63,8 @@ requestAdminRoutes.post('/:id/paid',async c=>{
  for(const i of items.results){
  statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,currency,amount,ref_type,ref_id,paid_at) VALUES(?,?,'item_intl','CNY',?,'item',?,?)").bind(payment++,r.customer_id,i.intl_fee_fen,i.id,at),db.prepare('UPDATE items SET intl_paid=1 WHERE id=?').bind(i.id));
  }
- statements.push(db.prepare(`UPDATE weigh_groups SET fee_paid=CASE WHEN EXISTS(SELECT 1 FROM items i WHERE i.weigh_group_id=weigh_groups.id AND i.intl_paid=0 AND i.missing=0 AND i.status NOT IN ('cancelled','refunded')) THEN 0 ELSE 1 END WHERE customer_id=? AND intl_fee_fen IS NOT NULL`).bind(r.customer_id));
+ // 只重算这次申请里那些摞的收款状态，别把这位客户其它包裹的历史摞一起改掉
+ statements.push(db.prepare(`UPDATE weigh_groups SET fee_paid=CASE WHEN EXISTS(SELECT 1 FROM items i WHERE i.weigh_group_id=weigh_groups.id AND i.intl_paid=0 AND i.missing=0 AND i.status NOT IN ('cancelled','refunded')) THEN 0 ELSE 1 END WHERE id IN(SELECT DISTINCT i.weigh_group_id FROM request_items ri JOIN items i ON i.id=ri.item_id WHERE ri.request_id=? AND i.weigh_group_id IS NOT NULL) AND intl_fee_fen IS NOT NULL`).bind(id));
  statements.push(db.prepare("INSERT INTO payments(id,customer_id,kind,currency,amount,ref_type,ref_id,paid_at) VALUES(?,?,'domestic','CNY',?,'request',?,?)").bind(payment++,r.customer_id,r.domestic_fee_fen,id,at));
  statements.push(db.prepare("UPDATE shipping_requests SET status='paid',paid_at=? WHERE id=?").bind(at,id));
  await db.batch(statements);return c.json({ok:true});

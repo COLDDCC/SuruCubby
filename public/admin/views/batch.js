@@ -5,7 +5,6 @@ import {
   codeTag,
   confirmBox,
   escapeHtml,
-  jpy,
   statusLabel,
   thumb,
   yen,
@@ -52,7 +51,7 @@ export async function render(view, [id]) {
               <td class="small muted">${i.rowNo ?? ''}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
                 <div>${codeTag(i)}</div></td>
-              <td class="right small">${jpy(i.actualPriceJpy)}</td>
+              <td class="right small">${yen(i.actualPriceJpy)}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>

@@ -1,4 +1,4 @@
-import { beijingTime, escapeHtml, jpy, money, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
@@ -26,7 +26,7 @@ async function api(path, options) {
   return { ok: res.ok, status: res.status, data };
 }
 
-function renderVerify(message) {
+function renderVerify(message, kind = 'err') {
   app.innerHTML = `
     <div class="card">
       <h1>我的仓库</h1>
@@ -38,7 +38,7 @@ function renderVerify(message) {
         <input id="pw" type="password" autocomplete="current-password" placeholder="初始密码见群主发给你的那条">
         <button id="go">进入</button>
       </div>
-      <p id="err" class="unpaid small">${message ? escapeHtml(message) : ''}</p>
+      <p id="err" class="${kind === 'ok' ? 'paid' : 'unpaid'} small">${message ? escapeHtml(message) : ''}</p>
     </div>`;
   const input = document.getElementById('qq');
   const pw = document.getElementById('pw');
@@ -105,8 +105,9 @@ function renderMustChange(data) {
       err.textContent = r.error || '保存失败';
       return;
     }
-    toast('密码已改好，以后就用这个');
-    boot();
+    // 改密码会让这个 token 之前的登录状态全部作废，退回登录页让客户用新密码进
+    token = '';
+    renderVerify('密码已改好，用 QQ 号和新密码再登一次');
   };
   document.getElementById('peek').onclick = () => render(data);
 }
@@ -128,7 +129,7 @@ function itemCard(item) {
       <div class="body">
         <div class="title">${title}</div>
         <div class="small muted">
-          实际价格 ${jpy(item.actualPriceJpy)} ·
+          实际价格 ${yen(item.actualPriceJpy)} ·
           应付 <span class="money">${yen(item.goodsFeeJpy)}</span>
         </div>
         <div class="small row" style="gap:6px;margin-top:4px">

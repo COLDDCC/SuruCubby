@@ -211,11 +211,17 @@ test('还是初始密码时下不了单，改成自己的之后旧密码立刻�
     body: JSON.stringify({ newPassword: 'ab12cd34' }),
   });
   assert.equal(changed.status, 200);
+  assert.equal((await changed.json()).relogin, true, '改完密码要告诉前端重新登录');
+
+  // 密码一换，这个 token 之前发出去的 Cookie 全作废：别人抄了链接也进不来
+  const staleView = await fetch(`${BASE}/api/w/${token}`, { headers: { cookie: ctx.cookie } });
+  assert.equal(staleView.status, 401, '旧 Cookie 不能再用');
 
   assert.equal((await login(QQS[0], '123456')).res.status, 401, '初始密码不能再登进来');
   const again = await login(QQS[0], 'ab12cd34');
   assert.equal(again.res.status, 200);
   assert.equal(again.data.mustChange, false);
+  ctx.cookie = again.res.headers.getSetCookie()[0].split(';')[0];
 
   const saved = await fetch(`${BASE}/api/w/${token}/addresses`, {
     method: 'POST',
@@ -238,7 +244,10 @@ test('群主能把客户的密码退回初始密码，也能直接替他设一�
 
   await call('POST', `/api/admin/customers/${id}/password`, { password: 'zhuprovider1' });
   assert.equal((await login(QQS[0], '123456')).res.status, 401);
-  assert.equal((await login(QQS[0], 'zhuprovider1')).res.status, 200);
+  const res = (await login(QQS[0], 'zhuprovider1')).res;
+  assert.equal(res.status, 200);
+  // 群主代设密码同样把客户手上的旧会话踢掉，这里换新 Cookie 继续后面的流程
+  ctx.cookie = res.headers.getSetCookie()[0].split(';')[0];
 });
 
 test('包裹改状态，客户页同步', async () => {
@@ -274,14 +283,40 @@ test('称重台：点封面认领、填重量、缺件不进分摊', async () =>
         claimed: true,
       });
     }
-    await call('POST', `/api/admin/packages/${ctx.packageId}/weigh/group`, {
-      customerId: customer.customerId,
-      weightG: 1000,
-    });
+  }
+  const claimed = await call('GET', `/api/admin/packages/${ctx.packageId}/weigh`);
+  assert.equal(claimed.progress.foundItems, 4);
+  assert.equal(claimed.customers[0].items.length, 2);
+  // 认领完但一件都没称：预览和确认必须给同一个答复，不能预览过了、点确认才报错
+  for (const path of ['preview', 'commit']) {
+    const tooEarly = await call(
+      'POST',
+      `/api/admin/packages/${ctx.packageId}/allocate/${path}`,
+      { totalFeeYuan: '100.00' },
+      { raw: true },
+    );
+    assert.equal(tooEarly.status, 400, `${path} 在没有重量时必须拦住`);
+    assert.match(tooEarly.data.error, /没填重量|没称重/);
+  }
+
+  for (const customer of claimed.customers) {
+    // 每件各自称重，把这一摞的 1000 g 分到件上（零头给第一件）
+    const each = Math.floor(1000 / customer.items.length);
+    for (const [k, item] of customer.items.entries()) {
+      await call('POST', `/api/admin/packages/${ctx.packageId}/weigh/item`, {
+        itemId: item.id,
+        weightG: k === 0 ? 1000 - each * (customer.items.length - 1) : each,
+      });
+    }
   }
   const after = await call('GET', `/api/admin/packages/${ctx.packageId}/weigh`);
   assert.equal(after.progress.foundItems, 4);
   assert.equal(after.progress.weighedCustomers, 3);
+  assert.deepEqual(
+    after.customers.map((c) => c.weightG),
+    [1000, 1000, 1000],
+    '一摞的重量要等于各件之和',
+  );
   ctx.weighCustomers = after.customers;
 });
 
@@ -315,17 +350,30 @@ test('不填运费也能分摊：设置里的单价（默认 100 元/kg）× 各
   assert.equal(manual.priceFenPerKg, null);
   assert.equal(manual.totalFeeFen, 10000);
 
-  // 单价被清成 0 时不许闷着算，要拦住
-  await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '0' });
-  const blocked = await call(
-    'POST',
-    `/api/admin/packages/${ctx.packageId}/allocate/preview`,
-    {},
-    { raw: true },
-  );
-  assert.equal(blocked.status, 400);
+  // 单价不许填 0：整箱运费会被静默算成 0 元。填错了直接拒，原来的单价也不动
+  const zero = await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '0' }, { raw: true });
+  assert.equal(zero.status, 400);
+  assert.equal((await call('GET', '/api/admin/settings')).intlPriceFenPerKg, 8000, '被拒时不该改到设置');
 
   await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '100' });
+});
+
+test('设置里的金额：键名带 Yuan 按元收，带 Fen 按分收', async () => {
+  const before = await call('GET', '/api/admin/settings');
+  // 以前 *Fen 也会被再乘 100，10 元存成 1000 元；现在按字面意思办
+  const saved = await call('POST', '/api/admin/settings', { domesticFeeFen: 1234 });
+  assert.equal(saved.domesticFeeFen, 1234, 'Fen 就是分，不能再乘 100');
+  assert.equal(saved.intlPriceFenPerKg, before.intlPriceFenPerKg, '只改一项不该动另一项');
+  const yuan = await call('POST', '/api/admin/settings', { domesticFeeYuan: '12.34' });
+  assert.equal(yuan.domesticFeeFen, 1234, '元换算成分要和上面一致');
+  await call('POST', '/api/admin/settings', { domesticFeeFen: before.domesticFeeFen });
+  for (const bad of ['abc', '-1', '1.234']) {
+    assert.equal(
+      (await call('POST', '/api/admin/settings', { domesticFeeFen: bad }, { raw: true })).status,
+      400,
+      `「${bad}」不是合法的分`,
+    );
+  }
 });
 
 test('分摊：¥100.00 / 三个 1000 g → 每人 ¥33.33，尾差 ¥0.01 记需求方', async () => {
@@ -360,18 +408,26 @@ test('客户页能看到自己这一摞的重量和运费', async () => {
   assert.equal(data.weighGroups[0].weightG, 1000);
   assert.equal(data.weighGroups[0].intlFeeFen, 3333);
   assert.equal(data.weighGroups[0].items.length, 2);
+  // 这一摞的运费要一分不差地拆到每件上：客户按件勾选，件上的钱加起来必须等于整摞
+  const ownFees = data.items.filter((i) => i.intlFeeFen !== null);
+  assert.equal(ownFees.length, 2);
+  assert.equal(ownFees.reduce((s, i) => s + i.intlFeeFen, 0), 3333);
+  assert.ok(ownFees.every((i) => i.intlFeeFen > 0), '每件都要有自己的运费，不能留空');
   assert.equal(data.summary.intlUnpaidFen, 3333);
   assert.equal(data.summary.freightUnpaidFen, 3333);
 });
 
 test('已分摊的包裹不能再乱改重量，撤销后可以', async () => {
+  const itemId = ctx.weighCustomers[0].items[0].id;
   const blocked = await call(
     'POST',
-    `/api/admin/packages/${ctx.packageId}/weigh/group`,
-    { customerId: ctx.weighCustomers[0].customerId, weightG: 1200 },
+    `/api/admin/packages/${ctx.packageId}/weigh/item`,
+    { itemId, weightG: 1200 },
     { raw: true },
   );
   assert.equal(blocked.status, 400);
+  // 整摞重量已经没有接口可写了：只能由各件之和算出来
+  assert.equal((await call('GET', `/api/admin/packages/${ctx.packageId}/weigh`)).customers[0].weightG, 1000);
   await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/undo`);
   const reverted = await call('GET', `/api/admin/packages/${ctx.packageId}`);
   assert.ok(reverted.items.every((i) => i.status === 'cn_arrived'));
@@ -522,6 +578,160 @@ test('填单号、收国内运费', async () => {
   assert.equal(detail.summary.goodsUnpaidJpy, 0);
   assert.equal(detail.summary.freightUnpaidFen, 0);
   assert.equal(detail.shipments[0].trackingNo, 'SF123456789');
+});
+
+test('客户申请发货：勾货 → 群主确认收款 → 填单号寄出', async () => {
+  const me = ctx.customers[1];
+  await call('POST', `/api/admin/customers/${me.id}/password`, { password: 'fahuo-2026' });
+  const sess = await login(me.qq, 'fahuo-2026');
+  assert.equal(sess.res.status, 200);
+  const cookie = sess.res.headers.getSetCookie()[0].split(';')[0];
+  const asMe = async (path, body, method = 'POST') => {
+    const res = await fetch(`${BASE}/api/w/${me.token}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', cookie },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+
+  // 地址最多存 3 个，第 4 个要拦住
+  const addresses = [];
+  for (const n of [1, 2, 3]) {
+    const r = await asMe('/addresses', {
+      recipient: `小明${n}`,
+      phone: '13800000000',
+      detail: `某市某路 ${n} 号`,
+    });
+    assert.equal(r.status, 200);
+    addresses.push(r.data.id);
+  }
+  assert.equal(
+    (await asMe('/addresses', { recipient: '小明4', phone: '13800000000', detail: '某市某路 4 号' }))
+      .status,
+    400,
+    '最多保存 3 个地址',
+  );
+
+  const mine = sess.data.items.filter((i) => i.status === 'cn_stock');
+  assert.equal(mine.length, 1);
+  const foreignItem = (await call('GET', `/api/admin/customers/${ctx.customers[2].id}`)).items.find(
+    (i) => i.status === 'cn_stock',
+  );
+  assert.ok(foreignItem, '另一个客户也该有可发货的东西，才验得出越权');
+  assert.equal(
+    (await asMe('/requests', { itemIds: [mine[0].id, foreignItem.id], addressId: addresses[0] })).status,
+    400,
+    '别人的货勾不进自己的申请',
+  );
+
+  const first = await asMe('/requests', { itemIds: [mine[0].id], addressId: addresses[0] });
+  assert.equal(first.status, 200);
+  assert.equal(
+    (await asMe('/requests', { itemIds: [mine[0].id], addressId: addresses[0] })).status,
+    400,
+    '同一件不能申请两次',
+  );
+  assert.equal(
+    (await asMe(`/requests/${first.data.id}`, undefined, 'DELETE')).status,
+    200,
+    '没确认收款前客户能自己撤回',
+  );
+
+  const requestId = (await asMe('/requests', { itemIds: [mine[0].id], addressId: addresses[1] })).data.id;
+  assert.equal(
+    (await call('POST', `/api/admin/requests/${requestId}/ship`, { trackingNo: 'YT0' }, { raw: true }))
+      .status,
+    400,
+    '没确认收款不能直接寄出',
+  );
+
+  const list = await call('GET', '/api/admin/requests');
+  const row = list.requests.find((r) => r.id === requestId);
+  assert.equal(row.status, 'pending');
+  assert.deepEqual(JSON.parse(row.address_snapshot), {
+    recipient: '小明2',
+    phone: '13800000000',
+    detail: '某市某路 2 号',
+  });
+  assert.equal(
+    list.items.filter((i) => i.request_id === requestId).reduce((s, i) => s + i.intl_fee_fen, 0),
+    3333,
+  );
+  assert.equal(row.domestic_fee_fen, 1000);
+
+  await call('POST', `/api/admin/requests/${requestId}/paid`);
+  const paid = await call('GET', `/api/admin/payments?customerId=${me.id}`);
+  assert.deepEqual(
+    paid.payments.filter((p) => p.kind === 'item_intl').map((p) => [p.refId, p.amount]),
+    [[mine[0].id, 3333]],
+    '按件各记一笔国际运费',
+  );
+  const dom = paid.payments.find((p) => p.kind === 'domestic');
+  assert.equal(dom.amount, 1000);
+  assert.equal(dom.refId, requestId);
+  assert.equal(
+    (await asMe(`/requests/${requestId}`, undefined, 'DELETE')).status,
+    400,
+    '确认收款后客户不能反悔',
+  );
+
+  await call('POST', `/api/admin/requests/${requestId}/ship`, { trackingNo: 'YT9988776655' });
+  const after = await call('GET', `/api/admin/customers/${me.id}`);
+  assert.equal(after.items.find((i) => i.id === mine[0].id).status, 'shipped');
+  assert.equal(after.summary.intlUnpaidFen, 0, '这一摞的国际运费收清了');
+  assert.equal(after.summary.domesticUnpaidFen, 0);
+  assert.equal(after.shipments[0].trackingNo, 'YT9988776655');
+  // 国内运费那笔要跟着换成寄出记录，撤销收款时才知道退的是哪一趟
+  assert.equal(
+    (await call('GET', `/api/admin/payments?customerId=${me.id}`)).payments.find(
+      (p) => p.kind === 'domestic',
+    ).refId,
+    after.shipments[0].id,
+  );
+  assert.equal((await asMe('', undefined, 'GET')).data.shipments[0].trackingNo, 'YT9988776655');
+  ctx.shippedItem = mine[0].id;
+});
+
+test('已寄出的能标已签收，可发货和已寄出不许从外面硬设', async () => {
+  assert.equal((await call('PATCH', `/api/admin/items/${ctx.shippedItem}`, { status: 'delivered' })).ok, true);
+  const detail = await call('GET', `/api/admin/customers/${ctx.customers[1].id}`);
+  assert.equal(detail.items.find((i) => i.id === ctx.shippedItem).status, 'delivered');
+  assert.ok(detail.timeline.some((t) => t.toStatus === 'delivered'), '状态历史要留痕');
+
+  // 没称过重、也没寄出过的件：这两个状态只能由称重确认 / 寄出流程写出来
+  const box = `裸状态${stamp}`;
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: box,
+    fileHash: box,
+    sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['还没称的一件', box, 100]] },
+    assignments: [{ cn: box, newCustomer: { qq: `${stamp + 31}`.slice(-9), nickname: box } }],
+  });
+  const rawItem = (await call('GET', `/api/admin/batches/${added.batchId}`)).items[0];
+  for (const status of ['cn_stock', 'shipped']) {
+    const res = await call('PATCH', `/api/admin/items/${rawItem.id}`, { status }, { raw: true });
+    assert.equal(res.status, 400, `${status} 只能走称重确认 / 寄出流程`);
+    assert.match(res.data.error, /称重|寄出/);
+  }
+});
+
+test('请求体不是 JSON 对象时报 400，不甩 500', async () => {
+  for (const body of ['null', '[1,2]', '"abc"', '123', '{', '']) {
+    const res = await fetch(`${BASE}/api/admin/settings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: cookieHeader() },
+      body,
+    });
+    assert.equal(res.status, 400, `后台收到「${body}」应该是 400`);
+  }
+  const me = ctx.customers[1];
+  const cookie = (await login(me.qq, 'fahuo-2026')).res.headers.getSetCookie()[0].split(';')[0];
+  const res = await fetch(`${BASE}/api/w/${me.token}/addresses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: '[{"recipient":"a"}]',
+  });
+  assert.equal(res.status, 400, '客户页也是同样口径');
 });
 
 test('计费后禁止直接砍单；未计费取消件和已付退款清单仍正常', async () => {
@@ -938,4 +1148,20 @@ test('后台找货：只输货号尾巴就能定位到这一件，跳过去该�
 
   const anonymous = await fetch(`${BASE}/api/admin/items/search?q=${code.slice(-5)}`);
   assert.equal(anonymous.status, 401, '搜库不能不登录');
+});
+
+test('群主重置链接时把 QQ 连错锁定一起清掉', async () => {
+  const qq = `${stamp + 21}`.slice(-9);
+  const created = await call('POST', '/api/admin/customers', { qq, nickname: `锁定重置${stamp}` });
+  for (let i = 0; i < 4; i += 1) {
+    assert.equal((await login(qq, '乱猜的密码')).res.status, 401);
+  }
+  assert.equal((await login(qq, '乱猜的密码')).res.status, 429, '第 5 次错就锁 15 分钟');
+  assert.equal((await login(qq, '123456')).res.status, 429, '锁定期内密码对也进不去');
+
+  // 人被锁住时群主手里唯一的解药就是这个按钮，锁定必须跟着一起清
+  await call('POST', `/api/admin/customers/${created.id}/reset-token`);
+  const again = await login(qq, '123456');
+  assert.equal(again.res.status, 200, '重置后马上能登进来');
+  assert.equal(again.data.mustChange, true, '重置链接不动密码，还是初始那一个');
 });
