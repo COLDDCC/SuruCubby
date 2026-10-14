@@ -82,7 +82,6 @@
   }
 
   function allocation(totalFeeYuan, declaredWeightG) {
-    const fee = Math.round(Number(String(totalFeeYuan).replace(/[^\d.]/g, '')) * 100);
     const usable = weigh.customers.filter((c) => c.weightG > 0 && c.items.some((i) => i.weighGroupId && !i.missing));
     const notWeighed = weigh.customers.filter(
       (c) => c.items.some((i) => i.weighGroupId && !i.missing) && !(c.weightG > 0),
@@ -92,6 +91,16 @@
     }
     if (!usable.length) return { error: '还没有任何已认领的物品，不能分摊' };
     const total = usable.reduce((sum, c) => sum + c.weightG, 0);
+    // 不填金额就按设置里的单价从重量推（和后端 buildAllocation 一个口径）
+    const price = state['/api/admin/settings'].intlPriceFenPerKg ?? 10000;
+    let fee;
+    let priceFenPerKg = null;
+    if (totalFeeYuan === undefined || totalFeeYuan === null || totalFeeYuan === '') {
+      priceFenPerKg = price;
+      fee = Math.round((total * price) / 1000);
+    } else {
+      fee = Math.round(Number(String(totalFeeYuan).replace(/[^\d.]/g, '')) * 100);
+    }
     const rows = usable.map((c) => ({
       weighGroupId: c.customerId,
       customerId: c.customerId,
@@ -103,6 +112,7 @@
     }));
     return {
       totalFeeFen: fee,
+      priceFenPerKg,
       totalWeightG: total,
       declaredWeightG: declaredWeightG ?? null,
       weightDiffG: declaredWeightG ? declaredWeightG - total : null,
@@ -316,7 +326,12 @@
     }
 
     if (path === '/api/admin/settings' && method === 'POST') {
-      state['/api/admin/settings'].domesticFeeFen = Math.round(Number(body.domesticFeeYuan) * 100);
+      if (body.domesticFeeYuan !== undefined) {
+        state['/api/admin/settings'].domesticFeeFen = Math.round(Number(body.domesticFeeYuan) * 100);
+      }
+      if (body.intlPriceYuanPerKg !== undefined) {
+        state['/api/admin/settings'].intlPriceFenPerKg = Math.round(Number(body.intlPriceYuanPerKg) * 100);
+      }
       return json(state['/api/admin/settings']);
     }
 

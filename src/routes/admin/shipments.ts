@@ -55,7 +55,7 @@ shipmentRoutes.post('/', async (c) => {
   if(reserved) throw badRequest('有商品已申请发货，请到发货申请处理');
   const notInStock = items.results.filter((i) => i.status !== 'cn_stock');
   if (notInStock.length > 0) {
-    throw badRequest(`有 ${notInStock.length} 件东西不在「国内在库」状态，不能寄出`);
+    throw badRequest(`有 ${notInStock.length} 件东西不是「可发货」状态，不能寄出`);
   }
 
   const groupIds = [...new Set(items.results.map((i) => i.weighGroupId).filter((v): v is number => v !== null))];
@@ -133,7 +133,7 @@ shipmentRoutes.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-/** 撤销一次寄出（填错时用），物品退回「国内在库」。 */
+/** 撤销一次寄出（填错时用），物品退回「可发货」。 */
 shipmentRoutes.delete('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '寄出 ID');
   const db = c.env.DB;

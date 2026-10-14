@@ -23,7 +23,15 @@
   </nav>
   <button id="logout" class="plain small">退出</button>
 </header>
-<main class="wrap" id="view"><p class="muted">加载中…</p></main>
+<div class="shell">
+  <main class="wrap" id="view"><p class="muted">加载中…</p></main>
+  <aside class="rail" id="rail" hidden>
+    <label for="rail-q">找货</label>
+    <input id="rail-q" inputmode="search" placeholder="货号尾号 / 名称 / 客户名" autocomplete="off">
+    <p class="small muted" id="rail-tip">货号尾号、名称片段、客户名都认</p>
+    <div id="rail-results"></div>
+  </aside>
+</div>
 <script type="module" src="/admin/app.js"></script>
 </body>
 </html>

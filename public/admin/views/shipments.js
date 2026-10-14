@@ -6,7 +6,7 @@ export async function render(view) {
   view.innerHTML = `
     <div class="card">
       <h2>国内寄出</h2>
-      <p class="small muted">生成寄出在「客户详情」页操作：勾选国内在库的物品即可。</p>
+      <p class="small muted">生成寄出在「客户详情」页操作：勾选「可发货」的物品即可。</p>
       ${
         data.shipments.length
           ? data.shipments
@@ -48,7 +48,7 @@ export async function render(view) {
       render(view);
     },
     cancel: async ({ id }) => {
-      if (!(await confirmBox('撤销这次寄出？物品会退回「国内在库」。', { danger: true, okText: '撤销' }))) return;
+      if (!(await confirmBox('撤销这次寄出？物品会退回「可发货」。', { danger: true, okText: '撤销' }))) return;
       await api.del(`/api/admin/shipments/${id}`);
       toast('已撤销');
       render(view);

@@ -1,5 +1,6 @@
 import { api } from '/admin/api.js';
 import { toast } from '/admin/ui.js';
+import { showSearch } from '/admin/search.js';
 
 const view = document.getElementById('view');
 const nav = document.getElementById('nav');
@@ -21,7 +22,23 @@ const routes = [
 ];
 
 function currentPath() {
-  return location.hash.replace(/^#/, '') || '/';
+  return location.hash.replace(/^#/, '').split('?')[0] || '/';
+}
+
+/** 侧栏搜完货号会跳到 #/packages/1?item=61 这种地址，把落点那一件圈出来。 */
+function focusTarget() {
+  const query = location.hash.split('?')[1] ?? '';
+  return new URLSearchParams(query).get('item');
+}
+
+function highlightItem() {
+  view.querySelectorAll('.hit').forEach((el) => el.classList.remove('hit'));
+  const id = focusTarget();
+  if (!id) return;
+  const el = view.querySelector(`[data-focus-item="${id}"]`);
+  if (!el) return;
+  el.classList.add('hit');
+  el.scrollIntoView({ block: 'center' });
 }
 
 function markNav() {
@@ -34,6 +51,7 @@ function markNav() {
 }
 
 function renderLogin(message = '') {
+  showSearch(false);
   view.innerHTML = `
     <div class="card" style="max-width:360px;margin:40px auto">
       <h1>后台登录</h1>
@@ -67,6 +85,7 @@ export async function route() {
   if (!loggedIn) {
     const session = await api.get('/api/admin/session').catch(() => ({ loggedIn: false }));
     loggedIn = session.loggedIn;
+    showSearch(loggedIn);
     if (!loggedIn) {
       renderLogin();
       return;
@@ -83,6 +102,7 @@ export async function route() {
   try {
     const mod = await match.module();
     await mod.render(view, params);
+    highlightItem();
   } catch (err) {
     if (err?.status === 401) return;
     console.error(err);

@@ -42,10 +42,18 @@ if (!fs.existsSync(WRANGLER)) die('找不到 node_modules/wrangler，先 npm ins
 const base = `http://127.0.0.1:${opts.port}`;
 const childEnv = { ...process.env, E2E_BASE: base, SEED_BASE: base };
 
-fs.rmSync(opts.state, { recursive: true, force: true });
-
-// 这个端口是我们自己的沙箱端口，上面要是还挂着上次没关干净的实例，先收掉再启
+// 上一轮被硬杀时，wrangler/workerd 会赖在端口和库文件上不走，先收干净再删目录
 squash();
+try {
+  fs.rmSync(opts.state, { recursive: true, force: true, maxRetries: 10, retryDelay: 400 });
+} catch {
+  die(`删不掉 ${opts.state}，有进程还占着它。手动结束 wrangler / workerd 之后重试。`);
+}
+
+// 端口还有人应答就说明上一轮的实例没死干净。这时下面那个「有 HTTP 响应就算起来了」的探针
+// 会误判成自己的实例，测试就写进别人的库里去了，所以直接拒绝开跑。
+const squatters = pidsOnPort();
+if (squatters.length) die(`端口 ${opts.port} 还被进程 ${squatters.join(' / ')} 占着，先结束它再跑。`);
 
 // 先把迁移打进这个空库，免得 wrangler dev 卡在「要不要应用迁移」的提问上
 const migrated = spawnSync(
@@ -102,8 +110,28 @@ process.exit(ran);
 
 // wrangler 会派生 workerd 子进程；只杀父进程在 Windows 上会留下占着端口和库文件的孤儿，
 // 所以下次开跑时按端口再兜一遍，把上一轮的残渣收掉。
+// 上一轮被硬杀留下的实例会同时赖着端口和库文件。要收的是带我们这个端口参数的进程
+// （wrangler 的 node 父进程会重新生 workerd，只杀 workerd 没用），外加正在监听的孤儿。
 function squash() {
-  for (const pid of pidsOnPort()) spawnSync('taskkill', ['//PID', String(pid), '//T', '//F'], { stdio: 'ignore' });
+  const finder =
+    `Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='workerd.exe' or Name='npx.exe'" | ` +
+    `Where-Object { $_.ProcessId -ne ${process.pid} -and $_.CommandLine -like '*--port ${opts.port}*' } | ` +
+    'Select-Object -ExpandProperty ProcessId';
+  const out = spawnSync('powershell', ['-NoProfile', '-Command', finder], { encoding: 'utf8' }).stdout ?? '';
+  const pids = new Set([
+    ...out
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => /^\d+$/.test(s)),
+    ...pidsOnPort(),
+  ]);
+  for (const pid of pids) {
+    spawnSync('taskkill', ['//PID', pid, '//T', '//F'], { stdio: 'ignore' });
+  }
+  for (let i = 0; i < 10 && pidsOnPort().length; i += 1) {
+    pidsOnPort().forEach((pid) => spawnSync('taskkill', ['//PID', pid, '//T', '//F'], { stdio: 'ignore' }));
+    spawnSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 300'], { stdio: 'ignore' });
+  }
 }
 
 function teardown() {

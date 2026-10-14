@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
-import { nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
-import { allocate } from '../../lib/allocate.ts';
+import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg } from '../../lib/db.ts';
+import { allocate, feeFromWeight } from '../../lib/allocate.ts';
 import { toFen } from '../../lib/money.ts';
 
 export const weighRoutes = new Hono<{ Bindings: Env }>();
@@ -144,6 +144,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
   return c.json({
     package: pkg,
     customers,
+    intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
     progress: {
       expectedItems: expected,
       foundItems: found,
@@ -269,10 +270,10 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   let totalFeeFen: number | null = null;
   if (body.totalFeeFen !== undefined && body.totalFeeFen !== null && body.totalFeeFen !== '') {
     totalFeeFen = requireInt(body.totalFeeFen, '国际运费（分）');
-  } else if (body.totalFeeYuan !== undefined) {
+  } else if (body.totalFeeYuan !== undefined && body.totalFeeYuan !== null && body.totalFeeYuan !== '') {
     totalFeeFen = toFen(body.totalFeeYuan);
   }
-  if (totalFeeFen === null || totalFeeFen < 0) throw badRequest('请填写这个包裹的实际国际运费');
+  if (totalFeeFen !== null && totalFeeFen < 0) throw badRequest('国际运费不能是负数');
 
   const groups = await env.DB.prepare(
     `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, g.weight_g AS weightG,
@@ -305,6 +306,17 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
     );
   }
 
+  // 没给金额就按设置里的单价从重量推：100 元 /kg 是常用价，称重台不用每次手填
+  let priceFenPerKg: number | null = null;
+  if (totalFeeFen === null) {
+    priceFenPerKg = await intlPriceFenPerKg(env);
+    if (priceFenPerKg <= 0) throw badRequest('设置里的国际运费单价是 0，先填单价或手动给金额');
+    totalFeeFen = feeFromWeight(
+      usable.reduce((sum, g) => sum + (g.weightG as number), 0),
+      priceFenPerKg,
+    );
+  }
+
   const result = allocate(
     totalFeeFen,
     usable.map((g) => ({ id: g.id, weightG: g.weightG as number })),
@@ -331,6 +343,7 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
 
   return {
     totalFeeFen,
+    priceFenPerKg,
     totalWeightG: result.totalWeightG,
     declaredWeightG,
     weightDiffG: declaredWeightG === null ? null : declaredWeightG - result.totalWeightG,

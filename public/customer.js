@@ -7,7 +7,7 @@ const GROUPS = [
   { title: '在日本', statuses: ['ordered', 'jp_warehouse'], note: '' },
   { title: '运输中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
   {
-    title: '国内在库，等你发货',
+    title: '可发货',
     statuses: ['cn_stock'],
     note: '勾选要寄的商品，选择地址后提交申请。扫码转账后由群主确认。',
   },
@@ -190,7 +190,7 @@ function render(data) {
         <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
         <div class="stat big"><div class="label">运费待付</div><div class="value money">${money(s.freightUnpaidFen)}</div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。国内在库 ${s.stockCount} 件，随时可以要求发货。</p>
+      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。可发货 ${s.stockCount} 件，随时可以要求发货。</p>
     </div>
     <div class="card"><h2>收货地址（最多3个）</h2>
       ${(data.addresses||[]).map(a=>`<label class="row"><input name="ship-address" type="radio" value="${a.id}"><span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span><button class="small plain" data-delete-address="${a.id}">删除</button></label>`).join('')}
@@ -236,7 +236,7 @@ function bindWarehouse(data){
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
  const add=app.querySelector('#add-address');if(add)add.onclick=handle(()=>send('/addresses','POST',{recipient:app.querySelector('#recipient').value,phone:app.querySelector('#phone').value,detail:app.querySelector('#detail').value}));
  const selected=()=>[...app.querySelectorAll('[data-ship-item]:checked')].map(el=>Number(el.dataset.shipItem));
- const refresh=()=>{const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);app.querySelector('#shipping-total').textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「已到国内」商品后提交。';};
+ const refresh=()=>{const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);app.querySelector('#shipping-total').textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「可发货」商品后提交。';};
  app.querySelectorAll('[data-ship-item]').forEach(el=>el.onchange=refresh);refresh();
  app.querySelector('#request-shipping').onclick=handle(()=>{const address=app.querySelector('[name="ship-address"]:checked');if(!address)throw Error('请选择收货地址');return send('/requests','POST',{itemIds:selected(),addressId:Number(address.value)});});
 }

@@ -1,5 +1,17 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, confirmBox, escapeHtml, jpy, statusLabel, yen, toast, promptBox } from '/admin/ui.js';
+import {
+  beijingTime,
+  bindActions,
+  codeTag,
+  confirmBox,
+  escapeHtml,
+  jpy,
+  statusLabel,
+  thumb,
+  yen,
+  toast,
+  promptBox,
+} from '/admin/ui.js';
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/batches/${id}`);
@@ -31,18 +43,15 @@ export async function render(view, [id]) {
             <div class="small ${unpaid ? 'unpaid' : 'paid'} money">${unpaid ? `未付 ${yen(unpaid)}` : '已付清'}</div>
           </div>
         </div>
-        ${
-          unpaid
-            ? `<button class="small" data-action="pay" data-customer="${g.customerId}">这一批货款已收</button>`
-            : ''
-        }
         <div class="scroll-x" style="margin-top:8px"><table>
-          <thead><tr><th>行</th><th>名称</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
+          <thead><tr><th>图</th><th>行</th><th>名称</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
           <tbody>${g.items
             .map(
-              (i) => `<tr>
+              (i) => `<tr data-focus-item="${i.id}">
+              <td class="cell-thumb">${thumb(i)}</td>
               <td class="small muted">${i.rowNo ?? ''}</td>
-              <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}</td>
+              <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
+                <div>${codeTag(i)}</div></td>
               <td class="right small">${jpy(i.actualPriceJpy)}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
@@ -54,15 +63,25 @@ export async function render(view, [id]) {
     })
     .join('');
 
+  const unpaidItems = data.items.filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded');
+  const unpaidPeople = new Set(unpaidItems.map((i) => i.customerId)).size;
+  const unpaidTotal = unpaidItems.reduce((sum, i) => sum + i.goodsFeeJpy, 0);
+
   view.innerHTML = `
     <div class="card">
       <h2>${escapeHtml(data.batch.name)}</h2>
-      <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo||'待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo||'待填')}</button></p>
+      <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
       <p class="small muted">
         导入于 ${beijingTime(data.batch.createdAt)} ·
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·
         共 ${data.items.length} 件
       </p>
+      ${
+        unpaidItems.length
+          ? `<p><button data-action="payAll">这批货款全收（${unpaidPeople} 人 · ${yen(unpaidTotal)}）</button>
+              <span class="small muted">点一次给每个人都记一笔，不用一个个客户确认；谁其实没付，去他页面撤销那一笔</span></p>`
+          : '<p class="small paid">这一批货款都记完了。</p>'
+      }
       <p class="small"><button class="small plain" data-action="fetchImages">固化封面图</button>
         <span class="small muted">缺图的去商品页抓 og:image；绑了 R2 就把图存进自己的桶，一次 20 件</span></p>
       <p class="small">关联包裹：${
@@ -74,7 +93,14 @@ export async function render(view, [id]) {
     ${groups}`;
 
   bindActions(view, {
-    orderTracking:async()=>{const orderNo=await promptBox('日本订单号',data.batch.orderNo||'');if(orderNo===null)return;const japanTrackingNo=await promptBox('日本物流单号',data.batch.japanTrackingNo||'');if(japanTrackingNo===null)return;await api.patch(`/api/admin/batches/${id}`,{orderNo,japanTrackingNo});await render(view,[id]);},
+    orderTracking: async () => {
+      const orderNo = await promptBox('日本订单号', data.batch.orderNo || '');
+      if (orderNo === null) return;
+      const japanTrackingNo = await promptBox('日本物流单号', data.batch.japanTrackingNo || '');
+      if (japanTrackingNo === null) return;
+      await api.patch(`/api/admin/batches/${id}`, { orderNo, japanTrackingNo });
+      await render(view, [id]);
+    },
     fetchImages: async (dataset, el) => {
       el.disabled = true;
       el.textContent = '正在抓…';
@@ -89,14 +115,19 @@ export async function render(view, [id]) {
         toast(err.message, true);
       }
     },
-    pay: async ({ customer }) => {
-      if (!(await confirmBox('确认这位客户这一批的货款已经收到？'))) return;
-      await api.post('/api/admin/payments', {
-        customerId: Number(customer),
-        kind: 'goods',
-        batchId: Number(id),
-      });
-      toast('已记账');
+    payAll: async () => {
+      if (
+        !(await confirmBox(`把这批还没付的货款全部记为已收？${unpaidPeople} 个人，合计 ${yen(unpaidTotal)}。`, {
+          okText: '全记上',
+        }))
+      )
+        return;
+      try {
+        const r = await api.post('/api/admin/payments/all-goods', { batchId: Number(id) });
+        toast(`已记 ${r.customers} 个人的货款，合计 ${yen(r.amountJpy)}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
       render(view, [id]);
     },
   });

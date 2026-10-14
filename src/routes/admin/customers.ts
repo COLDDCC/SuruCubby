@@ -4,14 +4,30 @@ import { badRequest, notFound, optionalString, readJson, requireInt, requireStri
 import { nextId, nowIso } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
 import { buildCustomerView } from '../../lib/customerView.ts';
+import { buildNameIndex, matchName } from '../../lib/nameMatch.ts';
 
 export const customerRoutes = new Hono<{ Bindings: Env }>();
+
+interface RosterRow {
+  qq?: string;
+  nickname?: string;
+  realName?: string;
+}
+
+/** 库里已有的人，名单导入时既拿来判重，也当名字索引用 */
+interface RosterCustomer {
+  id: number;
+  qq: string;
+  nickname: string;
+  token: string;
+  realName: string | null;
+}
 
 customerRoutes.get('/', async (c) => {
   const q = c.req.query('q')?.trim() ?? '';
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(
-    `SELECT c.id, c.qq, c.nickname, c.token, c.note, c.created_at AS createdAt,
+    `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.created_at AS createdAt,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id) AS itemCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
             (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i
@@ -21,17 +37,23 @@ customerRoutes.get('/', async (c) => {
             (SELECT COALESCE(SUM(s.fee_fen), 0) FROM shipments s
               WHERE s.customer_id = c.id AND s.fee_paid = 0) AS domesticUnpaidFen
        FROM customers c
-      WHERE (? = '' OR c.qq LIKE ? OR c.nickname LIKE ?
+      WHERE (? = '' OR c.qq LIKE ? OR c.nickname LIKE ? OR c.real_name LIKE ?
              OR EXISTS (SELECT 1 FROM customer_aliases a WHERE a.customer_id = c.id AND a.alias LIKE ?))
       ORDER BY c.nickname`,
   )
-    .bind(q, like, like, like)
+    .bind(q, like, like, like, like)
     .all();
   return c.json({ customers: rows.results });
 });
 
 customerRoutes.post('/', async (c) => {
-  const body = await readJson<{ qq?: string; nickname?: string; note?: string; alias?: string }>(c);
+  const body = await readJson<{
+    qq?: string;
+    nickname?: string;
+    realName?: string;
+    note?: string;
+    alias?: string;
+  }>(c);
   const qq = requireString(body.qq, 'QQ 号');
   if (!/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
   const nickname = requireString(body.nickname, '昵称');
@@ -40,29 +62,172 @@ customerRoutes.post('/', async (c) => {
   if (exists) throw badRequest('这个 QQ 号已经有客户了');
   const id = await nextId(db, 'customers');
   const token = randomToken();
+  // 表里写的既可能是昵称也可能是另一个叫法，两个都得登记，不然下次导入认不出这个人
+  const aliases = [...new Set([nickname, optionalString(body.alias)].filter((x): x is string => !!x))];
   await db.batch([
     db
-      .prepare('INSERT INTO customers (id, qq, nickname, token, note, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(id, qq, nickname, token, optionalString(body.note), nowIso()),
-    db
-      .prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)')
-      .bind(optionalString(body.alias) ?? nickname, id),
+      .prepare(
+        'INSERT INTO customers (id, qq, nickname, token, note, real_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .bind(id, qq, nickname, token, optionalString(body.note), optionalString(body.realName), nowIso()),
+    ...aliases.map((alias) =>
+      db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(alias, id),
+    ),
   ]);
   return c.json({ id, token });
+});
+
+/**
+ * 名单导入：把攒了很久的「名字 + QQ（+ 真名）」一次灌进来，不用一个个点。
+ * dryRun 只出结果不写库，确认没问题再来一次真写。
+ * 名字已经有主的情况一律不动手：宁可让你去核对，也不把一个客户的名字挪到另一个客户身上。
+ */
+customerRoutes.post('/import', async (c) => {
+  const body = await readJson<{ fileName?: string; dryRun?: boolean; rows?: RosterRow[] }>(c);
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (rows.length === 0) throw badRequest('名单里没有内容');
+  if (rows.length > 2000) throw badRequest('一份名单最多 2000 行，多了分开导');
+
+  const db = c.env.DB;
+  const index = await buildNameIndex(db);
+  const byQq = new Map<string, RosterCustomer>();
+  for (let offset = 0; ; offset += 100) {
+    const page = await db
+      .prepare('SELECT id, qq, nickname, token, real_name AS realName FROM customers ORDER BY id LIMIT 100 OFFSET ?')
+      .bind(offset)
+      .all<RosterCustomer>();
+    for (const row of page.results) byQq.set(row.qq, row);
+    if (page.results.length < 100) break;
+  }
+
+  const created: Array<{ qq: string; nickname: string; realName: string | null }> = [];
+  const updated: Array<{ qq: string; nickname: string; addedNames: string[]; realNameFilled: boolean }> = [];
+  const conflicts: Array<{ row: number; qq: string; nickname: string; reason: string }> = [];
+  const errors: Array<{ row: number; reason: string }> = [];
+  const statements: D1PreparedStatement[] = [];
+
+  let nextCustomerId = await nextId(db, 'customers');
+  const now = nowIso();
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const rowNo = i + 2; // 第 1 行是表头，报错好对得上 Excel
+    const raw = rows[i];
+    const qq = optionalString(raw?.qq) ?? '';
+    const nickname = optionalString(raw?.nickname) ?? '';
+    const realName = optionalString(raw?.realName);
+    if (!qq && !nickname) continue; // 整行空着，跳过
+    if (!qq) {
+      errors.push({ row: rowNo, reason: `「${nickname}」没有 QQ 号，光靠名字认不出人` });
+      continue;
+    }
+    if (!/^\d{5,15}$/.test(qq)) {
+      errors.push({ row: rowNo, reason: `QQ 号「${qq}」不像 QQ 号` });
+      continue;
+    }
+    if (!nickname) {
+      errors.push({ row: rowNo, reason: `QQ ${qq} 这一行没有名字` });
+      continue;
+    }
+
+    const nameHit = matchName(index, nickname);
+    const ownerByQq = byQq.get(qq);
+    const ownerByName = nameHit.customer;
+
+    if (nameHit.by === 'ambiguous') {
+      conflicts.push({
+        row: rowNo,
+        qq,
+        nickname,
+        reason: `「${nickname}」和好几个客户都对得上（${nameHit.candidates.map((x) => `${x.nickname} QQ ${x.qq}`).join('、')}）`,
+      });
+      continue;
+    }
+    if (ownerByQq && ownerByName && ownerByName.id !== ownerByQq.id) {
+      conflicts.push({
+        row: rowNo,
+        qq,
+        nickname,
+        reason: `QQ ${qq} 是「${ownerByQq.nickname}」，但名字「${nickname}」已经是 ${ownerByName.nickname}（QQ ${ownerByName.qq}）的`,
+      });
+      continue;
+    }
+    if (!ownerByQq && ownerByName) {
+      conflicts.push({
+        row: rowNo,
+        qq,
+        nickname,
+        reason: `「${nickname}」已经是 ${ownerByName.nickname}（QQ ${ownerByName.qq}）的名字，再按 QQ ${qq} 建就成了两个同名人`,
+      });
+      continue;
+    }
+
+    if (ownerByQq) {
+      // 这个人已经在库里：把表里的写法补成名字，真名只在空着的时候填
+      const added: string[] = [];
+      if (!index.exact.has(nickname)) {
+        added.push(nickname);
+        index.exact.set(nickname, ownerByQq);
+        statements.push(
+          db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(nickname, ownerByQq.id),
+        );
+      }
+      let realNameFilled = false;
+      if (realName && !ownerByQq.realName) {
+        realNameFilled = true;
+        ownerByQq.realName = realName;
+        statements.push(db.prepare('UPDATE customers SET real_name = ? WHERE id = ?').bind(realName, ownerByQq.id));
+      }
+      if (added.length || realNameFilled) {
+        updated.push({ qq, nickname: ownerByQq.nickname, addedNames: added, realNameFilled });
+      }
+      continue;
+    }
+
+    const id = nextCustomerId;
+    nextCustomerId += 1;
+    const customer: RosterCustomer = { id, qq, nickname, realName, token: randomToken() };
+    byQq.set(qq, customer);
+    index.exact.set(nickname, customer);
+    created.push({ qq, nickname, realName });
+    statements.push(
+      db
+        .prepare(
+          'INSERT INTO customers (id, qq, nickname, token, real_name, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .bind(id, qq, nickname, customer.token, realName, now),
+      db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(nickname, id),
+    );
+  }
+
+  if (!body.dryRun && statements.length) await db.batch(statements);
+
+  return c.json({
+    dryRun: Boolean(body.dryRun),
+    fileName: optionalString(body.fileName) || null,
+    counts: {
+      rows: rows.length,
+      created: created.length,
+      updated: updated.length,
+      conflicts: conflicts.length,
+      errors: errors.length,
+    },
+    created,
+    updated,
+    conflicts,
+    errors,
+  });
 });
 
 customerRoutes.get('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
   const view = await buildCustomerView(c.env, id);
   if (!view) throw notFound('客户不存在');
-  const aliases = await c.env.DB.prepare(
-    'SELECT alias FROM customer_aliases WHERE customer_id = ? ORDER BY alias',
-  )
+  const aliases = await c.env.DB.prepare('SELECT alias FROM customer_aliases WHERE customer_id = ? ORDER BY alias')
     .bind(id)
     .all<{ alias: string }>();
-  const row = await c.env.DB.prepare('SELECT token, note FROM customers WHERE id = ?')
+  const row = await c.env.DB.prepare('SELECT token, note, real_name AS realName FROM customers WHERE id = ?')
     .bind(id)
-    .first<{ token: string; note: string | null }>();
+    .first<{ token: string; note: string | null; realName: string | null }>();
   const payments = await c.env.DB.prepare(
     `SELECT id, kind, currency, amount, ref_type AS refType, ref_id AS refId, note, paid_at AS paidAt
        FROM payments WHERE customer_id = ? ORDER BY id DESC LIMIT 50`,
@@ -74,29 +239,48 @@ customerRoutes.get('/:id', async (c) => {
     aliases: aliases.results.map((a) => a.alias),
     token: row?.token,
     note: row?.note ?? null,
+    realName: row?.realName ?? null,
     payments: payments.results,
   });
 });
 
 customerRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
-  const body = await readJson<{ nickname?: string; qq?: string; note?: string }>(c);
+  const body = await readJson<{
+    nickname?: string;
+    qq?: string;
+    realName?: string;
+    note?: string;
+  }>(c);
   const qq = optionalString(body.qq);
   if (qq !== null && !/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
-  await c.env.DB.prepare(
-    'UPDATE customers SET nickname = COALESCE(?, nickname), qq = COALESCE(?, qq), note = COALESCE(?, note) WHERE id = ?',
-  )
-    .bind(optionalString(body.nickname), qq, optionalString(body.note), id)
-    .run();
+  const nickname = optionalString(body.nickname);
+  const db = c.env.DB;
+  if (nickname !== null) {
+    const taken = await db
+      .prepare('SELECT customer_id AS ownerId FROM customer_aliases WHERE alias = ?')
+      .bind(nickname)
+      .first<{ ownerId: number }>();
+    if (taken && taken.ownerId !== id) throw badRequest(`「${nickname}」这个名字已经是别的客户在用了`);
+  }
+  await db.batch([
+    db
+      .prepare(
+        'UPDATE customers SET nickname = COALESCE(?, nickname), qq = COALESCE(?, qq), real_name = COALESCE(?, real_name), note = COALESCE(?, note) WHERE id = ?',
+      )
+      .bind(nickname, qq, optionalString(body.realName), optionalString(body.note), id),
+    // 改完昵称，新名字必须也能在表里认出来；旧别名留着，早前的表还能对上
+    ...(nickname === null
+      ? []
+      : [db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(nickname, id)]),
+  ]);
   return c.json({ ok: true });
 });
 
 customerRoutes.post('/:id/reset-token', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
   const token = randomToken();
-  const result = await c.env.DB.prepare('UPDATE customers SET token = ? WHERE id = ?')
-    .bind(token, id)
-    .run();
+  const result = await c.env.DB.prepare('UPDATE customers SET token = ? WHERE id = ?').bind(token, id).run();
   if (!result.meta.changes) throw notFound('客户不存在');
   await c.env.DB.prepare('DELETE FROM token_attempts WHERE token = ?').bind(token).run();
   return c.json({ token });
@@ -106,9 +290,7 @@ customerRoutes.post('/:id/aliases', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
   const body = await readJson<{ alias?: string }>(c);
   const alias = requireString(body.alias, '别名');
-  const existing = await c.env.DB.prepare(
-    'SELECT customer_id AS customerId FROM customer_aliases WHERE alias = ?',
-  )
+  const existing = await c.env.DB.prepare('SELECT customer_id AS customerId FROM customer_aliases WHERE alias = ?')
     .bind(alias)
     .first<{ customerId: number }>();
   if (existing && existing.customerId !== id) throw badRequest('这个名字已经绑在别的客户身上了');
@@ -121,9 +303,7 @@ customerRoutes.post('/:id/aliases', async (c) => {
 customerRoutes.delete('/:id/aliases/:alias', async (c) => {
   const id = requireInt(c.req.param('id'), '客户 ID');
   const alias = decodeURIComponent(c.req.param('alias'));
-  await c.env.DB.prepare('DELETE FROM customer_aliases WHERE alias = ? AND customer_id = ?')
-    .bind(alias, id)
-    .run();
+  await c.env.DB.prepare('DELETE FROM customer_aliases WHERE alias = ? AND customer_id = ?').bind(alias, id).run();
   return c.json({ ok: true });
 });
 
@@ -151,12 +331,23 @@ customerRoutes.post('/merge', async (c) => {
     .all<{ sourceGroupId: number; targetGroupId: number }>();
 
   if (conflicts.results.length) {
-    const charged = await db.prepare(`SELECT id FROM weigh_groups WHERE customer_id IN (?,?) AND (intl_fee_fen IS NOT NULL OR fee_paid=1) LIMIT 1`).bind(sourceId,targetId).first();
+    const charged = await db
+      .prepare(
+        `SELECT id FROM weigh_groups WHERE customer_id IN (?,?) AND (intl_fee_fen IS NOT NULL OR fee_paid=1) LIMIT 1`,
+      )
+      .bind(sourceId, targetId)
+      .first();
     if (charged) throw badRequest('已有运费账目的客户不能合并，请先核对并撤销相关收款和分摊');
   }
-  const addressCount = await db.prepare('SELECT COUNT(*) AS n FROM addresses WHERE customer_id IN (?,?)').bind(sourceId,targetId).first<{n:number}>();
-  if ((addressCount?.n ?? 0)>3) throw badRequest('合并后地址超过3个，请先删除多余地址');
-  const active = await db.prepare(`SELECT id FROM shipping_requests WHERE customer_id IN (?,?) AND status IN ('pending','paid') LIMIT 1`).bind(sourceId,targetId).first();
+  const addressCount = await db
+    .prepare('SELECT COUNT(*) AS n FROM addresses WHERE customer_id IN (?,?)')
+    .bind(sourceId, targetId)
+    .first<{ n: number }>();
+  if ((addressCount?.n ?? 0) > 3) throw badRequest('合并后地址超过3个，请先删除多余地址');
+  const active = await db
+    .prepare(`SELECT id FROM shipping_requests WHERE customer_id IN (?,?) AND status IN ('pending','paid') LIMIT 1`)
+    .bind(sourceId, targetId)
+    .first();
   if (active) throw badRequest('有待处理发货申请，不能合并');
   const statements: D1PreparedStatement[] = [];
   for (const conflict of conflicts.results) {
@@ -182,9 +373,7 @@ customerRoutes.post('/merge', async (c) => {
     db.prepare('UPDATE shipping_requests SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('UPDATE shipments SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('UPDATE payments SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
-    db
-      .prepare('UPDATE OR REPLACE customer_aliases SET customer_id = ? WHERE customer_id = ?')
-      .bind(targetId, sourceId),
+    db.prepare('UPDATE OR REPLACE customer_aliases SET customer_id = ? WHERE customer_id = ?').bind(targetId, sourceId),
     db.prepare('DELETE FROM customers WHERE id = ?').bind(sourceId),
   );
   await db.batch(statements);

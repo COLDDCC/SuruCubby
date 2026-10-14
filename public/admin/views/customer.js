@@ -2,14 +2,15 @@ import { api } from '/admin/api.js';
 import {
   beijingTime,
   bindActions,
+  codeTag,
   confirmBox,
   empty,
   escapeHtml,
   jpy,
   money,
-  openModal,
   promptBox,
   statusLabel,
+  thumb,
   toast,
   yen,
 } from '/admin/ui.js';
@@ -39,6 +40,9 @@ export async function render(view, [id]) {
       <p class="small muted">货款按日元记，客户付款当天按汇率折成人民币；运费是人民币，两者不合并算总数。</p>
       <p class="small muted">别名：${data.aliases.map((a) => escapeHtml(a)).join('、') || '无'}
         <button class="small plain" data-action="addAlias">加别名</button></p>
+      <p class="small muted">真名（只有后台看得到，客户自己的页面不显示）：${
+        data.realName ? escapeHtml(data.realName) : '没填'
+      } <button class="small plain" data-action="realName">改</button></p>
     </div>
 
     <div class="card">
@@ -56,8 +60,7 @@ export async function render(view, [id]) {
             <span class="${b.unpaidJpy ? 'unpaid' : 'paid'} money">${b.unpaidJpy ? `未付 ${yen(b.unpaidJpy)}` : '已付清'}</span>
             ${
               b.unpaidJpy
-                ? `<button class="small" data-action="payBatch" data-batch="${b.batchId}">全部已收</button>
-                   <button class="small plain" data-action="paySome" data-batch="${b.batchId}">收部分</button>`
+                ? `<button class="small" data-action="payBatch" data-batch="${b.batchId}">这一批全部已收</button>`
                 : ''
             }
           </div>
@@ -69,7 +72,7 @@ export async function render(view, [id]) {
     </div>
 
     <div class="card">
-      <h3>国内在库（${stock.length} 件）</h3>
+      <h3>可发货（${stock.length} 件）</h3>
       ${
         stock.length
           ? `<form id="shipForm">
@@ -85,7 +88,7 @@ export async function render(view, [id]) {
           <button type="button" data-action="ship">生成一次寄出</button>
           <span class="small muted">每次固定收国内运费，与件数无关。</span>
         </form>`
-          : empty('没有在库物品')
+          : empty('没有可发货物品')
       }
     </div>
 
@@ -141,11 +144,13 @@ export async function render(view, [id]) {
     <div class="card">
       <h3>全部物品</h3>
       <div class="scroll-x"><table>
-        <thead><tr><th>名称</th><th>批次</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
+        <thead><tr><th>图</th><th>名称</th><th>批次</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
         <tbody>${data.items
           .map(
-            (i) => `<tr>
-            <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
+            (i) => `<tr data-focus-item="${i.id}">
+            <td class="cell-thumb">${thumb(i)}</td>
+            <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
+              <div>${codeTag(i)}</div></td>
             <td class="small muted">${escapeHtml(i.batchName)}</td>
             <td class="right small">${jpy(i.actualPriceJpy)}</td>
             <td class="right money">${yen(i.goodsFeeJpy)}</td>
@@ -199,53 +204,39 @@ export async function render(view, [id]) {
       toast('已添加');
       reload();
     },
+    realName: async () => {
+      const real = await promptBox('真名（只有你在后台看得到）', data.realName || '');
+      if (!real) return;
+      await api.patch(`/api/admin/customers/${id}`, { realName: real });
+      toast('已记下');
+      reload();
+    },
     merge: async () => {
       const sourceId = await promptBox('把哪个客户（ID）合并进来？合并后那个客户会被删除');
       if (!sourceId) return;
-      if (!(await confirmBox(`确定把 #${sourceId} 的所有数据并到这里？`, { danger: true, okText: '合并' })))
-        return;
+      if (!(await confirmBox(`确定把 #${sourceId} 的所有数据并到这里？`, { danger: true, okText: '合并' }))) return;
       await api.post('/api/admin/customers/merge', { sourceId: Number(sourceId), targetId: Number(id) });
       toast('已合并');
       reload();
     },
     payBatch: async ({ batch }) => {
-      if (!(await confirmBox('确认这一批的货款全部收到？'))) return;
-      await api.post('/api/admin/payments', { customerId: Number(id), kind: 'goods', batchId: Number(batch) });
-      toast('已记账');
-      reload();
-    },
-    paySome: ({ batch }) => {
       const items = data.items.filter(
         (i) => i.batchId === Number(batch) && !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded',
       );
-      openModal((box, close) => {
-        box.innerHTML = `
-          <h3>勾选这次收到的物品</h3>
-          ${items
-            .map(
-              (i) => `<label class="row" style="margin:6px 0">
-            <input type="checkbox" name="pick" value="${i.id}" checked>
-            <span>${escapeHtml(i.title)}</span>
-            <span class="money small muted">${yen(i.goodsFeeJpy)}</span></label>`,
-            )
-            .join('')}
-          <div class="row" style="justify-content:flex-end;margin-top:12px">
-            <button class="plain" data-no>取消</button><button data-yes>记一笔</button>
-          </div>`;
-        box.querySelector('[data-no]').onclick = close;
-        box.querySelector('[data-yes]').onclick = async () => {
-          const itemIds = [...box.querySelectorAll('input[name=pick]:checked')].map((el) => Number(el.value));
-          if (itemIds.length === 0) return toast('一件都没勾', true);
-          try {
-            await api.post('/api/admin/payments', { customerId: Number(id), kind: 'goods', itemIds });
-            close();
-            toast('已记账');
-            reload();
-          } catch (err) {
-            toast(err.message, true);
-          }
-        };
-      });
+      const total = items.reduce((sum, i) => sum + i.goodsFeeJpy, 0);
+      if (
+        !(await confirmBox(`这一批还有 ${items.length} 件没记，合计 ${yen(total)}。全部记为已收？`, {
+          okText: '全记上',
+        }))
+      )
+        return;
+      try {
+        await api.post('/api/admin/payments', { customerId: Number(id), kind: 'goods', batchId: Number(batch) });
+        toast('已记账');
+      } catch (err) {
+        toast(err.message, true);
+      }
+      reload();
     },
     payIntl: async ({ group }) => {
       await api.post('/api/admin/payments', { customerId: Number(id), kind: 'intl', weighGroupId: Number(group) });

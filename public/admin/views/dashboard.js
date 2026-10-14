@@ -72,20 +72,20 @@ export async function render(view) {
         .map((r) =>
           row(
             customerLink(r),
-            `在库 ${r.count} 件 · 最早一件已放 <span class="${r.days >= 30 ? 'unpaid' : ''}">${r.days} 天</span>`,
+            `可发货 ${r.count} 件 · 最早一件已放 <span class="${r.days >= 30 ? 'unpaid' : ''}">${r.days} 天</span>`,
             '',
             `<a class="btn small ghost" href="#/customers/${r.customerId}">安排寄出</a>`,
           ),
         )
         .join('')
-    : empty('国内没有在库物品');
+    : empty('还没有可发货的物品');
 
   view.innerHTML = `
     <div class="card"><h2>① 货款未付</h2>${goods}</div>
     <div class="card"><h2>② 国际运费未付</h2>${intl}</div>
     <div class="card"><h2>③ 国内运费未付</h2>${domestic}</div>
     <div class="card"><h2>④ 待退款</h2>${refunds}</div>
-    <div class="card"><h2>⑤ 国内在库<span class="muted small"> · 按在库天数倒序</span></h2>${stock}</div>`;
+    <div class="card"><h2>⑤ 可发货<span class="muted small"> · 包裹分摊后立刻进入这里，按天数倒序</span></h2>${stock}</div>`;
 
   bindActions(view, {
     payGoods: async ({ customer, batch }) => {

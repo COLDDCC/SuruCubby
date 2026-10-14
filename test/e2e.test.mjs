@@ -102,7 +102,10 @@ test('导入：建客户、建批次、自动建同名包裹', async () => {
     fileHash: `hash-${stamp}`,
     sheet: SHEET,
     batchName: `9月20日 第${stamp % 100}团`,
-    assignments: NAMES.map((cn, i) => ({ cn, newCustomer: { qq: QQS[i], nickname: cn } })),
+    assignments: NAMES.map((cn, i) => ({
+      cn,
+      newCustomer: { qq: QQS[i], nickname: cn },
+    })),
   });
   assert.equal(result.itemCount, 4);
   assert.equal(result.customerCount, 3);
@@ -132,7 +135,10 @@ test('同一个文件再导会被拦住，确认后才放行', async () => {
 test('第二次用同一个名字导入时自动认人（别名生效）', async () => {
   const preview = await call('POST', '/api/admin/import/preview', {
     fileHash: `hash-${stamp}-2`,
-    sheet: { headers: HEADERS, rows: [['补货一件', null, null, null, 500, NAMES[0], '500']] },
+    sheet: {
+      headers: HEADERS,
+      rows: [['补货一件', null, null, null, 500, NAMES[0], '500']],
+    },
   });
   assert.equal(preview.totals.unmatched, 0);
   assert.equal(preview.groups[0].customer.qq, QQS[0]);
@@ -182,17 +188,14 @@ test('包裹改状态，客户页同步', async () => {
 });
 
 test('cn_stock 之后的状态不允许在包裹层面批量改', async () => {
-  const res = await call(
-    'POST',
-    `/api/admin/packages/${ctx.packageId}/status`,
-    { status: 'shipped' },
-    { raw: true },
-  );
+  const res = await call('POST', `/api/admin/packages/${ctx.packageId}/status`, { status: 'shipped' }, { raw: true });
   assert.equal(res.status, 400);
 });
 
 test('称重台：点封面认领、填重量、缺件不进分摊', async () => {
-  await call('POST', `/api/admin/packages/${ctx.packageId}/status`, { status: 'cn_arrived' });
+  await call('POST', `/api/admin/packages/${ctx.packageId}/status`, {
+    status: 'cn_arrived',
+  });
   const weigh = await call('GET', `/api/admin/packages/${ctx.packageId}/weigh`);
   assert.equal(weigh.progress.expectedItems, 4);
   assert.equal(weigh.progress.foundItems, 0);
@@ -213,6 +216,49 @@ test('称重台：点封面认领、填重量、缺件不进分摊', async () =>
   assert.equal(after.progress.foundItems, 4);
   assert.equal(after.progress.weighedCustomers, 3);
   ctx.weighCustomers = after.customers;
+});
+
+test('不填运费也能分摊：设置里的单价（默认 100 元/kg）× 各摞重量', async () => {
+  const settings = await call('GET', '/api/admin/settings');
+  assert.equal(settings.intlPriceFenPerKg, 10000, '默认单价应该是 100 元/kg');
+
+  // 三个 1000 g 的摞 = 3000 g，100 元/kg → ¥300.00，每人整 ¥100.00，没有尾差
+  const auto = await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/preview`, {});
+  assert.equal(auto.priceFenPerKg, 10000, '自动算出来的要把单价还给前端，不然页面上说不清这钱怎么来的');
+  assert.equal(auto.totalFeeFen, 30000);
+  assert.deepEqual(
+    auto.rows.map((r) => r.feeFen),
+    [10000, 10000, 10000],
+  );
+  assert.equal(auto.diffFen, 0);
+
+  // 单价改成 80 元/kg，金额跟着变；国内运费那一栏没动
+  const changed = await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '80' });
+  assert.equal(changed.intlPriceFenPerKg, 8000);
+  assert.equal(changed.domesticFeeFen, settings.domesticFeeFen, '只改单价不该把国内运费一起改没');
+  const cheaper = await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/preview`, {});
+  assert.equal(cheaper.totalFeeFen, 24000);
+
+  // 手动填了金额就按填的算，不再乘单价
+  const manual = await call(
+    'POST',
+    `/api/admin/packages/${ctx.packageId}/allocate/preview`,
+    { totalFeeYuan: '100.00' },
+  );
+  assert.equal(manual.priceFenPerKg, null);
+  assert.equal(manual.totalFeeFen, 10000);
+
+  // 单价被清成 0 时不许闷着算，要拦住
+  await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '0' });
+  const blocked = await call(
+    'POST',
+    `/api/admin/packages/${ctx.packageId}/allocate/preview`,
+    {},
+    { raw: true },
+  );
+  assert.equal(blocked.status, 400);
+
+  await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: '100' });
 });
 
 test('分摊：¥100.00 / 三个 1000 g → 每人 ¥33.33，尾差 ¥0.01 记需求方', async () => {
@@ -262,7 +308,9 @@ test('已分摊的包裹不能再乱改重量，撤销后可以', async () => {
   await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/undo`);
   const reverted = await call('GET', `/api/admin/packages/${ctx.packageId}`);
   assert.ok(reverted.items.every((i) => i.status === 'cn_arrived'));
-  await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/commit`, { totalFeeYuan: '100.00' });
+  await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/commit`, {
+    totalFeeYuan: '100.00',
+  });
 });
 
 test('货款收款与撤销', async () => {
@@ -279,26 +327,71 @@ test('货款收款与撤销', async () => {
   await call('DELETE', `/api/admin/payments/${payment.id}`);
   detail = await call('GET', `/api/admin/customers/${customerId}`);
   assert.equal(detail.summary.goodsUnpaidJpy, 1800 + 1500);
-  await call('POST', '/api/admin/payments', { customerId, kind: 'goods', batchId: ctx.batchId });
+  await call('POST', '/api/admin/payments', {
+    customerId,
+    kind: 'goods',
+    batchId: ctx.batchId,
+  });
+});
+
+test('一键按批收货款：一次给每个没付的人各记一笔，撤销只退那一笔', async () => {
+  const others = ctx.customers.slice(1);
+  const read = (customer) => call('GET', `/api/admin/customers/${customer.id}`);
+  const before = await Promise.all(others.map(read));
+  assert.deepEqual(
+    before.map((detail) => detail.summary.goodsUnpaidJpy).sort((a, b) => a - b),
+    [900, 2600],
+  );
+  const byAmount = new Map(before.map((detail) => [detail.summary.goodsUnpaidJpy, detail.customer.id]));
+
+  const result = await call('POST', '/api/admin/payments/all-goods', { batchId: ctx.batchId });
+  assert.equal(result.customers, 2);
+  assert.equal(result.itemCount, 2);
+  assert.equal(result.amountJpy, 2600 + 900);
+
+  for (const id of byAmount.values()) assert.equal((await read({ id })).summary.goodsUnpaidJpy, 0);
+
+  const again = await call('POST', '/api/admin/payments/all-goods', { batchId: ctx.batchId }, { raw: true });
+  assert.equal(again.status, 400);
+  assert.match(again.data.error, /没有要收的货款/);
+
+  // 撤销 2600 那一笔，只退这个人，另一个人的收款不动
+  const bigId = byAmount.get(2600);
+  const smallId = byAmount.get(900);
+  const payments = await call('GET', `/api/admin/payments?customerId=${bigId}`);
+  const mine = payments.payments.find((p) => p.kind === 'goods' && p.refId === ctx.batchId);
+  assert.equal(mine.amount, 2600);
+  await call('DELETE', `/api/admin/payments/${mine.id}`);
+
+  assert.equal((await read({ id: bigId })).summary.goodsUnpaidJpy, 2600);
+  assert.equal((await read({ id: smallId })).summary.goodsUnpaidJpy, 0);
+
+  // 恢复原状：这一批只留客户 0 那一笔，后面的用例还要按未付来算
+  const other = await call('GET', `/api/admin/payments?customerId=${smallId}`);
+  const theirs = other.payments.find((p) => p.kind === 'goods' && p.refId === ctx.batchId);
+  await call('DELETE', `/api/admin/payments/${theirs.id}`);
+  assert.equal((await read({ id: smallId })).summary.goodsUnpaidJpy, 900);
 });
 
 test('国际运费没付就寄出会被拦住，强制继续时算上未付运费', async () => {
   const customerId = ctx.customers[0].id;
   const detail = await call('GET', `/api/admin/customers/${customerId}`);
   const itemIds = detail.items.filter((i) => i.status === 'cn_stock').map((i) => i.id);
-  const blocked = await call(
-    'POST',
-    '/api/admin/shipments',
-    { customerId, itemIds },
-    { raw: true },
-  );
+  const blocked = await call('POST', '/api/admin/shipments', { customerId, itemIds }, { raw: true });
   assert.equal(blocked.status, 409);
   assert.equal(blocked.data.unpaidIntlFen, 3333);
   assert.equal(blocked.data.totalDueFen, 1000 + 3333);
 
   const group = detail.weighGroups[0];
-  await call('POST', '/api/admin/payments', { customerId, kind: 'intl', weighGroupId: group.id });
-  const shipment = await call('POST', '/api/admin/shipments', { customerId, itemIds });
+  await call('POST', '/api/admin/payments', {
+    customerId,
+    kind: 'intl',
+    weighGroupId: group.id,
+  });
+  const shipment = await call('POST', '/api/admin/shipments', {
+    customerId,
+    itemIds,
+  });
   assert.equal(shipment.feeFen, 1000);
   assert.equal(shipment.itemCount, 2);
   ctx.shipmentId = shipment.id;
@@ -308,8 +401,51 @@ test('国际运费没付就寄出会被拦住，强制继续时算上未付运�
   assert.equal(after.summary.domesticUnpaidFen, 1000);
 });
 
+test('一键按批收运费：这个包裹每一摞各记一笔，收过的那摞不再动', async () => {
+  const read = async (id) => {
+    const detail = await call('GET', `/api/admin/customers/${id}`);
+    return { detail, group: detail.weighGroups.find((g) => g.packageId === ctx.packageId) };
+  };
+  const others = ctx.customers.slice(1);
+  const state = await Promise.all(others.map((c) => read(c.id)));
+  for (const { group } of state) assert.ok(group && !group.feePaid);
+
+  // 先按老办法收第一个人的那一摞，验证一键收不会重复扣他
+  await call('POST', '/api/admin/payments', {
+    customerId: others[0].id,
+    kind: 'intl',
+    weighGroupId: state[0].group.id,
+  });
+
+  const result = await call('POST', '/api/admin/payments/all-intl', { packageId: ctx.packageId });
+  assert.equal(result.customers, 1);
+  assert.equal(result.amountFen, state[1].group.intlFeeFen);
+  assert.equal(result.skipped, 0);
+
+  const paid = await Promise.all(others.map((c) => read(c.id)));
+  for (const { detail, group } of paid) {
+    assert.equal(group.feePaid, 1);
+    assert.equal(detail.summary.intlUnpaidFen, 0);
+  }
+
+  // 恢复原状：撤销这两笔，后面的用例还要按未收运费算
+  for (const { detail, group } of paid) {
+    const list = await call('GET', `/api/admin/payments?customerId=${detail.customer.id}`);
+    const mine = list.payments.find((p) => p.kind === 'intl' && p.refId === group.id);
+    assert.ok(mine, '应该能找到这笔运费收款');
+    await call('DELETE', `/api/admin/payments/${mine.id}`);
+  }
+  const reverted = await Promise.all(others.map((c) => read(c.id)));
+  assert.deepEqual(
+    reverted.map(({ detail, group }) => [group.feePaid, detail.summary.intlUnpaidFen]),
+    state.map(({ group, detail }) => [group.feePaid, detail.summary.intlUnpaidFen]),
+  );
+});
+
 test('填单号、收国内运费', async () => {
-  await call('PATCH', `/api/admin/shipments/${ctx.shipmentId}`, { trackingNo: 'SF123456789' });
+  await call('PATCH', `/api/admin/shipments/${ctx.shipmentId}`, {
+    trackingNo: 'SF123456789',
+  });
   await call('POST', '/api/admin/payments', {
     customerId: ctx.customers[0].id,
     kind: 'domestic',
@@ -321,32 +457,68 @@ test('填单号、收国内运费', async () => {
   assert.equal(detail.shipments[0].trackingNo, 'SF123456789');
 });
 
-test('计费后禁止直接砍单；未计费取消件和已付退款清单仍正常',async()=>{
- const detail=await call('GET',`/api/admin/customers/${ctx.customers[1].id}`);
- const blocked=await call('PATCH',`/api/admin/items/${detail.items[0].id}`,{status:'cancelled'}, {raw:true});assert.equal(blocked.status,400);
- const name=`退款${stamp}`;
- const added=await call('POST','/api/admin/import/commit',{batchName:name,fileHash:name,sheet:{headers:HEADERS,rows:[['待退款',null,null,null,100,name,10]]},assignments:[{cn:name,customerId:ctx.customers[1].id}]});
- const fresh=await call('GET',`/api/admin/batches/${added.batchId}`);const item=fresh.items[0];
- await call('POST','/api/admin/payments',{customerId:ctx.customers[1].id,kind:'goods',itemIds:[item.id]});
- await call('PATCH',`/api/admin/items/${item.id}`,{status:'cancelled'});
- const dashboard=await call('GET','/api/admin/dashboard');assert(dashboard.pendingRefunds.some(r=>r.itemId===item.id));
+test('计费后禁止直接砍单；未计费取消件和已付退款清单仍正常', async () => {
+  const detail = await call('GET', `/api/admin/customers/${ctx.customers[1].id}`);
+  const blocked = await call('PATCH', `/api/admin/items/${detail.items[0].id}`, { status: 'cancelled' }, { raw: true });
+  assert.equal(blocked.status, 400);
+  const name = `退款${stamp}`;
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: name,
+    fileHash: name,
+    sheet: {
+      headers: HEADERS,
+      rows: [['待退款', null, null, null, 100, name, 10]],
+    },
+    assignments: [{ cn: name, customerId: ctx.customers[1].id }],
+  });
+  const fresh = await call('GET', `/api/admin/batches/${added.batchId}`);
+  const item = fresh.items[0];
+  await call('POST', '/api/admin/payments', {
+    customerId: ctx.customers[1].id,
+    kind: 'goods',
+    itemIds: [item.id],
+  });
+  await call('PATCH', `/api/admin/items/${item.id}`, { status: 'cancelled' });
+  const dashboard = await call('GET', '/api/admin/dashboard');
+  assert(dashboard.pendingRefunds.some((r) => r.itemId === item.id));
 });
 
 test('重置链接后旧链接立刻失效', async () => {
   const customerId = ctx.customers[0].id;
   const oldToken = ctx.customers[0].token;
   await call('POST', `/api/admin/customers/${customerId}/reset-token`);
-  const res = await fetch(`${BASE}/api/w/${oldToken}`, { headers: { cookie: ctx.cookie } });
+  const res = await fetch(`${BASE}/api/w/${oldToken}`, {
+    headers: { cookie: ctx.cookie },
+  });
   assert.equal(res.status, 401);
 });
 
-test('有运费账目冲突时禁止合并；没有计费的客户可安全合并',async()=>{
- const unsafe=await call('POST','/api/admin/customers/merge',{sourceId:ctx.customers[2].id,targetId:ctx.customers[1].id},{raw:true});assert.equal(unsafe.status,400);
- const a=await call('POST','/api/admin/customers',{qq:'5'+QQS[0],nickname:'mergeA'+stamp});
- const b=await call('POST','/api/admin/customers',{qq:'6'+QQS[0],nickname:'mergeB'+stamp});
- await call('POST','/api/admin/customers/merge',{sourceId:a.id,targetId:b.id});
- const merged=await call('GET',`/api/admin/customers/${b.id}`);assert(merged.aliases.includes('mergeA'+stamp));
- const gone=await call('GET',`/api/admin/customers/${a.id}`,undefined,{raw:true});assert.equal(gone.status,404);
+test('有运费账目冲突时禁止合并；没有计费的客户可安全合并', async () => {
+  const unsafe = await call(
+    'POST',
+    '/api/admin/customers/merge',
+    { sourceId: ctx.customers[2].id, targetId: ctx.customers[1].id },
+    { raw: true },
+  );
+  assert.equal(unsafe.status, 400);
+  const a = await call('POST', '/api/admin/customers', {
+    qq: '5' + QQS[0],
+    nickname: 'mergeA' + stamp,
+  });
+  const b = await call('POST', '/api/admin/customers', {
+    qq: '6' + QQS[0],
+    nickname: 'mergeB' + stamp,
+  });
+  await call('POST', '/api/admin/customers/merge', {
+    sourceId: a.id,
+    targetId: b.id,
+  });
+  const merged = await call('GET', `/api/admin/customers/${b.id}`);
+  assert(merged.aliases.includes('mergeA' + stamp));
+  const gone = await call('GET', `/api/admin/customers/${a.id}`, undefined, {
+    raw: true,
+  });
+  assert.equal(gone.status, 404);
 });
 
 test('QQ 连错 5 次会锁定 15 分钟', async () => {
@@ -456,4 +628,255 @@ test('图片代理只认库里存着的物品，不是开放代理', async () =>
   assert.equal(missing.status, 404);
   const bad = await fetch(`${BASE}/img/i/abc`);
   assert.equal(bad.status, 404);
+});
+
+test('改过昵称的客户，表里写新名字、旧名字、带空格都还能自动对上', async () => {
+  await call('POST', '/api/admin/login', { password: PASSWORD });
+  const qqOld = '1000000';
+  const person = await call('POST', '/api/admin/customers', {
+    qq: qqOld,
+    nickname: `旧名${stamp}`,
+  });
+  await call('PATCH', `/api/admin/customers/${person.id}`, {
+    nickname: `新名${stamp}`,
+  });
+
+  const sheet = {
+    headers: ['名称', 'cn', '实际价格'],
+    rows: [
+      ['A', `新名${stamp}`, 100],
+      ['B', ` 旧名${stamp} `, 100],
+      ['C', `Ｍｅｏｗ${stamp}`, 100],
+    ],
+  };
+  await call('POST', '/api/admin/customers', {
+    qq: '1000001',
+    nickname: `Meow${stamp}`,
+  });
+
+  const preview = await call('POST', '/api/admin/import/preview', { sheet });
+  const byName = Object.fromEntries(preview.groups.map((g) => [g.cn, g]));
+  assert.equal(byName[`新名${stamp}`].matchedBy, 'exact', '改过的昵称本身就该能认出来');
+  assert.equal(byName[`旧名${stamp}`].matchedBy, 'exact', '旧名字留着别名，早前的表还能对上');
+  assert.equal(byName[`Ｍｅｏｗ${stamp}`].matchedBy, 'normalized', '全角写法要靠归一化认，不是碰运气');
+  assert.equal(byName[`Ｍｅｏｗ${stamp}`].customer.qq, '1000001');
+  assert.equal(preview.totals.unmatched, 0, '三个写法都不用人工指认');
+
+  const committed = await call('POST', '/api/admin/import/commit', {
+    batchName: `别名${stamp}`,
+    sheet,
+  });
+  assert.equal(committed.createdCustomers.length, 0, '不该凭空多出客户');
+  assert.equal(committed.customerCount, 2, '旧名/新名是同一个人，全角 Meow 是另一个');
+  const detail = await call('GET', `/api/admin/customers/${byName[`新名${stamp}`].customer.id}`);
+  assert.equal(detail.items.filter((i) => i.batchId === committed.batchId).length, 2, '表里两种写法都并到同一个人身上');
+});
+
+test('名字撞在好几个人身上时不许瞎猜，要给新 QQ 建重名人时拦住说清楚', async () => {
+  await call('POST', '/api/admin/login', { password: PASSWORD });
+  const a = await call('POST', '/api/admin/customers', {
+    qq: '1000002',
+    nickname: `双${stamp}`,
+  });
+  await call('POST', '/api/admin/customers', {
+    qq: '1000003',
+    nickname: `双 ${stamp}`,
+  });
+
+  const sheet = {
+    headers: ['名称', 'cn', '实际价格'],
+    // 中间两个空格：跟哪位的写法都不完全一样，归一化后又都撞得上
+    rows: [['A', `双  ${stamp}`, 100]],
+  };
+  const preview = await call('POST', '/api/admin/import/preview', { sheet });
+  assert.equal(preview.groups[0].matchedBy, 'ambiguous');
+  assert.equal(preview.groups[0].candidates.length, 2);
+
+  const blocked = await call('POST', '/api/admin/import/commit', { batchName: `歧义${stamp}`, sheet }, { raw: true });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.data.error, /好几个客户/);
+
+  const clash = await call(
+    'POST',
+    '/api/admin/import/commit',
+    {
+      batchName: `撞名${stamp}`,
+      sheet: {
+        headers: ['名称', 'cn', '实际价格'],
+        rows: [['A', `撞名${stamp}`, 100]],
+      },
+      assignments: [
+        {
+          cn: `撞名${stamp}`,
+          newCustomer: {
+            qq: '1000004',
+            nickname: `双${stamp}`,
+          },
+        },
+      ],
+    },
+    { raw: true },
+  );
+  assert.equal(clash.status, 400);
+  assert.match(clash.data.error, /已经是客户/);
+
+  const picked = await call('POST', '/api/admin/import/commit', {
+    batchName: `选定${stamp}`,
+    sheet,
+    assignments: [{ cn: `双  ${stamp}`, customerId: a.id }],
+  });
+  assert.equal(picked.createdCustomers.length, 0);
+});
+
+test('自动认错了人：管理员改指认后，货跟着指认走，名字也换到人身上', async () => {
+  await call('POST', '/api/admin/login', { password: PASSWORD });
+  const wrong = await call('POST', '/api/admin/customers', { qq: '1000005', nickname: `认错${stamp}` });
+  const right = await call('POST', '/api/admin/customers', { qq: '1000006', nickname: `该是这位${stamp}` });
+  const sheet = { headers: ['名称', 'cn', '实际价格'], rows: [['A', `认错${stamp}`, 100]] };
+
+  const before = await call('POST', '/api/admin/import/preview', { sheet });
+  assert.equal(before.groups[0].customer.id, wrong.id, '表里的名字默认自动认成第一位');
+
+  const committed = await call('POST', '/api/admin/import/commit', {
+    batchName: `纠正${stamp}`,
+    sheet,
+    assignments: [{ cn: `认错${stamp}`, customerId: right.id }],
+  });
+  assert.equal(committed.customerCount, 1);
+  const batchItems = await call('GET', `/api/admin/batches/${committed.batchId}`);
+  assert.equal(batchItems.items[0].customerId, right.id, '这一批的货记到指认的那位');
+  assert.equal(batchItems.items[0].goodsFeeJpy, 100, '日元货款不受指认影响');
+
+  const after = await call('POST', '/api/admin/import/preview', {
+    sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['B', `认错${stamp}`, 50]] },
+  });
+  assert.equal(after.groups[0].customer.id, right.id, '下次同样写法自动认的是纠正后的那位');
+
+  const wrongDetail = await call('GET', `/api/admin/customers/${wrong.id}`);
+  assert.ok(!wrongDetail.aliases.includes(`认错${stamp}`), '名字要从认错的客户身上放掉');
+  const rightDetail = await call('GET', `/api/admin/customers/${right.id}`);
+  assert.ok(rightDetail.aliases.includes(`认错${stamp}`), '名字要挂到指认的客户身上');
+});
+
+test('名单导入：一次把客户建齐，真名只进后台，撞名的行不动', async () => {
+  await call('POST', '/api/admin/login', { password: PASSWORD });
+  const roster = [
+    { nickname: `名单甲${stamp}`, qq: '2000001', realName: `甲真实${stamp}` },
+    { nickname: `名单乙${stamp}`, qq: '2000002', realName: null },
+    { nickname: `名单乙${stamp}`, qq: '2000002', realName: null },
+    { nickname: `名单丙${stamp}`, qq: 'abc', realName: null },
+    { nickname: `名单甲${stamp}`, qq: '2000004', realName: null },
+  ];
+
+  const dry = await call('POST', '/api/admin/customers/import', { dryRun: true, rows: roster });
+  assert.equal(dry.counts.created, 2, '两个没见过的 QQ');
+  assert.equal(dry.counts.conflicts, 1);
+  assert.equal(dry.counts.errors, 1);
+  assert.match(dry.conflicts[0].reason, /已经是/);
+  assert.match(dry.errors[0].reason, /不像 QQ 号/);
+
+  const afterDry = await call('GET', `/api/admin/customers?q=${encodeURIComponent('名单甲')}`);
+  assert.equal(afterDry.customers.length, 0, '预演不能写库');
+
+  const done = await call('POST', '/api/admin/customers/import', { dryRun: false, rows: roster });
+  assert.equal(done.counts.created, 2);
+  assert.equal(done.counts.updated, 0, '同一个人重复出现不该算成第二个人');
+
+  const byName = await call('GET', `/api/admin/customers?q=${encodeURIComponent('名单甲')}`);
+  assert.equal(byName.customers.length, 1, '撞名那行没多出一个人');
+  const jia = byName.customers[0];
+  assert.equal(jia.qq, '2000001');
+  assert.equal(jia.realName, `甲真实${stamp}`);
+
+  const byReal = await call('GET', `/api/admin/customers?q=${encodeURIComponent('甲真实')}`);
+  assert.equal(byReal.customers.length, 1, '后台能按真名搜到人');
+
+  const detail = await call('GET', `/api/admin/customers/${jia.id}`);
+  const own = await fetch(`${BASE}/api/w/${detail.token}/verify`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ qq: '2000001' }),
+  });
+  assert.equal(own.status, 200);
+  const ownText = JSON.stringify(await own.json());
+  assert.ok(ownText.includes(`名单甲${stamp}`), '他自己的名字照常用');
+  assert.ok(!ownText.includes(`甲真实${stamp}`), '真名不出现在客户自己的页面');
+
+  const second = await call('POST', '/api/admin/customers/import', {
+    dryRun: false,
+    rows: [
+      { nickname: `名单甲${stamp}`, qq: '2000001', realName: '写错了别用' },
+      { nickname: `名单乙${stamp}`, qq: '2000002', realName: `乙真实${stamp}` },
+      { nickname: `乙的小号${stamp}`, qq: '2000002', realName: null },
+    ],
+  });
+  assert.equal(second.counts.created, 0, '都认得了，不该再建');
+  assert.equal(second.counts.updated, 2, '乙补上真名，乙的小号补成一个名字');
+
+  const jiaAgain = await call('GET', `/api/admin/customers/${jia.id}`);
+  assert.equal(jiaAgain.realName, `甲真实${stamp}`, '已有真名不被覆盖');
+  const yi = (await call('GET', `/api/admin/customers?q=${encodeURIComponent('名单乙')}`)).customers[0];
+  assert.equal(yi.realName, `乙真实${stamp}`);
+
+  const preview = await call('POST', '/api/admin/import/preview', {
+    sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['x', `乙的小号${stamp}`, 100]] },
+  });
+  assert.equal(preview.groups[0].matchedBy, 'exact');
+  assert.equal(preview.groups[0].customer.qq, '2000002', '名单里加过的叫法，导货表时直接认得出');
+});
+
+test('后台找货：只输货号尾巴就能定位到这一件，跳过去该去哪一步看', async () => {
+  await call('POST', '/api/admin/login', { password: PASSWORD });
+  const cn = `找货${stamp}`;
+  // 每次跑都造一个没见过的编号；带字母是为了让编号的尾巴不会撞进客户名的数字里
+  const code = `ZH${`${stamp}`.slice(-6)}Q7`;
+  const imported = await call('POST', '/api/admin/import/commit', {
+    batchName: `找货批次${stamp}`,
+    fileHash: `hash-${stamp}-search`,
+    sheet: {
+      headers: ['名称', '商品链接', 'cn', '实际价格'],
+      rows: [
+        [`尾号测试手办${stamp}`, `https://www.suruga-ya.jp/product/detail/${code}`, cn, 1200],
+        ['没给链接的一件', null, cn, 300],
+      ],
+    },
+    assignments: [{ cn, newCustomer: { qq: `${stamp + 11}`.slice(-9), nickname: cn } }],
+  });
+  const mine = (items) => items.filter((i) => i.batchId === imported.batchId);
+
+  const tail = await call('GET', `/api/admin/items/search?q=${encodeURIComponent(code.slice(-5))}`);
+  assert.equal(mine(tail.items).length, 1, `搜尾号 ${code.slice(-5)} 应该只命中这一件`);
+  const hit = mine(tail.items)[0];
+  assert.equal(hit.code, code, '要把完整货号还给前端，光对上尾号看不清是哪件');
+  assert.equal(hit.batchId, imported.batchId);
+  assert.equal(hit.packageId, imported.packageId);
+  assert.equal(hit.allocatedAt, null, '还没分摊，落点应该在称重台而不是包裹页');
+  assert.equal(hit.nickname, cn);
+
+  const byName = await call('GET', `/api/admin/items/search?q=${encodeURIComponent('尾号测试')}`);
+  assert.equal(mine(byName.items).length, 1, '没货号的行也能靠名字片段找到，但只命中这一批的那一件');
+  assert.ok(byName.items.some((i) => i.id === hit.id), '有货号的这件名字里也带片段，应该一起出现');
+
+  // 一箱几十件时先按人筛：搜客户名要能把这人的两件都捞出来
+  const byPerson = await call('GET', `/api/admin/items/search?q=${encodeURIComponent(cn)}`);
+  assert.equal(mine(byPerson.items).length, 2, '搜人名应该把这个人这一批的两件都列出来');
+
+  // 站在称重台上只搜这一箱，别把别的箱的东西混进来
+  const scoped = await call(
+    'GET',
+    `/api/admin/items/search?q=${encodeURIComponent('尾号测试')}&packageId=${imported.packageId}`,
+  );
+  assert.equal(scoped.items.length, 1, '限定了包裹就只该出这一箱的');
+  assert.equal(scoped.items[0].id, hit.id);
+  const wrongBox = await call(
+    'GET',
+    `/api/admin/items/search?q=${encodeURIComponent('尾号测试')}&packageId=${imported.packageId + 9999}`,
+  );
+  assert.deepEqual(wrongBox.items, [], '这一箱里没有就是没有，不拿别的箱的凑数');
+
+  assert.deepEqual((await call('GET', `/api/admin/items/search?q=${encodeURIComponent(`zzz${stamp}`)}`)).items, []);
+  assert.deepEqual((await call('GET', '/api/admin/items/search?q=1')).items, [], '只给一个字符不查，免得把整库列出来');
+
+  const anonymous = await fetch(`${BASE}/api/admin/items/search?q=${code.slice(-5)}`);
+  assert.equal(anonymous.status, 401, '搜库不能不登录');
 });

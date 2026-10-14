@@ -113,7 +113,7 @@ const allocated = await call('POST', `/api/admin/packages/${packageId}/allocate/
   totalFeeYuan: '238.00',
   totalWeightG: 6000,
 });
-console.log(`分摊完成，尾差 ${allocated.diffFen} 分，${allocated.itemsMovedToStock} 件进入国内在库`);
+console.log(`分摊完成，尾差 ${allocated.diffFen} 分，${allocated.itemsMovedToStock} 件变为可发货`);
 
 // 阿狸：货款、国际运费都付了，已经寄出一次，国内运费还没收
 const ali = await call('GET', `/api/admin/customers/${byName['阿狸'].id}`);

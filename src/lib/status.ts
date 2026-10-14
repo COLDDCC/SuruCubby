@@ -19,7 +19,8 @@ export const STATUS_LABELS: Record<ItemStatus, string> = {
   jp_warehouse: '已到日本仓',
   intl_transit: '回国中',
   cn_arrived: '回国中',
-  cn_stock: '已到国内',
+  // 方案里叫「国内在库」，界面统一显示「可发货」：分摊完客户就能申请，只看 key 看不出这一步能做什么
+  cn_stock: '可发货',
   shipped: '已寄出',
   delivered: '已签收',
   cancelled: '缺货取消',

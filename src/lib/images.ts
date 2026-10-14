@@ -25,6 +25,44 @@ export function isHttpUrl(value: string | null | undefined): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value);
 }
 
+/** 骏河屋商品链接末尾的货号（纯数字，或 ZHONA146352 这种字母开头的编号）。 */
+export function surugaCode(productUrl: string): string {
+  const path = String(productUrl).split(/[?#]/)[0].replace(/\/+$/, '');
+  const hit = path.match(/\/product\/(?:[^/]+\/)?([^/]+)$/i)?.[1] ?? '';
+  const code = decodeURIComponent(hit).trim();
+  return /^[0-9]{4,24}$|^[A-Za-z][A-Za-z0-9_-]{3,23}$/.test(code) && /[0-9]/.test(code) ? code : '';
+}
+
+/**
+ * 按货号推骏河屋官方 CDN 上的商品图。规则实测过：真货号 200 image/jpeg，
+ * 假货号会被 302 跳到要登录的域名再 403 —— 所以推出来的一定要再去取一次，
+ * 取到图片才算数，不能凭规则写进数据库。
+ */
+export function surugaImageCandidates(productUrl: string): string[] {
+  const code = surugaCode(productUrl);
+  if (!code) return [];
+  return [`https://cdn.suruga-ya.jp/database/pics_light/game/${code.toLowerCase()}.jpg`];
+}
+
+/** 验证一个地址真能取到图片，取不到返回 null。 */
+export async function liveImageUrl(url: string): Promise<string | null> {
+  if (!isHttpUrl(url)) return null;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; SuruCubby/1.0)', accept: 'image/*' },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().startsWith('image/')) return null;
+  if (Number(res.headers.get('content-length') ?? '0') > MAX_BYTES) return null;
+  return url;
+}
+
 export function isCached(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.startsWith(CACHED_PREFIX);
 }

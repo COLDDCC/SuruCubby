@@ -33,6 +33,13 @@ export async function domesticFeeFen(env: Env): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
 }
 
+/** 国际运费单价（分 / kg），默认 100 元 /kg。 */
+export async function intlPriceFenPerKg(env: Env): Promise<number> {
+  const raw = await getSetting(env, 'intl_price_fen_per_kg', '10000');
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10000;
+}
+
 /** 生成一条状态变更日志的 SQL 语句。 */
 export function statusLogStmt(
   db: D1Database,

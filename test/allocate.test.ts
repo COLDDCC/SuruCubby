@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocate } from '../src/lib/allocate.ts';
+import { allocate, feeFromWeight } from '../src/lib/allocate.ts';
 
 test('验收用例：3 个客户各 1000 g，总运费 ¥100.00', () => {
   const result = allocate(10000, [
@@ -44,6 +44,22 @@ test('运费为 0 时人人都是 0', () => {
     [0, 0],
   );
   assert.equal(result.diffFen, 0);
+});
+
+test('按单价从重量推运费：100 元/kg 时 5130 g 就是 ¥513.00', () => {
+  assert.equal(feeFromWeight(5130, 10000), 51300);
+  assert.equal(feeFromWeight(1000, 10000), 10000);
+  assert.equal(feeFromWeight(0, 10000), 0);
+  // 单价 23.37 元/kg、1 g 时不满 1 分，四舍五入
+  assert.equal(feeFromWeight(1, 2337), 2);
+  assert.equal(feeFromWeight(999, 1), 1);
+});
+
+test('单价或重量写法不对就拦住，不许拿浮点凑数', () => {
+  assert.throws(() => feeFromWeight(1000.5, 10000), /整数克/);
+  assert.throws(() => feeFromWeight(-1, 10000), /整数克/);
+  assert.throws(() => feeFromWeight(1000, 1.5), /整数分/);
+  assert.throws(() => feeFromWeight(1000, -1), /整数分/);
 });
 
 import { imageKey, isCached, isHttpUrl, KEY_PATTERN } from '../src/lib/images.ts';

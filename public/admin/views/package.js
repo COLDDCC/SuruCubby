@@ -1,5 +1,19 @@
 import { api } from '/admin/api.js';
-import { PACKAGE_BULK_STATUSES, STATUS_LABELS, beijingTime, bindActions, escapeHtml, money, openModal, promptBox, statusLabel, toast, yen } from '/admin/ui.js';
+import {
+  PACKAGE_BULK_STATUSES,
+  STATUS_LABELS,
+  beijingTime,
+  bindActions,
+  codeTag,
+  escapeHtml,
+  money,
+  openModal,
+  promptBox,
+  statusLabel,
+  thumb,
+  toast,
+  yen,
+} from '/admin/ui.js';
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/packages/${id}`);
@@ -10,6 +24,7 @@ export async function render(view, [id]) {
     entry.items.push(item);
     byCustomer.set(item.customerId, entry);
   }
+  const stockCount = data.items.filter((i) => i.status === 'cn_stock').length;
 
   view.innerHTML = `
     <div class="card">
@@ -33,14 +48,19 @@ export async function render(view, [id]) {
         <button class="small plain" data-action="tracking">回国单号：${escapeHtml(pkg.trackingNo || '待填')}</button>
       </div>
       <p><button data-action="moveItems" class="small plain">拆包 / 合包：移动勾选商品</button></p>
-      <p class="small muted">改状态会同步包裹里所有物品，已取消 / 已退款 / 已在国内在库之后的物品不受影响。</p>
+      <p class="small muted">改状态会同步包裹里所有物品，已取消 / 已退款 / 已经是「可发货」或已寄出的物品不受影响。</p>
       ${
         pkg.totalFeeFen === null
           ? '<p class="small muted">还没分摊国际运费。</p>'
           : `<p class="small">国际运费 <span class="money">${money(pkg.totalFeeFen)}</span>
               ${pkg.totalWeightG ? `· 总重 ${Number(pkg.totalWeightG).toLocaleString()} g` : ''}
               ${data.rounding ? `· 尾差 ${money(data.rounding.diffFen)}（需求方承担）` : ''}
-              · 分摊于 ${beijingTime(pkg.allocatedAt)}</p>`
+              · 分摊于 ${beijingTime(pkg.allocatedAt)}</p>
+            ${
+              stockCount
+                ? `<p class="small paid">这 ${stockCount} 件已是「可发货」，客户页面能直接勾选申请发货。</p>`
+                : '<p class="small muted">这一箱还没有可发货的物品。</p>'
+            }`
       }
     </div>
     ${[...byCustomer.values()]
@@ -49,11 +69,13 @@ export async function render(view, [id]) {
         <h3><a href="#/customers/${g.customerId}">${escapeHtml(g.nickname)}</a>
           <span class="muted small">${g.items.length} 件</span></h3>
         <div class="scroll-x"><table>
-          <thead><tr><th>名称</th><th>状态</th><th class="right">应付</th><th></th></tr></thead>
+          <thead><tr><th>图</th><th>名称</th><th>状态</th><th class="right">应付</th><th></th></tr></thead>
           <tbody>${g.items
             .map(
-              (i) => `<tr>
-              <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}</td>
+              (i) => `<tr data-focus-item="${i.id}">
+              <td class="cell-thumb">${thumb(i)}</td>
+              <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
+                <div>${codeTag(i)}</div></td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="right"><button class="small plain" data-action="itemStatus" data-item="${i.id}" data-status="${i.status}">改状态</button></td>
@@ -75,15 +97,30 @@ export async function render(view, [id]) {
   });
 
   bindActions(view, {
-    moveItems: async()=>{
-      const itemIds=[...view.querySelectorAll('[data-move-item]:checked')].map(el=>Number(el.dataset.moveItem));
-      if(!itemIds.length)return toast('先勾选商品',true);
-      const d=await api.get('/api/admin/packages');const available=d.packages.filter(p=>p.id!==Number(id)&&!p.allocatedAt);
-      const target=await promptBox('目标包裹ID（'+available.map(p=>p.id+':'+p.name).join('；')+'）。输入“新建”创建包裹','');if(target===null)return;
-      let targetId=Number(target);
-      if(target==='新建'){const name=await promptBox('新包裹名称','');if(!name)return;targetId=(await api.post('/api/admin/packages',{name})).id;}
-      if(!targetId)return toast('请输入有效包裹ID',true);
-      try{await api.post(`/api/admin/packages/${targetId}/items`,{itemIds,action:'add'});await render(view,[id]);toast('已移动商品');}catch(e){toast(e.message,true);}
+    moveItems: async () => {
+      const itemIds = [...view.querySelectorAll('[data-move-item]:checked')].map((el) => Number(el.dataset.moveItem));
+      if (!itemIds.length) return toast('先勾选商品', true);
+      const d = await api.get('/api/admin/packages');
+      const available = d.packages.filter((p) => p.id !== Number(id) && !p.allocatedAt);
+      const target = await promptBox(
+        '目标包裹ID（' + available.map((p) => p.id + ':' + p.name).join('；') + '）。输入“新建”创建包裹',
+        '',
+      );
+      if (target === null) return;
+      let targetId = Number(target);
+      if (target === '新建') {
+        const name = await promptBox('新包裹名称', '');
+        if (!name) return;
+        targetId = (await api.post('/api/admin/packages', { name })).id;
+      }
+      if (!targetId) return toast('请输入有效包裹ID', true);
+      try {
+        await api.post(`/api/admin/packages/${targetId}/items`, { itemIds, action: 'add' });
+        await render(view, [id]);
+        toast('已移动商品');
+      } catch (e) {
+        toast(e.message, true);
+      }
     },
     tracking: async () => {
       const value = await promptBox('回国单号', pkg.trackingNo || '');

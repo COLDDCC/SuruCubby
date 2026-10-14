@@ -1,31 +1,7 @@
 import { api } from '/admin/api.js';
 import { bindActions, escapeHtml, toast, yen } from '/admin/ui.js';
 import { collectCellUrls } from '/admin/sheet.js';
-
-const LOCAL_XLSX = '/vendor/xlsx.full.min.js';
-const CDN_XLSX = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const el = document.createElement('script');
-    el.src = src;
-    el.onload = resolve;
-    el.onerror = () => reject(new Error(`加载失败：${src}`));
-    document.head.appendChild(el);
-  });
-}
-
-/** 优先用自托管的 SheetJS（国内更快），没有就退回官方 CDN。 */
-async function loadXlsx() {
-  if (window.XLSX) return window.XLSX;
-  try {
-    await loadScript(LOCAL_XLSX);
-  } catch {
-    await loadScript(CDN_XLSX);
-  }
-  if (!window.XLSX) throw new Error('SheetJS 没加载成功，检查网络或把 xlsx.full.min.js 放到 /vendor/ 下');
-  return window.XLSX;
-}
+import { loadXlsx } from '/admin/xlsx.js';
 
 async function sha256(buffer) {
   const digest = await crypto.subtle.digest('SHA-256', buffer);
@@ -42,6 +18,8 @@ let state = {
   /** 出预览那一刻的 columnEdits 快照，用来挡住「改完没重新预览就导入」 */
   previewedEdits: '',
   assignments: new Map(),
+  /** 管理员点了「不是这位」的名字：不接受自动认的结果，必须重新指认 */
+  overrides: new Set(),
   customers: [],
 };
 
@@ -54,6 +32,7 @@ export async function render(view) {
     columnEdits: {},
     previewedEdits: '',
     assignments: new Map(),
+    overrides: new Set(),
     customers: [],
   };
   view.innerHTML = `
@@ -86,7 +65,12 @@ async function handleFile(file, view) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     // blankrows: true —— 中间的空行也要占位，否则后面所有行的「Excel 行号」和
     // 从公式里抽出来的地址都会对不上号
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
+    const rows = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: true,
+    });
     if (rows.length < 2) throw new Error('这张表没有数据行');
     const body = rows.slice(1);
     while (body.length > 0 && body[body.length - 1].every((cell) => cell === null || String(cell).trim() === '')) {
@@ -130,10 +114,12 @@ async function loadPreview(view) {
 
 function columnsCard(p) {
   const options = (current) =>
-    [`<option value="">不使用</option>`,
+    [
+      `<option value="">不使用</option>`,
       ...p.fields.map(
         (f) => `<option value="${f.field}" ${current === f.field ? 'selected' : ''}>${escapeHtml(f.label)}</option>`,
-      )].join('');
+      ),
+    ].join('');
   return `<div class="card">
     <h3>列对应关系</h3>
     <p class="small muted">程序按表头猜的，猜错了直接在下面改。表头写着「数量」但底下是 1500、4230 这种数，就把这列改成「平时价格」。</p>
@@ -154,7 +140,12 @@ function columnsCard(p) {
 function renderPreview(view) {
   const p = state.preview;
   const box = document.getElementById('preview');
-  const unmatched = p.groups.filter((g) => !g.customer && !state.assignments.has(g.cn));
+  // 自动认出来的可以当场改指认；点了「不是这位」却没重新选的，算还没处理
+  const needsPick = (g) => {
+    if (state.assignments.has(g.cn)) return false;
+    return state.overrides.has(g.cn) || !g.customer;
+  };
+  const unmatched = p.groups.filter(needsPick);
 
   const customerOptions = state.customers
     .map((c) => `<option value="${c.id}">${escapeHtml(c.nickname)}（${escapeHtml(c.qq)}）</option>`)
@@ -196,29 +187,53 @@ function renderPreview(view) {
         <tbody>${p.groups
           .map((g) => {
             const assigned = state.assignments.get(g.cn);
-            const matched = g.customer || (assigned && assigned.label);
-            return `<tr class="${matched ? '' : 'highlight-row'}">
+            const overridden = state.overrides.has(g.cn);
+            const autoName = g.customer ? `${g.customer.nickname}（QQ ${g.customer.qq}）` : '';
+            const ambiguous =
+              g.matchedBy === 'ambiguous' && !assigned
+                ? `<div class="small unpaid">好几个客户名字都对得上：${g.candidates
+                    .map((x) => `${escapeHtml(x.nickname)}（QQ ${escapeHtml(x.qq)}）`)
+                    .join('、')}，请指定是哪一位</div>`
+                : '';
+            const pick = `<div class="row">
+                  <select data-pick="${escapeHtml(g.cn)}">
+                    <option value="">— 选已有客户 —</option>${customerOptions}
+                  </select>
+                  <button class="small plain" data-action="use" data-cn="${escapeHtml(g.cn)}">用这个</button>
+                </div>
+                <div class="row" style="margin-top:6px">
+                  <input style="width:130px" inputmode="numeric" placeholder="新客户 QQ 号" data-qq="${escapeHtml(g.cn)}">
+                  <button class="small plain" data-action="create" data-cn="${escapeHtml(g.cn)}">新建</button>
+                </div>`;
+            let cell;
+            if (assigned) {
+              cell = `<div>${escapeHtml(assigned.label)}</div>
+                <div class="row">
+                  <button class="small plain" data-action="clear" data-cn="${escapeHtml(g.cn)}">重新选</button>${
+                    overridden && g.customer
+                      ? `<button class="small plain" data-action="unoverride" data-cn="${escapeHtml(
+                          g.cn,
+                        )}">还是用${escapeHtml(autoName)}</button>`
+                      : ''
+                  }
+                </div>`;
+            } else if (overridden && g.customer) {
+              cell = `<div class="small unpaid">不要自动认的 ${escapeHtml(autoName)}</div>${pick}`;
+            } else if (g.customer) {
+              cell = `<div>${escapeHtml(g.customer.nickname)}<span class="small muted"> · ${escapeHtml(g.customer.qq)}${
+                g.matchedBy === 'normalized' && g.cn !== g.customer.nickname
+                  ? `<span class="small muted"> · 表里写的「${escapeHtml(g.cn)}」，自动对上</span>`
+                  : ''
+              }</span></div>
+              <button class="small plain" data-action="override" data-cn="${escapeHtml(g.cn)}">不是这位？改</button>`;
+            } else {
+              cell = ambiguous + pick;
+            }
+            return `<tr class="${needsPick(g) ? 'highlight-row' : ''}">
               <td>${escapeHtml(g.cn)}</td>
               <td class="right">${g.count}</td>
               <td class="right money">${yen(g.subtotalJpy)}</td>
-              <td>${
-                g.customer
-                  ? `${escapeHtml(g.customer.nickname)}<div class="small muted">${escapeHtml(g.customer.qq)}</div>`
-                  : assigned
-                    ? `${escapeHtml(assigned.label)} <button class="small plain" data-action="clear" data-cn="${escapeHtml(
-                        g.cn,
-                      )}">改</button>`
-                    : `<div class="row">
-                        <select data-pick="${escapeHtml(g.cn)}">
-                          <option value="">— 选已有客户 —</option>${customerOptions}
-                        </select>
-                        <button class="small plain" data-action="use" data-cn="${escapeHtml(g.cn)}">用这个</button>
-                      </div>
-                      <div class="row" style="margin-top:6px">
-                        <input style="width:130px" inputmode="numeric" placeholder="新客户 QQ 号" data-qq="${escapeHtml(g.cn)}">
-                        <button class="small plain" data-action="create" data-cn="${escapeHtml(g.cn)}">新建</button>
-                      </div>`
-              }</td>
+              <td>${cell}</td>
             </tr>`;
           })
           .join('')}</tbody></table></div>
@@ -247,17 +262,34 @@ function renderPreview(view) {
       const id = Number(select.value);
       if (!id) return toast('先选一个客户', true);
       const customer = state.customers.find((c) => c.id === id);
-      state.assignments.set(cn, { customerId: id, label: `${customer.nickname}（沿用，加别名）` });
+      state.assignments.set(cn, {
+        customerId: id,
+        label: `${customer.nickname}（沿用，加别名）`,
+      });
       renderPreview(view);
     },
     create: ({ cn }) => {
       const input = box.querySelector(`[data-qq="${CSS.escape(cn)}"]`);
       const qq = input.value.trim();
       if (!/^\d{5,15}$/.test(qq)) return toast('QQ 号格式不对', true);
-      state.assignments.set(cn, { newCustomer: { qq, nickname: cn }, label: `新客户 ${qq}` });
+      state.assignments.set(cn, {
+        newCustomer: { qq, nickname: cn },
+        label: `新客户 ${qq}`,
+      });
       renderPreview(view);
     },
     clear: ({ cn }) => {
+      state.assignments.delete(cn);
+      renderPreview(view);
+    },
+    // 自动认错了人：不接受这个结果，重新指认，导入时这条指认会盖掉自动匹配
+    override: ({ cn }) => {
+      state.overrides.add(cn);
+      state.assignments.delete(cn);
+      renderPreview(view);
+    },
+    unoverride: ({ cn }) => {
+      state.overrides.delete(cn);
       state.assignments.delete(cn);
       renderPreview(view);
     },
@@ -277,7 +309,8 @@ function renderPreview(view) {
           columns: state.columnEdits,
           batchName: document.getElementById('batchName').value.trim(),
           orderedAt: document.getElementById('orderedAt').value || null,
-          orderNo: document.getElementById('orderNo').value, japanTrackingNo:document.getElementById('japanTrackingNo').value,
+          orderNo: document.getElementById('orderNo').value,
+          japanTrackingNo: document.getElementById('japanTrackingNo').value,
           confirmDuplicate: Boolean(p.duplicate),
           assignments: [...state.assignments.entries()].map(([cn, a]) => ({
             cn,

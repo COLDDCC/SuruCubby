@@ -26,6 +26,20 @@ export interface AllocationResult {
   diffFen: number;
 }
 
+/**
+ * 总价 = 总重量 × 单价（分 / kg）。先整数相乘再除，避免浮点误差；不足 1 分四舍五入。
+ * 群主的口径：国际运费单价基本固定（默认 100 元/kg），称完重量金额就出来了，不用每次手填。
+ */
+export function feeFromWeight(totalWeightG: number, priceFenPerKg: number): number {
+  if (!Number.isInteger(totalWeightG) || totalWeightG < 0) {
+    throw new Error('总重量必须是整数克');
+  }
+  if (!Number.isInteger(priceFenPerKg) || priceFenPerKg < 0) {
+    throw new Error('运费单价必须是整数分 / kg');
+  }
+  return Math.round((totalWeightG * priceFenPerKg) / 1000);
+}
+
 export function allocate(totalFeeFen: number, groups: WeighInput[]): AllocationResult {
   if (!Number.isInteger(totalFeeFen) || totalFeeFen < 0) {
     throw new Error('国际运费必须是非负整数（分）');

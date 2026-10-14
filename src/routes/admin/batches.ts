@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { fetchOgImage } from '../../lib/ogImage.ts';
-import { cacheImage, isHttpUrl } from '../../lib/images.ts';
+import { cacheImage, isHttpUrl, liveImageUrl, surugaImageCandidates } from '../../lib/images.ts';
 import { nowIso } from '../../lib/db.ts';
 
 export const batchRoutes = new Hono<{ Bindings: Env }>();
@@ -57,7 +57,7 @@ batchRoutes.get('/:id', async (c) => {
 
 batchRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
-  const body = await readJson<{ name?: string; orderedAt?: string; orderNo?:string; japanTrackingNo?:string }>(c);
+  const body = await readJson<{ name?: string; orderedAt?: string; orderNo?: string; japanTrackingNo?: string }>(c);
   const name = optionalString(body.name);
   const orderedAt = optionalString(body.orderedAt);
   await c.env.DB.prepare(
@@ -65,7 +65,12 @@ batchRoutes.patch('/:id', async (c) => {
   )
     .bind(name, orderedAt, id)
     .run();
-  if(body.orderNo!==undefined||body.japanTrackingNo!==undefined) await c.env.DB.prepare('UPDATE batches SET order_no=COALESCE(?,order_no),japan_tracking_no=COALESCE(?,japan_tracking_no) WHERE id=?').bind(optionalString(body.orderNo),optionalString(body.japanTrackingNo),id).run();
+  if (body.orderNo !== undefined || body.japanTrackingNo !== undefined)
+    await c.env.DB.prepare(
+      'UPDATE batches SET order_no=COALESCE(?,order_no),japan_tracking_no=COALESCE(?,japan_tracking_no) WHERE id=?',
+    )
+      .bind(optionalString(body.orderNo), optionalString(body.japanTrackingNo), id)
+      .run();
   return c.json({ ok: true });
 });
 
@@ -73,7 +78,9 @@ batchRoutes.patch('/:id', async (c) => {
  * 固化封面图：对这一批里还没有站内图片的物品，
  *   1. 有外链图片地址就用它（=IMAGE("...") 公式里的地址在导入时已经被抽出来了）；
  *   2. 没有就去商品链接的页面抓 og:image；
- *   3. 绑了 R2 就把图抓下来存进自己的桶，图片地址换成 /img/{key}，从此不怕对方改地址或防盗链；
+ *   3. 商品页抓不到（骏河屋对国外 IP 直接 403）就按货号拼官方 CDN 的地址，
+ *      取回来确认是图片才认，取不到就当没图；
+ *   4. 绑了 R2 就把图抓下来存进自己的桶，图片地址换成 /img/{key}，从此不怕对方改地址或防盗链；
  *      没绑 R2 就退回直接外链。
  * 一次最多处理 20 件，按钮可以反复点直到 left 为 0。
  */
@@ -108,8 +115,14 @@ batchRoutes.post('/:id/images', async (c) => {
   for (const row of rows.results) {
     let source = isHttpUrl(row.imageUrl) ? row.imageUrl : null;
     if (!source && row.productUrl) source = await fetchOgImage(row.productUrl);
+    if (!source && row.productUrl) {
+      for (const candidate of surugaImageCandidates(row.productUrl)) {
+        source = await liveImageUrl(candidate);
+        if (source) break;
+      }
+    }
     if (!source) {
-      failures.push({ itemId: row.id, reason: '商品页里也没找到图' });
+      failures.push({ itemId: row.id, reason: '商品页和货号都找不到图' });
       continue;
     }
     if (bucket) {
@@ -117,11 +130,7 @@ batchRoutes.post('/:id/images', async (c) => {
       if (result.path) {
         cached += 1;
         statements.push(
-          c.env.DB.prepare('UPDATE items SET image_url = ?, updated_at = ? WHERE id = ?').bind(
-            result.path,
-            at,
-            row.id,
-          ),
+          c.env.DB.prepare('UPDATE items SET image_url = ?, updated_at = ? WHERE id = ?').bind(result.path, at, row.id),
         );
         continue;
       }
@@ -136,9 +145,7 @@ batchRoutes.post('/:id/images', async (c) => {
   }
   if (statements.length > 0) await c.env.DB.batch(statements);
 
-  const left = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM items WHERE batch_id = ? AND ${pending}`,
-  )
+  const left = await c.env.DB.prepare(`SELECT COUNT(*) AS count FROM items WHERE batch_id = ? AND ${pending}`)
     .bind(id)
     .first<{ count: number }>();
 
