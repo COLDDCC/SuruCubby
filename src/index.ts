@@ -131,6 +131,8 @@ app.notFound(async (c) => {
   if (url.pathname.startsWith('/api/')) return c.json({ error: '接口不存在' }, 404);
   // 客户专属页：/w/{token} 统一返回同一个页面，token 由前端从地址里取
   if (url.pathname.startsWith('/w/')) return serveAsset(c.env, url, '/customer.html');
+  // 统一入口：客户输 QQ 号 + 密码自己进，不用群主挨个发链接
+  if (url.pathname === '/login' || url.pathname === '/me') return serveAsset(c.env, url, '/customer.html');
   return c.env.ASSETS.fetch(c.req.raw);
 });
 

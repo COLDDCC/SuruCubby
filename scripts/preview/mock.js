@@ -135,15 +135,16 @@
 
     // 客户页
     if (path.startsWith('/api/w/')) {
-      if (path.endsWith('/verify')) {
+      if (path === '/api/w/login') {
         const expected = customerKey === '__customer__' ? state.__customerQq__ : state.__customer2Qq__;
-        if (String(body.qq).trim() !== expected) {
-          return json({ error: 'QQ 号对不上（演示里的号码写在页面上）', left: 4 }, 401);
+        if (String(body.qq).trim() !== expected || body.password !== '123456') {
+          return json({ error: 'QQ 号或密码不对（演示里号码写在页面上，密码是 123456）', left: 4 }, 401);
         }
-        return json({ verified: true, ...state[customerKey] });
+        sessionStorage.setItem('demo-verified', '1');
+        return json({ verified: true, mustChange: false, ...state[customerKey] });
       }
       if (!sessionStorage.getItem('demo-verified')) return json({ verified: false }, 401);
-      return json({ verified: true, ...state[customerKey] });
+      return json({ verified: true, mustChange: false, ...state[customerKey] });
     }
 
     if (path === '/api/admin/session') return json({ loggedIn: true });
@@ -336,14 +337,5 @@
     }
 
     return json({ ok: true, demo: true });
-  };
-
-  // 客户页验证过一次之后就记住，跟线上的 Cookie 行为一致
-  const origPost = window.fetch;
-  window.fetch = async function (input, init) {
-    const res = await origPost(input, init);
-    const raw = typeof input === 'string' ? input : input.url;
-    if (raw.includes('/verify') && res.ok) sessionStorage.setItem('demo-verified', '1');
-    return res;
   };
 })();

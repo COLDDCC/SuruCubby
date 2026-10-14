@@ -321,10 +321,11 @@ function renderPreview(view) {
         toast(`导入成功：${result.itemCount} 件，${result.customerCount} 位客户`);
         if (result.createdCustomers.length) {
           const lines = result.createdCustomers
-            .map((c) => `${c.nickname}（${c.qq}）: ${location.origin}/w/${c.token}`)
+            .map((c) => `${c.nickname}（QQ ${c.qq}）: ${location.origin}/w/${c.token} 初始密码 123456`)
             .join('\n');
           box.innerHTML = `<div class="card"><h3>新建了这些客户，把链接发给他们</h3>
             <textarea style="width:100%;height:140px">${escapeHtml(lines)}</textarea>
+            <p class="small muted">不想挨个发链接也行：让他们打开 ${escapeHtml(location.origin)}/login，账号是自己的 QQ 号，初始密码 123456，进去先改成自己的。</p>
             <p><a class="btn" href="#/batches/${result.batchId}">查看这一批</a></p></div>`;
         } else {
           location.hash = `#/batches/${result.batchId}`;

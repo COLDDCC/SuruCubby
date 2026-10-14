@@ -43,6 +43,9 @@ export async function render(view, [id]) {
       <p class="small muted">真名（只有后台看得到，客户自己的页面不显示）：${
         data.realName ? escapeHtml(data.realName) : '没填'
       } <button class="small plain" data-action="realName">改</button></p>
+      <p class="small ${data.passwordInitial ? 'unpaid' : 'paid'}">登录密码：${
+        data.passwordInitial ? '还是初始密码 123456（他下次进去会被要求改成自己的）' : '已经改成自己的了'
+      } <button class="small plain" data-action="password">改密码</button></p>
     </div>
 
     <div class="card">
@@ -209,6 +212,22 @@ export async function render(view, [id]) {
       if (!real) return;
       await api.patch(`/api/admin/customers/${id}`, { realName: real });
       toast('已记下');
+      reload();
+    },
+    password: async () => {
+      const pw = await promptBox(
+        data.passwordInitial
+          ? '给他设一个密码（留空＝还是初始密码 123456，他下次进去自己改）'
+          : '给他设一个新密码（留空＝退回初始密码 123456，他下次进去自己改）',
+        '',
+      );
+      if (pw === null) return;
+      if (pw === '' && !data.passwordInitial) {
+        if (!(await confirmBox('退回初始密码 123456？他下次登录要先改成自己的。', { danger: true, okText: '退回' })))
+          return;
+      }
+      await api.post(`/api/admin/customers/${id}/password`, { password: pw });
+      toast(pw === '' ? '已退回初始密码 123456' : '密码已设好，私发给他');
       reload();
     },
     merge: async () => {

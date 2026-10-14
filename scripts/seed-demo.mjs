@@ -129,7 +129,7 @@ const shipment = await call('POST', '/api/admin/shipments', {
 });
 await call('PATCH', `/api/admin/shipments/${shipment.id}`, { trackingNo: 'SF1234567890' });
 
-console.log('\n演示客户的专属链接：');
+console.log('\n演示客户登录（统一入口 /login，或点下面的专属链接）：');
 for (const c of (await call('GET', '/api/admin/customers')).customers) {
-  console.log(`  ${c.nickname.padEnd(4)} QQ ${c.qq}  ${BASE}/w/${c.token}`);
+  console.log(`  ${c.nickname.padEnd(4)} QQ ${c.qq}  密码 123456  ${BASE}/w/${c.token}`);
 }

@@ -3,7 +3,12 @@ import type { Env } from '../lib/env.ts';
 import { badRequest, readJson } from '../lib/http.ts';
 import { nowIso } from '../lib/db.ts';
 import { buildCustomerView } from '../lib/customerView.ts';
-import { clearCustomerSession, customerSession, issueCustomerSession } from '../lib/session.ts';
+import {
+  clearCustomerSession,
+  customerSession,
+  issueCustomerSession,
+} from '../lib/session.ts';
+import { hashPassword, passwordProblem, usingInitialPassword, verifyPassword } from '../lib/password.ts';
 
 export const customerRoutes = new Hono<{ Bindings: Env }>();
 
@@ -61,14 +66,17 @@ async function clearFailures(env: Env, token: string): Promise<void> {
   await env.DB.prepare('DELETE FROM token_attempts WHERE token = ?').bind(token).run();
 }
 
-customerRoutes.post('/:token/verify', async (c) => {
-  const token = c.req.param('token');
-  if (token.length > 64) throw badRequest('链接不对');
-  const body = await readJson<{ qq?: string }>(c);
+customerRoutes.post('/login', async (c) => {
+  const body = await readJson<{ qq?: string; password?: string }>(c);
   const qq = typeof body.qq === 'string' ? body.qq.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
   if (qq === '') throw badRequest('请输入 QQ 号');
+  if (password === '') throw badRequest('请输入密码');
+  if (qq.length > 32 || password.length > 64) throw badRequest('账号或密码太长了');
 
-  const lockedUntil = await checkLock(c.env, token);
+  // 锁定按 QQ 计，换成统一入口也照样防得住挨个试密码
+  const key = `qq:${qq}`;
+  const lockedUntil = await checkLock(c.env, key);
   if (lockedUntil) {
     return c.json(
       { error: '输错太多次了，请过 15 分钟再试', lockedUntil: new Date(lockedUntil).toISOString() },
@@ -76,15 +84,19 @@ customerRoutes.post('/:token/verify', async (c) => {
     );
   }
 
-  const customer = await c.env.DB.prepare('SELECT id, qq FROM customers WHERE token = ?')
-    .bind(token)
-    .first<{ id: number; qq: string }>();
+  const customer = await c.env.DB.prepare(
+    'SELECT id, qq, token, password_hash AS passwordHash FROM customers WHERE qq = ?',
+  )
+    .bind(qq)
+    .first<{ id: number; qq: string; token: string; passwordHash: string | null }>();
 
-  if (!customer || customer.qq !== qq) {
-    const result = await recordFailure(c.env, token);
+  if (!customer || !(await verifyPassword(password, customer.passwordHash ?? null))) {
+    const result = await recordFailure(c.env, key);
     return c.json(
       {
-        error: result.locked ? '输错太多次了，请过 15 分钟再试' : 'QQ 号对不上',
+        error: result.locked
+          ? '输错太多次了，请过 15 分钟再试'
+          : 'QQ 号或密码不对',
         left: result.left,
         locked: result.locked,
       },
@@ -92,10 +104,33 @@ customerRoutes.post('/:token/verify', async (c) => {
     );
   }
 
-  await clearFailures(c.env, token);
-  await issueCustomerSession(c, token, customer.id);
+  await clearFailures(c.env, key);
+  await issueCustomerSession(c, customer.token, customer.id);
   const view = await buildCustomerView(c.env, customer.id);
-  return c.json({ verified: true, ...view, serverTime: nowIso() });
+  return c.json({
+    verified: true,
+    token: customer.token,
+    mustChange: usingInitialPassword(customer.passwordHash ?? null),
+    ...view,
+    serverTime: nowIso(),
+  });
+});
+
+/** 登录后设自己的密码；换完就不再是「还在用初始密码」。 */
+customerRoutes.post('/:token/password', async (c) => {
+  const token = c.req.param('token');
+  const customerId = await customerSession(c, token);
+  if (customerId === null) return c.json({ error: '请先登录' }, 401);
+  const body = await readJson<{ newPassword?: string }>(c);
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+  const problem = passwordProblem(newPassword);
+  if (problem) throw badRequest(problem);
+
+  const result = await c.env.DB.prepare('UPDATE customers SET password_hash = ? WHERE id = ?')
+    .bind(await hashPassword(newPassword), customerId)
+    .run();
+  if (!result.meta.changes) throw badRequest('客户不存在');
+  return c.json({ ok: true });
 });
 
 customerRoutes.get('/:token', async (c) => {
@@ -104,9 +139,11 @@ customerRoutes.get('/:token', async (c) => {
   if (customerId === null) return c.json({ verified: false }, 401);
 
   // token 被重置后旧 Cookie 立即失效
-  const customer = await c.env.DB.prepare('SELECT id FROM customers WHERE id = ? AND token = ?')
+  const customer = await c.env.DB.prepare(
+    'SELECT id, password_hash AS passwordHash FROM customers WHERE id = ? AND token = ?',
+  )
     .bind(customerId, token)
-    .first<{ id: number }>();
+    .first<{ id: number; passwordHash: string | null }>();
   if (!customer) {
     clearCustomerSession(c, token);
     return c.json({ verified: false }, 401);
@@ -114,7 +151,12 @@ customerRoutes.get('/:token', async (c) => {
 
   const view = await buildCustomerView(c.env, customerId);
   if (!view) return c.json({ verified: false }, 401);
-  return c.json({ verified: true, ...view, serverTime: nowIso() });
+  return c.json({
+    verified: true,
+    mustChange: usingInitialPassword(customer.passwordHash ?? null),
+    ...view,
+    serverTime: nowIso(),
+  });
 });
 
 customerRoutes.post('/:token/logout', (c) => {

@@ -1,6 +1,7 @@
 import { beijingTime, escapeHtml, jpy, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
-const token = decodeURIComponent(location.pathname.replace(/^\/w\//, '').replace(/\/$/, ''));
+const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
+let token = pathToken ? decodeURIComponent(pathToken) : '';
 const app = document.getElementById('app');
 
 const GROUPS = [
@@ -29,36 +30,85 @@ function renderVerify(message) {
   app.innerHTML = `
     <div class="card">
       <h1>我的仓库</h1>
-      <p class="muted">第一次打开请输入你的 QQ 号，确认是本人。之后 180 天内不用再输。</p>
+      <p class="muted">输入你的 QQ 号和密码。第一次进来密码是群主发的初始密码，进去之后会让你换成自己的。</p>
       <label for="qq">QQ 号</label>
+      <input id="qq" inputmode="numeric" autocomplete="off" placeholder="例如 123456789">
+      <label for="pw">密码</label>
       <div class="row">
-        <input id="qq" inputmode="numeric" autocomplete="off" placeholder="例如 123456789">
+        <input id="pw" type="password" autocomplete="current-password" placeholder="初始密码见群主发给你的那条">
         <button id="go">进入</button>
       </div>
       <p id="err" class="unpaid small">${message ? escapeHtml(message) : ''}</p>
     </div>`;
   const input = document.getElementById('qq');
+  const pw = document.getElementById('pw');
   const button = document.getElementById('go');
   const err = document.getElementById('err');
   const submit = async () => {
     button.disabled = true;
-    const { ok, data } = await api(`/api/w/${encodeURIComponent(token)}/verify`, {
+    const { ok, data } = await api('/api/w/login', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ qq: input.value.trim() }),
+      body: JSON.stringify({ qq: input.value.trim(), password: pw.value }),
     });
     button.disabled = false;
     if (!ok) {
       err.textContent = data.error || '验证失败';
       return;
     }
-    render(data);
+    token = data.token;
+    // 统一入口登录后把专属地址补进地址栏，刷新不用再输密码
+    history.replaceState(null, '', `/w/${encodeURIComponent(token)}`);
+    if (data.mustChange) renderMustChange(data);
+    else render(data);
   };
   button.onclick = submit;
-  input.onkeydown = (e) => {
+  pw.onkeydown = (e) => {
     if (e.key === 'Enter') submit();
   };
   input.focus();
+}
+
+/** 还在用统一的初始密码时先进这一屏：不改密码就下不了单。 */
+function renderMustChange(data) {
+  app.innerHTML = `
+    <div class="card">
+      <h1>先改一下密码</h1>
+      <p class="muted">群主发的初始密码大家都一样，谁都可能登进你的页面。设一个只有你自己知道的，之后下单、填地址才认。</p>
+      <label for="np">新密码（6 到 32 位，不要有空格）</label>
+      <input id="np" type="password" autocomplete="new-password">
+      <label for="np2">再输一次</label>
+      <div class="row">
+        <input id="np2" type="password" autocomplete="new-password">
+        <button id="save">保存</button>
+        <button id="peek" class="plain">先随便看看</button>
+      </div>
+      <p id="err" class="unpaid small"></p>
+    </div>`;
+  const err = document.getElementById('err');
+  document.getElementById('save').onclick = async (e) => {
+    const a = document.getElementById('np').value;
+    const b = document.getElementById('np2').value;
+    e.target.disabled = true;
+    if (a !== b) {
+      err.textContent = '两次输的不一样';
+      e.target.disabled = false;
+      return;
+    }
+    const { ok, data: r } = await api(`/api/w/${encodeURIComponent(token)}/password`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newPassword: a }),
+    });
+    e.target.disabled = false;
+    if (!ok) {
+      err.textContent = r.error || '保存失败';
+      return;
+    }
+    toast('密码已改好，以后就用这个');
+    boot();
+  };
+  document.getElementById('peek').onclick = () => render(data);
 }
 
 function itemCard(item) {
@@ -209,12 +259,13 @@ function render(data) {
 
 async function boot() {
   if (!token) {
-    app.innerHTML = '<div class="card"><p class="unpaid">链接不完整，请找需求方要一份新的。</p></div>';
+    renderVerify('');
     return;
   }
   const { ok, status, data } = await api(`/api/w/${encodeURIComponent(token)}`);
   if (ok && data.verified) {
-    render(data);
+    if (data.mustChange) renderMustChange(data);
+    else render(data);
     return;
   }
   if (status === 401) {

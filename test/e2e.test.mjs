@@ -144,34 +144,101 @@ test('第二次用同一个名字导入时自动认人（别名生效）', async
   assert.equal(preview.groups[0].customer.qq, QQS[0]);
 });
 
-test('客户页：没验证看不到，QQ 输错也看不到', async () => {
-  const token = ctx.customers[0].token;
-  const anonymous = await fetch(`${BASE}/api/w/${token}`);
-  assert.equal(anonymous.status, 401);
-  const wrong = await fetch(`${BASE}/api/w/${token}/verify`, {
+async function login(qq, password, cookie) {
+  const res = await fetch(`${BASE}/api/w/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ qq: '99999999' }),
+    headers: {
+      'content-type': 'application/json',
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify({ qq, password }),
   });
-  assert.equal(wrong.status, 401);
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+    /* 忽略 */
+  }
+  return { res, data };
+}
+
+test('客户登录：没登录看不到，QQ 或密码不对也看不到', async () => {
+  const anonymous = await fetch(`${BASE}/api/w/${ctx.customers[0].token}`);
+  assert.equal(anonymous.status, 401);
+  assert.equal((await login('99999999', '123456')).res.status, 401);
+  assert.equal((await login(QQS[0], '999999')).res.status, 401);
 });
 
-test('客户页：QQ 对上后只看得到自己的东西，金额与 Excel 一致', async () => {
-  const token = ctx.customers[0].token;
-  const res = await fetch(`${BASE}/api/w/${token}/verify`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ qq: QQS[0] }),
-  });
+test('客户登录：QQ + 初始密码进来，只看得到自己的东西，金额与 Excel 一致', async () => {
+  const { res, data } = await login(QQS[0], '123456');
   assert.equal(res.status, 200);
-  const data = await res.json();
   assert.equal(data.verified, true);
+  assert.equal(data.token, ctx.customers[0].token);
+  assert.equal(data.mustChange, true, '初始密码没改时要催他改');
   assert.equal(data.customer.nickname, NAMES[0]);
   assert.equal(data.items.length, 2);
   assert.equal(data.summary.goodsUnpaidJpy, 1800 + 1500);
   assert.ok(data.items.every((i) => i.status === 'ordered'));
   assert.ok(!JSON.stringify(data).includes(NAMES[1]), '不能出现别的客户的信息');
   ctx.cookie = res.headers.getSetCookie()[0].split(';')[0];
+});
+
+test('还是初始密码时下不了单，改成自己的之后旧密码立刻不好使', async () => {
+  const token = ctx.customers[0].token;
+  const blocked = await fetch(`${BASE}/api/w/${token}/addresses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: ctx.cookie },
+    body: JSON.stringify({ recipient: '张三', phone: '13800000000', detail: '某市某路 1 号' }),
+  });
+  assert.equal(blocked.status, 403);
+  assert.match((await blocked.json()).error, /修改密码/);
+
+  // 太短的、还等于初始的都不收
+  assert.equal(
+    (
+      await fetch(`${BASE}/api/w/${token}/password`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: ctx.cookie },
+        body: JSON.stringify({ newPassword: '123456' }),
+      })
+    ).status,
+    400,
+  );
+
+  const changed = await fetch(`${BASE}/api/w/${token}/password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: ctx.cookie },
+    body: JSON.stringify({ newPassword: 'ab12cd34' }),
+  });
+  assert.equal(changed.status, 200);
+
+  assert.equal((await login(QQS[0], '123456')).res.status, 401, '初始密码不能再登进来');
+  const again = await login(QQS[0], 'ab12cd34');
+  assert.equal(again.res.status, 200);
+  assert.equal(again.data.mustChange, false);
+
+  const saved = await fetch(`${BASE}/api/w/${token}/addresses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: ctx.cookie },
+    body: JSON.stringify({ recipient: '张三', phone: '13800000000', detail: '某市某路 1 号' }),
+  });
+  assert.equal(saved.status, 200);
+  ctx.addressId = (await saved.json()).id;
+});
+
+test('群主能把客户的密码退回初始密码，也能直接替他设一个', async () => {
+  const id = ctx.customers[0].id;
+  const detail = await call('GET', `/api/admin/customers/${id}`);
+  assert.equal(detail.passwordInitial, false);
+
+  await call('POST', `/api/admin/customers/${id}/password`, { password: '' });
+  const back = await call('GET', `/api/admin/customers/${id}`);
+  assert.equal(back.passwordInitial, true, '退回后应显示还在用初始密码');
+  assert.equal((await login(QQS[0], '123456')).res.status, 200);
+
+  await call('POST', `/api/admin/customers/${id}/password`, { password: 'zhuprovider1' });
+  assert.equal((await login(QQS[0], '123456')).res.status, 401);
+  assert.equal((await login(QQS[0], 'zhuprovider1')).res.status, 200);
 });
 
 test('包裹改状态，客户页同步', async () => {
@@ -522,17 +589,13 @@ test('有运费账目冲突时禁止合并；没有计费的客户可安全合�
 });
 
 test('QQ 连错 5 次会锁定 15 分钟', async () => {
-  const fresh = await call('POST', '/api/admin/customers', {
+  await call('POST', '/api/admin/customers', {
     qq: `${stamp + 3}`.slice(-9),
     nickname: `锁定测试${stamp}`,
   });
   let last;
   for (let i = 0; i < 6; i += 1) {
-    last = await fetch(`${BASE}/api/w/${fresh.token}/verify`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ qq: '10000' }),
-    });
+    last = (await login('10000', '123456')).res;
   }
   assert.equal(last.status, 429);
 });
@@ -792,13 +855,9 @@ test('名单导入：一次把客户建齐，真名只进后台，撞名的行�
   assert.equal(byReal.customers.length, 1, '后台能按真名搜到人');
 
   const detail = await call('GET', `/api/admin/customers/${jia.id}`);
-  const own = await fetch(`${BASE}/api/w/${detail.token}/verify`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ qq: '2000001' }),
-  });
-  assert.equal(own.status, 200);
-  const ownText = JSON.stringify(await own.json());
+  const own = await login('2000001', '123456');
+  assert.equal(own.res.status, 200);
+  const ownText = JSON.stringify(own.data);
   assert.ok(ownText.includes(`名单甲${stamp}`), '他自己的名字照常用');
   assert.ok(!ownText.includes(`甲真实${stamp}`), '真名不出现在客户自己的页面');
 

@@ -2,12 +2,16 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { nextId, nowIso, domesticFeeFen, statusLogStmt } from '../../lib/db.ts';
-import { customerSession } from '../../lib/session.ts';
+import { clearCustomerSession, customerSession } from '../../lib/session.ts';
+import { usingInitialPassword } from '../../lib/password.ts';
 export const requestAdminRoutes=new Hono<{Bindings:Env}>();
 export const requestCustomerRoutes=new Hono<{Bindings:Env}>();
 requestCustomerRoutes.use('/:token/*',async(c,next)=>{
  const token=c.req.param('token'); const cid=await customerSession(c,token);
- if(cid===null || !await c.env.DB.prepare('SELECT id FROM customers WHERE id=? AND token=?').bind(cid,token).first()) return c.json({error:'请先验证身份'},401);
+ const row=cid===null?null:await c.env.DB.prepare('SELECT id,password_hash AS passwordHash FROM customers WHERE id=? AND token=?').bind(cid,token).first<{id:number;passwordHash:string|null}>();
+ if(!row){clearCustomerSession(c,token);return c.json({error:'请先验证身份'},401);}
+ // 还拿着统一的初始密码时不让动手下单：谁都知道 123456，先改成自己的才认
+ if(c.req.method!=='GET'&&usingInitialPassword(row.passwordHash)) return c.json({error:'请先点击「修改密码」设一个只有你知道的密码'},403);
  await next();
 });
 async function identity(c:any):Promise<number>{return (await customerSession(c,c.req.param('token')))!;}

@@ -3,6 +3,7 @@ import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, optionalString, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
+import { hashPassword, passwordProblem } from '../../lib/password.ts';
 import { buildCustomerView } from '../../lib/customerView.ts';
 import { buildNameIndex, matchName } from '../../lib/nameMatch.ts';
 
@@ -28,6 +29,7 @@ customerRoutes.get('/', async (c) => {
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(
     `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.created_at AS createdAt,
+            c.password_hash IS NULL AS passwordInitial,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id) AS itemCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
             (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i
@@ -225,9 +227,11 @@ customerRoutes.get('/:id', async (c) => {
   const aliases = await c.env.DB.prepare('SELECT alias FROM customer_aliases WHERE customer_id = ? ORDER BY alias')
     .bind(id)
     .all<{ alias: string }>();
-  const row = await c.env.DB.prepare('SELECT token, note, real_name AS realName FROM customers WHERE id = ?')
+  const row = await c.env.DB.prepare(
+    'SELECT token, note, real_name AS realName, password_hash IS NULL AS passwordInitial FROM customers WHERE id = ?',
+  )
     .bind(id)
-    .first<{ token: string; note: string | null; realName: string | null }>();
+    .first<{ token: string; note: string | null; realName: string | null; passwordInitial: number }>();
   const payments = await c.env.DB.prepare(
     `SELECT id, kind, currency, amount, ref_type AS refType, ref_id AS refId, note, paid_at AS paidAt
        FROM payments WHERE customer_id = ? ORDER BY id DESC LIMIT 50`,
@@ -240,8 +244,33 @@ customerRoutes.get('/:id', async (c) => {
     token: row?.token,
     note: row?.note ?? null,
     realName: row?.realName ?? null,
+    passwordInitial: row?.passwordInitial === 1,
     payments: payments.results,
   });
+});
+
+/**
+ * 帮客户设密码：给了 password 就设成那一个，留空则退回初始密码 123456
+ * （退回去之后客户下次登录会被要求先改自己的，等同于「他来找我从头来一遍」）。
+ */
+customerRoutes.post('/:id/password', async (c) => {
+  const id = requireInt(c.req.param('id'), '客户 ID');
+  const body = await readJson<{ password?: unknown }>(c);
+  const password = optionalString(body.password);
+  const db = c.env.DB;
+  if (!(await db.prepare('SELECT id FROM customers WHERE id = ?').bind(id).first())) {
+    throw notFound('客户不存在');
+  }
+  if (password === null) {
+    await db.prepare('UPDATE customers SET password_hash = NULL WHERE id = ?').bind(id).run();
+    return c.json({ ok: true, reset: true });
+  }
+  const problem = passwordProblem(password);
+  if (problem) throw badRequest(problem);
+  await db.prepare('UPDATE customers SET password_hash = ? WHERE id = ?')
+    .bind(await hashPassword(password), id)
+    .run();
+  return c.json({ ok: true, reset: false });
 });
 
 customerRoutes.patch('/:id', async (c) => {

@@ -17,6 +17,7 @@ export async function render(view, params, query = '') {
         <input id="q" placeholder="搜 QQ / 昵称 / 真名 / 别名" value="${escapeHtml(query)}">
         <button class="small plain" data-action="search">搜索</button>
       </div>
+      <p class="small muted">客户统一入口 <a href="/login" target="_blank">${escapeHtml(location.origin)}/login</a>：输自己的 QQ 号和密码就能进，初始密码 123456；专属链接照旧能用，不用挨个发。</p>
       ${
         data.customers.length
           ? data.customers
@@ -28,7 +29,9 @@ export async function render(view, params, query = '') {
               <a href="#/customers/${c.id}">${escapeHtml(c.nickname)}</a>${
                 c.realName ? `<span class="small muted">（${escapeHtml(c.realName)}）</span>` : ''
               }
-              <div class="small muted">QQ ${escapeHtml(c.qq)} · ${c.itemCount} 件 · 可发货 ${c.stockCount}</div>
+              <div class="small muted">QQ ${escapeHtml(c.qq)} · ${c.itemCount} 件 · 可发货 ${c.stockCount}${
+                c.passwordInitial ? ' · <span class="unpaid">还在用初始密码</span>' : ''
+              }</div>
             </div>
             <div class="side">
               <span class="${goods ? 'unpaid' : 'paid'} money">${yen(goods)}</span>
