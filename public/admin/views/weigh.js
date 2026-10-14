@@ -51,7 +51,13 @@ export async function render(view, [id]) {
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
-      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。每件填重量并保存，漏件请明确标记。包裹到手、全部称重算费后确认，商品才变为绿色「可发货」，客户那边马上能勾选申请发货。</p>
+      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。包裹到手、全部称重算费后确认，商品才变为绿色「可发货」，客户那边马上能勾选申请发货。</p>
+      ${
+        allocated || p.unclaimedItems <= 0
+          ? ""
+          : `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button>
+             <span class="small muted">货全到了就点这个，一件件都不用点；确实没收到的请在下面标「缺件」</span></p>`
+      }
       ${
         allocated
           ? `<p class="small">已分摊：国际运费 <span class="money">${money(pkg.totalFeeFen)}</span>
@@ -69,15 +75,27 @@ export async function render(view, [id]) {
       }
     </div>
     ${data.customers
-      .map(
-        (c) => `
+      .map((c) => {
+        const live = c.items.filter((i) => !i.missing);
+        const weighedUnits = live.filter((i) => i.weightG).length;
+        const byUnit = live.length > 0 && weighedUnits === live.length;
+        return `
       <div class="card" data-customer-card="${c.customerId}">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0">${escapeHtml(c.nickname)}
             <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ""}</span></h3>
-          <div class="row">
-            <span class="small muted">这一摞 ${c.weightG ? `${Number(c.weightG).toLocaleString()} g` : "还没称"}</span>
-          </div>
+          ${
+            allocated || byUnit
+              ? `<span class="small muted">这一摞 ${
+                  c.weightG ? `${Number(c.weightG).toLocaleString()} g` : "还没称"
+                }${byUnit ? " · 逐件相加" : ""}</span>`
+              : `<div class="row" style="justify-content:flex-end">
+                  <input inputmode="numeric" placeholder="整摞重量 g" data-group-weight="${c.customerId}"
+                         value="${c.weightG ?? ""}" style="width:120px">
+                  <button class="small" data-action="groupWeight" data-customer="${c.customerId}">存整摞</button>
+                  ${weighedUnits ? `<span class="small muted">已逐件称 ${weighedUnits}/${live.length}</span>` : ""}
+                </div>`
+          }
         </div>
         ${
           c.intlFeeFen !== null
@@ -109,8 +127,8 @@ export async function render(view, [id]) {
             })
             .join("")}
         </div>
-      </div>`,
-      )
+      </div>`;
+      })
       .join("")}
     ${
       allocated
@@ -131,6 +149,30 @@ export async function render(view, [id]) {
   const reload = () => render(view, [id]);
 
   bindActions(view, {
+    claimAll: async (_p, el) => {
+      el.disabled = true;
+      try {
+        const r = await api.post(`/api/admin/packages/${id}/weigh/claim-all`, {});
+        toast(r.claimed ? `已认领 ${r.claimed} 件，分成 ${r.customers} 摞，接着称每摞的重量就行` : "没有待认领的商品了");
+        await reload();
+      } catch (err) {
+        toast(err.message, true);
+        el.disabled = false;
+      }
+    },
+    groupWeight: async ({ customer }, el) => {
+      el.disabled = true;
+      try {
+        await api.post(`/api/admin/packages/${id}/weigh/group`, {
+          customerId: Number(customer),
+          weightG: view.querySelector(`[data-group-weight="${customer}"]`).value.trim(),
+        });
+        await reload();
+      } catch (err) {
+        toast(err.message, true);
+        el.disabled = false;
+      }
+    },
     unitWeight: async ({ item }, el) => {
       el.disabled = true;
       try {
@@ -188,12 +230,6 @@ export async function render(view, [id]) {
       }
     },
     preview: async () => {
-      if (
-        data.customers.some((c) =>
-          c.items.some((i) => !i.missing && !i.weightG),
-        )
-      )
-        return toast("请先填写每件商品重量，缺件要明确标记", true);
       // 输入框里的单价先落库，预览和确认都按库里的单价算，避免页面上改了、实际没生效
       const typed = view.querySelector("#price")?.value.trim() ?? "";
       // 不传金额：后端按设置里的单价（默认 100 元/kg）从各摞重量算出这一箱的运费
@@ -229,7 +265,11 @@ export async function render(view, [id]) {
               <tbody>${p.rows
                 .map(
                   (r) => `<tr>
-                <td>${escapeHtml(r.nickname)}<div class="small muted">${r.itemCount} 件</div></td>
+                <td>${escapeHtml(r.nickname)}<div class="small muted">${r.itemCount} 件${
+                    r.unitMode === "equal"
+                      ? ` · 整摞均摊，每件 ${money(Math.floor(r.feeFen / r.itemCount))} 起`
+                      : " · 按各件轻重"
+                  }</div></td>
                 <td class="right">${r.weightG.toLocaleString()} g</td>
                 <td class="right">${(r.share * 100).toFixed(1)}%</td>
                 <td class="right money">${money(r.feeFen)}</td>

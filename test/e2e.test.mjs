@@ -296,7 +296,7 @@ test('称重台：点封面认领、填重量、缺件不进分摊', async () =>
       { raw: true },
     );
     assert.equal(tooEarly.status, 400, `${path} 在没有重量时必须拦住`);
-    assert.match(tooEarly.data.error, /没填重量|没称重/);
+    assert.match(tooEarly.data.error, /没称/);
   }
 
   for (const customer of claimed.customers) {
@@ -426,7 +426,7 @@ test('已分摊的包裹不能再乱改重量，撤销后可以', async () => {
     { raw: true },
   );
   assert.equal(blocked.status, 400);
-  // 整摞重量已经没有接口可写了：只能由各件之和算出来
+  // 逐件称过的摞，重量只由各件之和算出来，直接改整摞那个数会被拦（见下一个用例）
   assert.equal((await call('GET', `/api/admin/packages/${ctx.packageId}/weigh`)).customers[0].weightG, 1000);
   await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/undo`);
   const reverted = await call('GET', `/api/admin/packages/${ctx.packageId}`);
@@ -434,6 +434,126 @@ test('已分摊的包裹不能再乱改重量，撤销后可以', async () => {
   await call('POST', `/api/admin/packages/${ctx.packageId}/allocate/commit`, {
     totalFeeYuan: '100.00',
   });
+});
+
+test('整箱一次到国内：一键全部认领，整摞称一个数就能摊到每件', async () => {
+  // 他真实那一箱就是几十件挤在一个包裹里，一件一件称根本来不及：按那个形状再造一箱
+  const box = `整箱均摊${stamp}`;
+  const people = [`${box}甲`, `${box}乙`, `${box}丙`];
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: box,
+    fileHash: box,
+    sheet: {
+      headers: ['名称', 'cn', '实际价格'],
+      rows: [
+        ['甲的第一件', people[0], 100],
+        ['甲的第二件', people[0], 100],
+        ['甲的第三件', people[0], 100],
+        ['乙的第一件', people[1], 100],
+        ['乙的第二件', people[1], 100],
+        ['丙的唯一一件', people[2], 100],
+      ],
+    },
+    assignments: people.map((cn, i) => ({
+      cn,
+      newCustomer: { qq: `${stamp + 40 + i}`.slice(-9), nickname: cn },
+    })),
+  });
+  const pkgId = added.packageId;
+  await call('POST', `/api/admin/packages/${pkgId}/status`, { status: 'cn_arrived' });
+
+  const weigh = await call('GET', `/api/admin/packages/${pkgId}/weigh`);
+  assert.equal(weigh.progress.unclaimedItems, 6, '没认领的件数要直接说出来');
+  const stackOf = (nickname) => weigh.customers.find((c) => c.nickname === nickname);
+
+  const claimed = await call('POST', `/api/admin/packages/${pkgId}/weigh/claim-all`, {});
+  assert.equal(claimed.claimed, 6);
+  assert.equal(claimed.customers, 3, '一个客户一摞，不用一件件点');
+
+  const tooEarly = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {}, { raw: true });
+  assert.equal(tooEarly.status, 400);
+  assert.match(tooEarly.data.error, /整摞放秤上/, '拦住的话要告诉他不称也能填整摞');
+
+  // 丙 那件逐件称（500 g），甲乙只把整摞放秤上：2000 g、1000 g
+  const bing = stackOf(people[2]);
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/item`, {
+    itemId: bing.items[0].id,
+    weightG: 500,
+  });
+  for (const [nickname, weightG] of [[people[0], 2000], [people[1], 1000]]) {
+    await call('POST', `/api/admin/packages/${pkgId}/weigh/group`, {
+      customerId: stackOf(nickname).customerId,
+      weightG,
+    });
+  }
+  const conflict = await call(
+    'POST',
+    `/api/admin/packages/${pkgId}/weigh/group`,
+    { customerId: bing.customerId, weightG: 800 },
+    { raw: true },
+  );
+  assert.equal(conflict.status, 400, '这一摞已经逐件称过，不能再填整摞把口径搅浑');
+  assert.match(conflict.data.error, /逐件称/);
+
+  // 3,500 g × 100 元/kg = ¥350.00；按摞重分：甲 ¥200.00、乙 ¥100.00、丙 ¥50.00
+  const preview = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {});
+  assert.equal(preview.totalFeeFen, 35000);
+  const rowOf = (nickname) => preview.rows.find((r) => r.nickname === nickname);
+  assert.deepEqual(
+    [rowOf(people[0]).feeFen, rowOf(people[1]).feeFen, rowOf(people[2]).feeFen],
+    [20000, 10000, 5000],
+  );
+  assert.equal(rowOf(people[0]).unitMode, 'equal');
+  assert.equal(rowOf(people[2]).unitMode, 'byWeight');
+  for (const row of preview.rows) {
+    assert.equal(row.units.length, row.itemCount);
+    assert.equal(
+      row.units.reduce((sum, u) => sum + u.feeFen, 0),
+      row.feeFen,
+      '每件加起来要正好等于这一摞，不能差尾差',
+    );
+  }
+  assert.deepEqual(
+    rowOf(people[0]).units.map((u) => u.feeFen).sort((a, b) => b - a),
+    [6667, 6667, 6666],
+    '¥200.00 摊 3 件：前两件各多 1 分',
+  );
+
+  const commit = await call('POST', `/api/admin/packages/${pkgId}/allocate/commit`, {});
+  assert.equal(commit.itemsMovedToStock, 6);
+  const jiaDetail = await call('GET', `/api/admin/customers/${stackOf(people[0]).customerId}`);
+  assert.ok(jiaDetail.items.every((i) => i.status === 'cn_stock'));
+  assert.deepEqual(
+    jiaDetail.items.map((i) => i.intlFeeFen).sort((a, b) => b - a),
+    [6667, 6667, 6666],
+  );
+
+  // 整摞称的那几件没有逐件重量，客户页上照样有运费、照样能勾着申请发货
+  const jia = added.createdCustomers.find((c) => c.nickname === people[0]);
+  await call('POST', `/api/admin/customers/${jia.id}/password`, { password: 'zhengxiang-2026' });
+  const sess = await login(jia.qq, 'zhengxiang-2026');
+  assert.equal(sess.res.status, 200);
+  const cookie = sess.res.headers.getSetCookie()[0].split(';')[0];
+  const asMe = async (path, body) => {
+    const res = await fetch(`${BASE}/api/w/${jia.token}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  assert.equal(sess.data.summary.stockCount, 3);
+  assert.equal(sess.data.items.filter((i) => i.intlFeeFen !== null).length, 3);
+  const address = await asMe('/addresses', {
+    recipient: '甲',
+    phone: '13800000000',
+    detail: `某市某路 ${stamp} 号`,
+  });
+  const requested = await asMe('/requests', {
+    itemIds: sess.data.items.filter((i) => i.status === 'cn_stock').map((i) => i.id),
+    addressId: address.data.id,
+  });
+  assert.equal(requested.status, 200, JSON.stringify(requested.data));
 });
 
 test('货款收款与撤销', async () => {

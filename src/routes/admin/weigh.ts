@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg } from '../../lib/db.ts';
-import { allocate, feeFromWeight } from '../../lib/allocate.ts';
+import { allocate, feeFromWeight, splitGroupFee } from '../../lib/allocate.ts';
 import { toFen } from '../../lib/money.ts';
 
 export const weighRoutes = new Hono<{ Bindings: Env }>();
@@ -148,6 +148,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
     progress: {
       expectedItems: expected,
       foundItems: found,
+      unclaimedItems: items.results.filter((i) => !i.weighGroupId && !i.missing).length,
       missingItems: items.results.filter((i) => i.missing).length,
       weighedCustomers: weighed,
       totalCustomers: customers.length,
@@ -219,9 +220,22 @@ weighRoutes.post('/:id/weigh/missing', async (c) => {
 });
 
 /**
- * 每件各自称重，一摞的总重由这件件数加出来（见 weigh/item）。
- * 所以这里不再收「整摞重量」：直接写 weigh_groups.weight_g 会和下面的合计对不上。
+ * 一摞的称重口径：逐件称（basis=items，重量是各件之和）或整摞称一次（basis=group，摞内按件数均摊）。
+ * 逐件称过的摞，weigh_groups.weight_g 由各件重量自动加出来（见 weigh/item）；
+ * 只要还有一件没填，就以整摞那个总数为准，避免半摞的重量把分母带偏。
  */
+interface GroupRow {
+  id: number;
+  customerId: number;
+  nickname: string;
+  qq: string;
+  groupWeightG: number | null;
+  weightG: number | null;
+  itemCount: number;
+  weighedCount: number;
+  unitWeightG: number | null;
+  basis: 'items' | 'group' | null;
+}
 
 interface AllocateBody {
   totalFeeFen?: unknown;
@@ -239,39 +253,59 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   if (totalFeeFen !== null && totalFeeFen < 0) throw badRequest('国际运费不能是负数');
 
   const groups = await env.DB.prepare(
-    `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, g.weight_g AS weightG,
+    `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, g.weight_g AS groupWeightG,
             (SELECT COUNT(*) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0
-               AND i.status NOT IN ('cancelled','refunded')) AS itemCount
+               AND i.status NOT IN ('cancelled','refunded','shipped','delivered')) AS itemCount,
+            (SELECT COUNT(*) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0
+               AND i.status NOT IN ('cancelled','refunded','shipped','delivered')
+               AND i.weight_g IS NOT NULL) AS weighedCount,
+            (SELECT SUM(i.weight_g) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0
+               AND i.status NOT IN ('cancelled','refunded','shipped','delivered')) AS unitWeightG
        FROM weigh_groups g
        JOIN customers c ON c.id = g.customer_id
       WHERE g.package_id = ?
       ORDER BY c.nickname`,
   )
     .bind(packageId)
-    .all<{
-      id: number;
-      customerId: number;
-      nickname: string;
-      qq: string;
-      weightG: number | null;
-      itemCount: number;
-    }>();
+    .all<GroupRow>();
+
+  const unitRows = await env.DB.prepare(
+    `SELECT id, weigh_group_id AS gid, weight_g AS weightG FROM items
+      WHERE package_id = ? AND missing = 0 AND weigh_group_id IS NOT NULL
+        AND status NOT IN ('cancelled','refunded','shipped','delivered')
+      ORDER BY id`,
+  )
+    .bind(packageId)
+    .all<{ id: number; gid: number; weightG: number | null }>();
+  const unitsByGroup = new Map<number, Array<{ id: number; weightG: number | null }>>();
+  for (const u of unitRows.results) {
+    const list = unitsByGroup.get(u.gid) ?? [];
+    list.push({ id: u.id, weightG: u.weightG });
+    unitsByGroup.set(u.gid, list);
+  }
 
   const unfinished=await env.DB.prepare(`SELECT COUNT(*) AS n FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weigh_group_id IS NULL`).bind(packageId).first<{n:number}>();
-  if(unfinished?.n) throw badRequest('还有商品未称重或未明确标记缺件，不能确认费用');
-  const weighedUnits=await env.DB.prepare(`SELECT weigh_group_id AS gid, SUM(weight_g) AS w,COUNT(*) AS n,COUNT(weight_g) AS weighted FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') GROUP BY weigh_group_id`).bind(packageId).all<{gid:number;w:number;n:number;weighted:number}>();
-  // 一摞的重量只认各件之和：预览和确认走同一个口径，不会出现预览过了、确认被拦
-  for (const u of weighedUnits.results) {
-    if (u.weighted !== u.n) throw badRequest('还有商品没填重量：每件都要称，没收到的请标「缺件」');
-    const g = groups.results.find((group) => group.id === u.gid);
-    if (g) g.weightG = u.w;
-  }
+  if(unfinished?.n) throw badRequest(`还有 ${unfinished.n} 件既没认领也没标缺件：点上面「整箱全部认领」，或者把没收到的那几件标成缺件`);
   const usable = groups.results.filter((g) => g.itemCount > 0);
-  const notWeighed = usable.filter((g) => !g.weightG || g.weightG <= 0);
+  // 一摞有两种称法：逐件都称过就按各件重量分，只把整摞放秤上就按件数均摊。
+  // 一件称过一件没称的摞算「整摞」—— 用整摞那个总数，免得半摞的重量把分母带偏。
+  for (const g of usable) {
+    if (g.weighedCount === g.itemCount) {
+      g.basis = 'items';
+      g.weightG = g.unitWeightG;
+    } else if (g.groupWeightG && g.groupWeightG > 0) {
+      g.basis = 'group';
+      g.weightG = g.groupWeightG;
+    } else {
+      g.basis = null;
+      g.weightG = null;
+    }
+  }
+  const notWeighed = usable.filter((g) => !g.basis);
   if (usable.length === 0) throw badRequest('还没有任何已认领的物品，不能分摊');
   if (notWeighed.length > 0) {
     throw badRequest(
-      `还有 ${notWeighed.length} 位客户没称重：${notWeighed.map((g) => g.nickname).join('、')}`,
+      `还有 ${notWeighed.length} 摞没称：${notWeighed.map((g) => g.nickname).join('、')}。整摞放秤上填一个总重就行，不用一件一件称`,
     );
   }
 
@@ -290,18 +324,21 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
     totalFeeFen,
     usable.map((g) => ({ id: g.id, weightG: g.weightG as number })),
   );
-  const byId = new Map(usable.map((g) => [g.id, g]));
-  const rows = result.rows.map((row) => {
-    const g = byId.get(row.id)!;
+  const rows = usable.map((g, index) => {
+    const units = unitsByGroup.get(g.id) ?? [];
+    const split = splitGroupFee(result.rows[index].feeFen, units);
     return {
-      weighGroupId: row.id,
+      weighGroupId: g.id,
       customerId: g.customerId,
       nickname: g.nickname,
       qq: g.qq,
       itemCount: g.itemCount,
-      weightG: row.weightG,
-      share: row.share,
-      feeFen: row.feeFen,
+      weightG: g.weightG as number,
+      share: result.rows[index].share,
+      feeFen: result.rows[index].feeFen,
+      // 每件各自多少运费在预览就定下来了，确认写的是同一份数，不会出现预览一个数、入账另一个数
+      unitMode: split.mode,
+      units: split.rows,
     };
   });
 
@@ -329,8 +366,94 @@ weighRoutes.post('/:id/weigh/item',async c=>{
  if(!item) throw notFound('物品不在此包裹'); const gid=await ensureGroup(c.env,id,item.cid);
  await c.env.DB.batch([
  c.env.DB.prepare('UPDATE items SET weight_g=?,weigh_group_id=?,missing=0,updated_at=? WHERE id=?').bind(weight,gid,nowIso(),itemId),
- c.env.DB.prepare("UPDATE weigh_groups SET weight_g=(SELECT SUM(weight_g) FROM items WHERE weigh_group_id=? AND missing=0 AND status NOT IN ('cancelled','refunded')) WHERE id=?").bind(gid,gid)]);
+ // 这一摞每件都称齐了，摞重才由各件相加；还缺件的话别把整摞称的那个总数冲成半摞之和
+ c.env.DB.prepare(`UPDATE weigh_groups SET weight_g=(SELECT SUM(weight_g) FROM items WHERE weigh_group_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered'))
+   WHERE id=? AND (SELECT COUNT(*) FROM items WHERE weigh_group_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weight_g IS NULL)=0`).bind(gid,gid,gid)]);
  return c.json({ok:true});
+});
+
+/** 整摞称一次：这一摞放秤上是多少就填多少，摞内每件按件数均摊。填空 = 取消整摞称法。 */
+weighRoutes.post('/:id/weigh/group', async (c) => {
+  const id = requireInt(c.req.param('id'), '包裹 ID');
+  const pkg = await loadPackage(c.env, id);
+  ensureNotAllocated(pkg);
+  const body = await readJson<{ customerId?: unknown; weighGroupId?: unknown; weightG?: unknown }>(c);
+  const db = c.env.DB;
+  let groupId: number | null = null;
+  if (body.weighGroupId !== undefined && body.weighGroupId !== null && body.weighGroupId !== '') {
+    groupId = requireInt(body.weighGroupId, '称重组 ID');
+  } else {
+    const customerId = requireInt(body.customerId, '客户 ID');
+    groupId = await ensureGroup(c.env, id, customerId);
+  }
+  const group = await db
+    .prepare('SELECT id FROM weigh_groups WHERE id = ? AND package_id = ?')
+    .bind(groupId, id)
+    .first<{ id: number }>();
+  if (!group) throw notFound('这一摞不存在');
+
+  const weighed = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM items WHERE weigh_group_id = ? AND missing = 0 AND weight_g IS NOT NULL
+         AND status NOT IN ('cancelled','refunded','shipped','delivered')`,
+    )
+    .bind(groupId)
+    .first<{ n: number }>();
+  const total = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM items WHERE weigh_group_id = ? AND missing = 0
+         AND status NOT IN ('cancelled','refunded','shipped','delivered')`,
+    )
+    .bind(groupId)
+    .first<{ n: number }>();
+  if ((weighed?.n ?? 0) > 0 && (weighed?.n ?? 0) === (total?.n ?? 0)) {
+    throw badRequest('这一摞已经逐件称过了，重量由每件自己加起来；要改成整摞称，先把那几件的重量清掉');
+  }
+
+  const raw = body.weightG;
+  const weight = raw === undefined || raw === null || raw === '' ? null : requireInt(raw, '整摞重量');
+  if (weight !== null && (weight <= 0 || weight > 1000000)) {
+    throw badRequest('整摞重量必须为 1 至 1000000 克');
+  }
+  await db.prepare('UPDATE weigh_groups SET weight_g = ? WHERE id = ?').bind(weight, groupId).run();
+  return c.json({ ok: true, weighGroupId: groupId, weightG: weight });
+});
+
+/** 整箱一次到国内时不用一件件点：把这一箱里还没认领的全归到各自客户的摞上。 */
+weighRoutes.post('/:id/weigh/claim-all', async (c) => {
+  const id = requireInt(c.req.param('id'), '包裹 ID');
+  const pkg = await loadPackage(c.env, id);
+  ensureNotAllocated(pkg);
+  const db = c.env.DB;
+  const pending = await db
+    .prepare(
+      `SELECT i.id, i.customer_id AS customerId FROM items i
+        WHERE i.package_id = ? AND i.weigh_group_id IS NULL AND i.missing = 0
+          AND i.status NOT IN ('cancelled','refunded','shipped','delivered')
+        ORDER BY i.id`,
+    )
+    .bind(id)
+    .all<{ id: number; customerId: number }>();
+  if (!pending.results.length) return c.json({ ok: true, claimed: 0, customers: 0 });
+
+  const byCustomer = new Map<number, number[]>();
+  for (const item of pending.results) {
+    const list = byCustomer.get(item.customerId) ?? [];
+    list.push(item.id);
+    byCustomer.set(item.customerId, list);
+  }
+  const statements: D1PreparedStatement[] = [];
+  for (const [customerId, itemIds] of byCustomer) {
+    const groupId = await ensureGroup(c.env, id, customerId);
+    for (const itemId of itemIds) {
+      statements.push(
+        db.prepare('UPDATE items SET weigh_group_id = ?, updated_at = ? WHERE id = ?')
+          .bind(groupId, nowIso(), itemId),
+      );
+    }
+  }
+  await db.batch(statements);
+  return c.json({ ok: true, claimed: pending.results.length, customers: byCustomer.size });
 });
 /** allocate()/feeFromWeight() 是纯函数库，抛普通 Error；到接口层得变成 400，不能让群主看到「服务器出错了」 */
 async function buildAllocationOr400(env: Env, packageId: number, body: AllocateBody) {
@@ -385,17 +508,14 @@ weighRoutes.post('/:id/allocate/commit', async (c) => {
       )
       .bind(id, allocation.diffFen),
   ];
-  // 摞里的分摊要精确到每件：客户页面按件勾发货，每件都得有自己的运费。
-  // buildAllocation 已经保证每件有重量，这里再把这一摞的尾差一分不差地摊到前几件上。
-  const unitRows=await db.prepare("SELECT id,weigh_group_id AS gid,weight_g AS weight FROM items WHERE package_id=? AND missing=0 AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(id).all<{id:number;gid:number;weight:number}>();
+  // 每件各自的运费直接用书预览里算好的那份：客户页面按件勾发货，每件都得有自己的运费，
+  // 而且「每件之和 = 这一摞 = 这一箱」要分毫不差，不能让确认再算一遍算出另一个数。
   for (const row of allocation.rows) {
-    const units = unitRows.results.filter((i) => i.gid === row.weighGroupId);
-    const unitAllocation = allocate(row.feeFen, units.map((i) => ({ id: i.id, weightG: i.weight })));
-    unitAllocation.rows.forEach((u, k) => {
+    for (const unit of row.units) {
       statements.push(
-        db.prepare('UPDATE items SET intl_fee_fen = ? WHERE id = ?').bind(u.feeFen + (k < unitAllocation.diffFen ? 1 : 0), u.id),
+        db.prepare('UPDATE items SET intl_fee_fen = ? WHERE id = ?').bind(unit.feeFen, unit.id),
       );
-    });
+    }
     statements.push(
       db
         .prepare('UPDATE weigh_groups SET intl_fee_fen = ?, weight_g = ? WHERE id = ?')

@@ -62,3 +62,31 @@ export function allocate(totalFeeFen: number, groups: WeighInput[]): AllocationR
   const diffFen = totalFeeFen - rows.reduce((sum, r) => sum + r.feeFen, 0);
   return { totalWeightG, totalFeeFen, rows, diffFen };
 }
+
+/** 一摞内部怎么分：各件都称过就按重量分，否则件数均摊。 */
+export type UnitSplitMode = 'byWeight' | 'equal';
+
+export interface UnitSplit {
+  mode: UnitSplitMode;
+  rows: Array<{ id: number; feeFen: number }>;
+}
+
+/**
+ * 把一摞的运费分到这一摞里的每一件，保证「每件加起来正好等于这一摞」。
+ * 尾差按件摊给最前面几件各 1 分 —— 客户页面按件勾发货，件上的钱必须能拼回整摞。
+ */
+export function splitGroupFee(
+  totalFeeFen: number,
+  units: Array<{ id: number; weightG: number | null }>,
+): UnitSplit {
+  if (units.length === 0) return { mode: 'equal', rows: [] };
+  const byWeight = units.every((u) => Number.isInteger(u.weightG) && (u.weightG as number) > 0);
+  const split = allocate(totalFeeFen, units.map((u) => ({ id: u.id, weightG: byWeight ? (u.weightG as number) : 1 })));
+  let remainder = split.diffFen;
+  const rows = split.rows.map((r) => {
+    const extra = remainder > 0 ? 1 : 0;
+    remainder -= extra;
+    return { id: r.id, feeFen: r.feeFen + extra };
+  });
+  return { mode: byWeight ? 'byWeight' : 'equal', rows };
+}

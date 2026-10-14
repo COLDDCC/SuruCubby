@@ -37,7 +37,7 @@ requestCustomerRoutes.post('/:token/requests',async c=>{
  const address=await db.prepare('SELECT recipient,phone,detail FROM addresses WHERE id=? AND customer_id=?').bind(requireInt(b.addressId,'地址 ID'),cid).first();
  if(!address) throw notFound('地址不存在');
  const rows=await db.prepare(`SELECT i.id,i.status,i.weight_g AS weight,i.intl_fee_fen AS fee,p.allocated_at AS allocated FROM items i LEFT JOIN packages p ON p.id=i.package_id WHERE i.id IN (${ids.map(()=>'?')}) AND i.customer_id=? AND i.missing=0 AND i.shipment_id IS NULL AND NOT EXISTS(SELECT 1 FROM request_items r WHERE r.item_id=i.id)`).bind(...ids,cid).all<{id:number;status:string;weight:number|null;fee:number|null;allocated:string|null}>();
- if(rows.results.length!==ids.length||rows.results.some(i=>i.status!=='cn_stock'||!i.allocated||!i.weight||i.fee===null)) throw badRequest('有商品尚未算费、已申请或不属于你，请刷新');
+ if(rows.results.length!==ids.length||rows.results.some(i=>i.status!=='cn_stock'||!i.allocated||i.fee===null)) throw badRequest('有商品尚未算费、已申请或不属于你，请刷新');
  const id=await nextId(db,'shipping_requests');
  await db.batch([db.prepare('INSERT INTO shipping_requests(id,customer_id,address_snapshot,domestic_fee_fen,status,created_at) VALUES(?,?,?,?,?,?)').bind(id,cid,JSON.stringify(address),await domesticFeeFen(c.env),'pending',nowIso()),...ids.map(i=>db.prepare('INSERT INTO request_items VALUES(?,?)').bind(i,id))]);return c.json({id});
 });
