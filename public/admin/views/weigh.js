@@ -17,18 +17,25 @@ export async function render(view, [id]) {
   const data = await api.get(`/api/admin/packages/${id}/weigh`);
   const p = data.progress;
   const pkg = data.package;
-  const allocated = Boolean(pkg.allocatedAt);
 
-  const unpaidGroups = data.customers.filter(
-    (c) => !c.feePaid && c.intlFeeFen !== null,
-  );
+  const isReady = (c) => {
+    if (c.intlFeeFen !== null) return false;
+    const live = c.items.filter((i) => !i.missing);
+    if (!live.length) return false;
+    return live.every((i) => i.weightG) || (c.weightG ?? 0) > 0;
+  };
+  const chargedStacks = data.customers.filter((c) => c.intlFeeFen !== null);
+  const readyStacks = data.customers.filter(isReady);
+  const openStacks = data.customers.filter((c) => c.intlFeeFen === null);
+
+  const unpaidGroups = chargedStacks.filter((c) => !c.feePaid);
   const unpaidIntl = unpaidGroups.reduce((sum, c) => sum + c.intlFeeFen, 0);
 
-  const stockCustomers = allocated
-    ? data.customers.filter((c) => c.items.some((i) => i.status === 'cn_stock'))
-    : [];
+  const stockCustomers = data.customers.filter((c) =>
+    c.items.some((i) => i.status === "cn_stock"),
+  );
   const stockCount = stockCustomers.reduce(
-    (sum, c) => sum + c.items.filter((i) => i.status === 'cn_stock').length,
+    (sum, c) => sum + c.items.filter((i) => i.status === "cn_stock").length,
     0,
   );
   const stockHint = stockCount
@@ -43,25 +50,29 @@ export async function render(view, [id]) {
     <div class="progress-bar">
       <span>应有 <strong>${p.expectedItems}</strong> 件 / 已找到 <strong>${p.foundItems}</strong> 件</span>
       <span>已称 <strong>${p.weighedCustomers}</strong> 人 / 共 <strong>${p.totalCustomers}</strong> 人</span>
+      <span>已算运费 <strong>${chargedStacks.length}</strong> 摞${
+        openStacks.length ? ` / 还有 <strong>${openStacks.length}</strong> 摞` : ""
+      }</span>
       ${p.missingItems ? `<span class="badge warn">缺件 ${p.missingItems}</span>` : ""}
-      ${allocated ? `<span class="badge ok">可发货 ${stockCount} 件</span>` : ""}
+      ${stockCount ? `<span class="badge ok">可发货 ${stockCount} 件</span>` : ""}
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
-      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。包裹到手、全部称重算费后确认，商品才变为绿色「可发货」，客户那边马上能勾选申请发货。</p>
+      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。<strong>不用等全箱称完</strong>：哪一摞称好了就先「算分摊」那一摞，那个人马上就能申请发货，剩下的人称好了再算一次，账各记各的。已经算过运费的那几摞要改，得先「撤销分摊」。</p>
       ${
-        allocated || p.unclaimedItems <= 0
-          ? ""
-          : `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button>
+        p.unclaimedItems > 0
+          ? `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button>
              <span class="small muted">货全到了就点这个，一件件都不用点；确实没收到的请在下面标「缺件」</span></p>`
+          : ""
       }
       ${
-        allocated
+        chargedStacks.length
           ? `<p class="small">已分摊：国际运费 <span class="money">${money(pkg.totalFeeFen)}</span>
-              · <button class="small danger" data-action="undo">撤销分摊</button></p>
+              · <button class="small danger" data-action="undo">撤销分摊</button>
+              <span class="small muted">（这一箱算过的 ${chargedStacks.length} 摞一起退回）</span></p>
             ${stockHint}
             ${
               unpaidGroups.length
@@ -79,13 +90,14 @@ export async function render(view, [id]) {
         const live = c.items.filter((i) => !i.missing);
         const weighedUnits = live.filter((i) => i.weightG).length;
         const byUnit = live.length > 0 && weighedUnits === live.length;
+        const charged = c.intlFeeFen !== null;
         return `
       <div class="card" data-customer-card="${c.customerId}">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0">${escapeHtml(c.nickname)}
             <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ""}</span></h3>
           ${
-            allocated || byUnit
+            charged || byUnit
               ? `<span class="small muted">这一摞 ${
                   c.weightG ? `${Number(c.weightG).toLocaleString()} g` : "还没称"
                 }${byUnit ? " · 逐件相加" : ""}</span>`
@@ -98,8 +110,8 @@ export async function render(view, [id]) {
           }
         </div>
         ${
-          c.intlFeeFen !== null
-            ? `<p class="small">分摊运费 <span class="money ${c.feePaid ? "paid" : "unpaid"}">${money(c.intlFeeFen)}</span>${c.feePaid ? " 已付" : ""}</p>`
+          charged
+            ? `<p class="small">分摊运费 <span class="money ${c.feePaid ? "paid" : "unpaid"}">${money(c.intlFeeFen)}</span>${c.feePaid ? " 已付" : ""} · 这一摞已封账，要改先撤销分摊</p>`
             : ""
         }
         <div class="claim-grid" style="margin-top:10px">
@@ -116,11 +128,11 @@ export async function render(view, [id]) {
                 ${code ? "" : `<div class="name">${escapeHtml(i.title)}</div>`}
               </div>
               <div class="claim-ctrl">
-                <input inputmode="numeric" placeholder="重量 g" data-unit-weight="${i.id}" value="${i.weightG ?? ""}" ${allocated ? "disabled" : ""}>
-                <button class="small" data-action="unitWeight" data-item="${i.id}" ${allocated ? "disabled" : ""}>存</button>
+                <input inputmode="numeric" placeholder="重量 g" data-unit-weight="${i.id}" value="${i.weightG ?? ""}" ${charged ? "disabled" : ""}>
+                <button class="small" data-action="unitWeight" data-item="${i.id}" ${charged ? "disabled" : ""}>存</button>
               </div>
               <button class="small plain claim-missing"
-                      data-action="missing" data-item="${i.id}" data-missing="${i.missing ? "1" : ""}">
+                      data-action="missing" data-item="${i.id}" data-missing="${i.missing ? "1" : ""}" ${charged ? "disabled" : ""}>
                 ${i.missing ? "取消缺件" : "缺件"}
               </button>
             </div>`;
@@ -131,29 +143,42 @@ export async function render(view, [id]) {
       })
       .join("")}
     ${
-      allocated
-        ? ""
-        : `<div class="card">
+      openStacks.length
+        ? `<div class="card">
       <label for="price">这一箱国际运费单价（元 / kg）</label>
       <div class="row" style="justify-content:space-between">
         <div class="row">
           <input id="price" inputmode="decimal" style="width:120px" value="${fenToYuan(data.intlPriceFenPerKg)}">
           <button class="small plain" data-action="savePrice">存单价</button>
         </div>
-        <button data-action="preview">算分摊</button>
+        <button data-action="preview">算分摊${
+          readyStacks.length ? `（称好的 ${readyStacks.length} 摞）` : ""
+        }</button>
       </div>
-      <p class="small muted">开始称之前先把这一箱的单价填好点「存单价」，称完点「算分摊」：各摞重量之和 × 单价就是这一箱运费，每人摊多少当场出来。单价是全箱通用的默认值，下一箱可以直接改；包装箱重量按比例摊给所有人，尾差算需求方的。转运仓那天收得不一样，预览里可以直接改总额再确认。</p>
+      <p class="small muted">单价 × 各摞重量之和就是这一箱运费，每人摊多少当场出来；点「算分摊」只把<strong>称好的那几摞</strong>入账，没称的照旧不动。包装箱重量按比例摊给所有人，尾差算需求方的。转运仓那天收得不一样，预览里可以直接改总额再确认——但手填实收总额得整箱都称完认领完才行，不然这笔钱会全压在已经称好的那几个人头上。</p>
+      ${
+        readyStacks.length === 0
+          ? `<p class="small warn">现在还没有一摞称好：把某一摞「存整摞」填一个总重，或逐件填完重量，就能先算那一摞。</p>`
+          : ""
+      }
     </div>`
+        : `<div class="card"><p class="small paid">这一箱 ${chargedStacks.length} 摞都算过运费了。剩下的人后到货再称再算，或到「包裹详情」继续对账。</p>${stockHint}</div>`
     }`;
 
   const reload = () => render(view, [id]);
 
-  bindActions(view, {
+  const bindActions(view, {
     claimAll: async (_p, el) => {
       el.disabled = true;
       try {
         const r = await api.post(`/api/admin/packages/${id}/weigh/claim-all`, {});
-        toast(r.claimed ? `已认领 ${r.claimed} 件，分成 ${r.customers} 摞，接着称每摞的重量就行` : "没有待认领的商品了");
+        toast(
+          r.claimed
+            ? `已认领 ${r.claimed} 件，分成 ${r.customers} 摞，接着称每摞的重量就行${
+                r.skipped ? `；还有 ${r.skipped} 件在已封账的那几摞里，要撤销分摊才能加进去` : ""
+              }`
+            : "没有待认领的商品了",
+        );
         await reload();
       } catch (err) {
         toast(err.message, true);
@@ -241,13 +266,17 @@ export async function render(view, [id]) {
         return toast(err.message, true);
       }
       openModal((box, close) => {
-        const body = () => ({
-          totalFeeYuan: box.querySelector("#fee").value.trim(),
-          totalWeightG:
-            box.querySelector("#declared").value.trim() === ""
-              ? null
-              : Number(box.querySelector("#declared").value.trim()),
-        });
+        // 只有把单价算出来的那个数改掉了，才叫「手填实收总额」；没改就不传金额，
+        // 后端继续按单价算 —— 不然分批分摊会被当成整箱实收，钱全压在这几摞头上。
+        const autoFeeFen = preview.totalFeeFen;
+        const body = () => {
+          const fee = box.querySelector("#fee").value.trim();
+          const declared = box.querySelector("#declared").value.trim();
+          return {
+            totalFeeYuan: fee === "" || Math.round(Number(fee) * 100) === autoFeeFen ? null : fee,
+            totalWeightG: declared === "" ? null : Number(declared),
+          };
+        };
         const draw = (p) => {
           box.innerHTML = `
             <h3>分摊预览</h3>
@@ -259,6 +288,18 @@ export async function render(view, [id]) {
                   )} / kg × 各摞合计 ${p.totalWeightG.toLocaleString()} g = ${money(
                     p.totalFeeFen,
                   )}</p>`
+            }
+            ${
+              p.fullBox
+                ? ""
+                : `<p class="small warn">这次只算称好的 ${p.rows.length} 摞${
+                    p.chargedStacks
+                      ? `（这一箱已经有 ${p.chargedStacks} 摞算过，不会重复算）`
+                      : ""
+                  }；还差 ${p.pendingStacks} 摞没称${
+                    p.pendingNames.length ? `（${p.pendingNames.join("、")}）` : ""
+                  }${p.unclaimedItems ? `、${p.unclaimedItems} 件没认领` : ""}。
+                  这些人这次不进账、状态也不变，等称好了再点一次「算分摊」就行。</p>`
             }
             <div class="scroll-x"><table>
               <thead><tr><th>客户</th><th class="right">重量</th><th class="right">占比</th><th class="right">应付运费</th></tr></thead>
@@ -284,10 +325,16 @@ export async function render(view, [id]) {
                 ? ""
                 : `<p class="small muted">转运仓重量 − 各摞之和 = ${p.weightDiffG.toLocaleString()} g（仅供参考）</p>`
             }
-            <label for="fee">这一箱实收的国际运费（元）</label>
+            <label for="fee">这一箱实收的国际运费（元）${
+              p.fullBox
+                ? ""
+                : "<span class=\"small muted\">这一箱还没弄完，改这个数会被拦住；只算称好的那几摞就别动它</span>"
+            }</label>
             <div class="row">
               <input id="fee" inputmode="decimal" value="${fenToYuan(p.totalFeeFen)}">
-              <input id="declared" inputmode="numeric" placeholder="转运仓总重量 g，对账用，可不填">
+              <input id="declared" inputmode="numeric" placeholder="转运仓总重量 g，对账用，可不填"${
+                p.fullBox ? "" : " disabled"
+              }>
               <button class="small plain" data-recalc>按新金额重算</button>
             </div>
             <div class="row" style="justify-content:flex-end;margin-top:12px">
@@ -309,7 +356,11 @@ export async function render(view, [id]) {
               );
               close();
               toast(
-                `已分摊，${result.itemsMovedToStock} 件变成「可发货」，客户页面现在就能申请发货`,
+                `已分摊 ${result.rows.length} 摞，${result.itemsMovedToStock} 件变成「可发货」，客户页面现在就能申请发货${
+                  result.fullBox
+                    ? ""
+                    : `；另外 ${result.pendingStacks} 摞没称的照旧不动，称好了再算一次`
+                }`,
               );
               reload();
             } catch (err) {
@@ -342,10 +393,10 @@ export async function render(view, [id]) {
     },
     undo: async () => {
       if (
-        !(await confirmBox("撤销分摊？物品退回「回国中」，客户那边不再显示可发货。", {
-          danger: true,
-          okText: "撤销",
-        }))
+        !(await confirmBox(
+          `撤销分摊？这一箱算过的 ${chargedStacks.length} 摞全部退回「回国中」，客户那边不再显示可发货；没算的那几摞本来就没动。`,
+          { danger: true, okText: "撤销" },
+        ))
       )
         return;
       try {

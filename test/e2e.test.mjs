@@ -296,7 +296,7 @@ test('称重台：点封面认领、填重量、缺件不进分摊', async () =>
       { raw: true },
     );
     assert.equal(tooEarly.status, 400, `${path} 在没有重量时必须拦住`);
-    assert.match(tooEarly.data.error, /没称/);
+    assert.match(tooEarly.data.error, /称好|没称/);
   }
 
   for (const customer of claimed.customers) {
@@ -554,6 +554,147 @@ test('整箱一次到国内：一键全部认领，整摞称一个数就能摊�
     addressId: address.data.id,
   });
   assert.equal(requested.status, 200, JSON.stringify(requested.data));
+});
+
+test('称完一摞先算一摞：不用等全箱几十个人都称完', async () => {
+  const box = `分批分摊${stamp}`;
+  const people = [`${box}甲`, `${box}乙`, `${box}丙`];
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: box,
+    fileHash: box,
+    sheet: {
+      headers: ['名称', 'cn', '实际价格'],
+      rows: [
+        ['甲的第一件', people[0], 100],
+        ['甲的第二件', people[0], 100],
+        ['乙的第一件', people[1], 100],
+        ['乙的第二件', people[1], 100],
+        ['丙的唯一一件', people[2], 100],
+      ],
+    },
+    assignments: people.map((cn, i) => ({
+      cn,
+      newCustomer: { qq: `${stamp + 50 + i}`.slice(-9), nickname: cn },
+    })),
+  });
+  const pkgId = added.packageId;
+  await call('POST', `/api/admin/packages/${pkgId}/status`, { status: 'cn_arrived' });
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/claim-all`, {});
+
+  const weigh = await call('GET', `/api/admin/packages/${pkgId}/weigh`);
+  const stackOf = (nickname) => weigh.customers.find((c) => c.nickname === nickname);
+  const price = (await call('GET', '/api/admin/settings')).intlPriceFenPerKg;
+  const feeOf = Math.round((1000 * price) / 1000);
+
+  // 只有甲那摞称了 1000 g：预览就只能算甲，且要明说还有几摞没进来
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/group`, {
+    customerId: stackOf(people[0]).customerId,
+    weightG: 1000,
+  });
+  const first = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {});
+  assert.equal(first.rows.length, 1);
+  assert.equal(first.rows[0].nickname, people[0]);
+  assert.equal(first.totalFeeFen, feeOf, '只按称好的那一摞算钱，不能把没称的也摊进去');
+  assert.equal(first.fullBox, false);
+  assert.equal(first.pendingStacks, 2);
+  assert.deepEqual([...first.pendingNames].sort(), [people[1], people[2]].sort());
+
+  // 手填的是转运仓整箱实收：半箱就填会把整箱运费全压在甲头上，必须拦
+  for (const path of ['preview', 'commit']) {
+    const manual = await call(
+      'POST',
+      `/api/admin/packages/${pkgId}/allocate/${path}`,
+      { totalFeeYuan: '100.00' },
+      { raw: true },
+    );
+    assert.equal(manual.status, 400, `${path} 在半箱时不该收手填总额`);
+    assert.match(manual.data.error, /实收总额/);
+  }
+
+  const committed = await call('POST', `/api/admin/packages/${pkgId}/allocate/commit`, {});
+  assert.equal(committed.itemsMovedToStock, 2);
+  const mid = await call('GET', `/api/admin/packages/${pkgId}/weigh`);
+  const midStack = (nickname) => mid.customers.find((c) => c.nickname === nickname);
+  assert.equal(midStack(people[0]).intlFeeFen, feeOf);
+  assert.ok(midStack(people[0]).items.every((i) => i.status === 'cn_stock'));
+  assert.equal(midStack(people[1]).intlFeeFen, null);
+  assert.ok(midStack(people[1]).items.every((i) => i.status === 'cn_arrived'), '没称的人状态不该动');
+  assert.ok(midStack(people[2]).items.every((i) => i.status === 'cn_arrived'));
+
+  // 已封账的那摞不能再改重量、不能再塞东西、也不能标缺件
+  const jiaItem = midStack(people[0]).items[0].id;
+  for (const [path, body] of [
+    ['weigh/item', { itemId: jiaItem, weightG: 1200 }],
+    ['weigh/group', { customerId: midStack(people[0]).customerId, weightG: 1200 }],
+    ['weigh/missing', { itemId: jiaItem, missing: true }],
+    ['weigh/claim', { itemId: jiaItem, claimed: false }],
+  ]) {
+    const res = await call('POST', `/api/admin/packages/${pkgId}/${path}`, body, { raw: true });
+    assert.equal(res.status, 400, `${path} 不该让改已封账的那摞`);
+    assert.match(res.data.error, /这一摞已经算过运费/);
+  }
+
+  // 甲这边不用等乙丙：直接申请发货
+  const jia = added.createdCustomers.find((c) => c.nickname === people[0]);
+  await call('POST', `/api/admin/customers/${jia.id}/password`, { password: 'fenpi-2026' });
+  const sess = await login(jia.qq, 'fenpi-2026');
+  const cookie = sess.res.headers.getSetCookie()[0].split(';')[0];
+  assert.equal(sess.data.summary.stockCount, 2, '只有算过费的那两件是可发货的');
+  const asMe = async (path, body) => {
+    const res = await fetch(`${BASE}/api/w/${jia.token}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  const addr = await asMe('/addresses', {
+    recipient: '甲',
+    phone: '13800000000',
+    detail: `某市某路 ${stamp} 号`,
+  });
+  const requested = await asMe('/requests', {
+    itemIds: sess.data.items.filter((i) => i.status === 'cn_stock').map((i) => i.id),
+    addressId: addr.data.id,
+  });
+  assert.equal(requested.status, 200, JSON.stringify(requested.data));
+
+  // 第二批：乙称好了，只算乙，甲那摞不能被算第二遍
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/group`, {
+    customerId: midStack(people[1]).customerId,
+    weightG: 1000,
+  });
+  const second = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {});
+  assert.equal(second.rows.length, 1);
+  assert.equal(second.rows[0].nickname, people[1]);
+  assert.equal(second.chargedStacks, 1);
+  assert.equal(second.totalFeeFen, feeOf);
+  await call('POST', `/api/admin/packages/${pkgId}/allocate/commit`, {});
+  const afterTwo = await call('GET', `/api/admin/packages/${pkgId}`);
+  assert.equal(afterTwo.package.totalFeeFen, feeOf * 2, '这一箱的总额是两次分摊累加出来的');
+  assert.equal(
+    afterTwo.items.filter((i) => i.status === 'cn_stock').length,
+    4,
+    '甲那两件先可发货，乙这两件跟着进来',
+  );
+
+  // 最后一摞：全箱弄完了，手填实收总额这条路才打开
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/group`, {
+    customerId: midStack(people[2]).customerId,
+    weightG: 1000,
+  });
+  const last = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {});
+  assert.equal(last.fullBox, true);
+  assert.equal(last.pendingStacks, 0);
+  assert.equal(last.rows.length, 1, '已经算过的两摞不再重复出现在这次分摊里');
+  await call('POST', `/api/admin/packages/${pkgId}/allocate/commit`, { totalFeeYuan: '50.00' });
+  const done = await call('GET', `/api/admin/packages/${pkgId}`);
+  assert.equal(done.package.totalFeeFen, feeOf * 2 + 5000);
+  assert.equal(done.items.filter((i) => i.status === 'cn_stock').length, 5);
+  assert.equal(
+    (await call('GET', `/api/admin/packages/${pkgId}/weigh`)).progress.weighedCustomers,
+    3,
+  );
 });
 
 test('货款收款与撤销', async () => {
