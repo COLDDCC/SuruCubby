@@ -39,11 +39,11 @@ export async function render(view, [id]) {
     0,
   );
   const stockHint = stockCount
-    ? `<p class="small paid">这一箱 ${stockCount} 件已是「可发货」，客户打开自己的页面就能勾选申请发货。要现在寄出：${
+    ? `<p class="small paid">这一箱 ${stockCount} 件已是「可发货」，客户打开自己的页面就能勾选申请发货。你要直接寄出：${
         stockCustomers.length === 1
           ? `<a href="#/customers/${stockCustomers[0].customerId}">${escapeHtml(stockCustomers[0].nickname)} 的详情页</a>`
           : `<a href="#/customers">${stockCustomers.length} 个人的详情页</a>`
-      }</p>`
+      }，或到 <a href="#/shipments">寄出</a> 页点「登记一次发货」——勾完这一批、填上快递单号就同时标成「已寄出」。</p>`
     : "";
 
   view.innerHTML = `
@@ -167,7 +167,7 @@ export async function render(view, [id]) {
 
   const reload = () => render(view, [id]);
 
-  const bindActions(view, {
+  bindActions(view, {
     claimAll: async (_p, el) => {
       el.disabled = true;
       try {
