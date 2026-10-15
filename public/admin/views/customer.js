@@ -1,4 +1,5 @@
 import { api } from '/admin/api.js';
+import { createShipment } from './shipments.js';
 import {
   beijingTime,
   bindActions,
@@ -81,14 +82,16 @@ export async function render(view, [id]) {
           ${stock
             .map(
               (i) => `<label class="row" style="margin:6px 0">
-              <input type="checkbox" name="item" value="${i.id}" checked>
+              <input type="checkbox" name="item" value="${i.id}"${i.requestId ? ' disabled' : ' checked'}>
               <span>${escapeHtml(i.title)}</span>
-              <span class="small muted">${escapeHtml(i.packageName || '')}</span>
+              <span class="small muted">${escapeHtml(i.packageName || '')}${
+                i.requestId ? ` · 已在申请 #${i.requestId} 里，去「发货申请」页寄` : ''
+              }</span>
             </label>`,
             )
             .join('')}
-          <button type="button" data-action="ship">生成一次寄出</button>
-          <span class="small muted">每次固定收国内运费，与件数无关。</span>
+          <button type="button" data-action="ship">标成已发货 · 填单号</button>
+          <span class="small muted">每次固定收国内运费，与件数无关。点完会让你填快递单号，还没出单可以留空。</span>
         </form>`
           : empty('没有可发货物品')
       }
@@ -128,12 +131,16 @@ export async function render(view, [id]) {
               .map(
                 (sh) => `<div class="list-row">
           <div class="main">
-            ${sh.trackingNo ? escapeHtml(sh.trackingNo) : '<span class="muted">单号待填</span>'}
-            <div class="small muted">${sh.items.length} 件 · ${beijingTime(sh.shippedAt || sh.createdAt)}</div>
+            ${sh.trackingNo ? escapeHtml(sh.trackingNo) : '<span class="badge warn">单号待填</span>'}
+            <div class="small muted">${sh.items.length} 件 · ${
+              sh.shippedAt ? `发货于 ${beijingTime(sh.shippedAt)}` : `创建于 ${beijingTime(sh.createdAt)}（还没填单号）`
+            }</div>
           </div>
           <div class="side">
             <span class="${sh.feePaid ? 'paid' : 'unpaid'} money">${money(sh.feeFen)}</span>
-            <button class="small plain" data-action="track" data-id="${sh.id}" data-current="${escapeHtml(sh.trackingNo || '')}">单号</button>
+            <button class="small${sh.trackingNo ? ' plain' : ''}" data-action="track" data-id="${sh.id}" data-current="${escapeHtml(
+              sh.trackingNo || '',
+            )}">${sh.trackingNo ? '改单号' : '补单号'}</button>
             ${sh.feePaid ? '' : `<button class="small" data-action="payDomestic" data-id="${sh.id}">已收款</button>`}
           </div>
         </div>`,
@@ -271,8 +278,9 @@ export async function render(view, [id]) {
       reload();
     },
     track: async ({ id: shipmentId, current }) => {
-      const value = await promptBox('填写国内快递单号', current);
+      const value = await promptBox(current ? '改国内快递单号' : '填写国内快递单号', current);
       if (value === null) return;
+      if (!value) return toast('单号是空的，没改', true);
       await api.patch(`/api/admin/shipments/${shipmentId}`, { trackingNo: value });
       toast('已保存');
       reload();
@@ -286,28 +294,16 @@ export async function render(view, [id]) {
     ship: async () => {
       const itemIds = [...view.querySelectorAll('#shipForm input[name=item]:checked')].map((el) => Number(el.value));
       if (itemIds.length === 0) return toast('先勾几件', true);
-      try {
-        const result = await api.post('/api/admin/shipments', { customerId: Number(id), itemIds });
-        toast(`已生成寄出，应收 ${money(result.feeFen)}`);
-        reload();
-      } catch (err) {
-        if (err.status !== 409) throw err;
-        const d = err.data;
-        const ok = await confirmBox(
-          `这位客户还有国际运费没付（${money(d.unpaidIntlFen)}）。本次应收 = ${money(d.feeFen)} + ${money(
-            d.unpaidIntlFen,
-          )} = ${money(d.totalDueFen)}。仍要生成寄出吗？`,
-          { danger: true, okText: '强制生成' },
-        );
-        if (!ok) return;
-        const result = await api.post('/api/admin/shipments', {
-          customerId: Number(id),
-          itemIds,
-          force: true,
-        });
-        toast(`已生成寄出，应收 ${money(result.totalDueFen)}`);
-        reload();
-      }
+      const trackingNo = await promptBox('国内快递单号（还没出单就留空，回头在「寄出」页补）', '');
+      if (trackingNo === null) return;
+      const result = await createShipment({ customerId: Number(id), itemIds, trackingNo });
+      if (!result) return;
+      toast(
+        `已标成发货：${result.itemCount} 件，应收 ${money(result.totalDueFen)}${
+          trackingNo ? ` · ${trackingNo}` : ' · 单号还没填'
+        }`,
+      );
+      reload();
     },
   });
 }

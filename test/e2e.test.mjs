@@ -798,6 +798,7 @@ test('国际运费没付就寄出会被拦住，强制继续时算上未付运�
   const shipment = await call('POST', '/api/admin/shipments', {
     customerId,
     itemIds,
+    trackingNo: 'SF20261015',
   });
   assert.equal(shipment.feeFen, 1000);
   assert.equal(shipment.itemCount, 2);
@@ -806,6 +807,10 @@ test('国际运费没付就寄出会被拦住，强制继续时算上未付运�
   const after = await call('GET', `/api/admin/customers/${customerId}`);
   assert.ok(after.items.filter((i) => itemIds.includes(i.id)).every((i) => i.status === 'shipped'));
   assert.equal(after.summary.domesticUnpaidFen, 1000);
+  // 发货当场就把单号填上：寄出记录要带着单号和发货时间，客户页才不是「单号待填」
+  const created = after.shipments.find((s) => s.id === shipment.id);
+  assert.equal(created.trackingNo, 'SF20261015');
+  assert.ok(created.shippedAt, '填了单号就该有发货时间');
 });
 
 test('一键按批收运费：这个包裹每一摞各记一笔，收过的那摞不再动', async () => {
@@ -849,7 +854,9 @@ test('一键按批收运费：这个包裹每一摞各记一笔，收过的那�
   );
 });
 
-test('填单号、收国内运费', async () => {
+test('改单号、收国内运费', async () => {
+  const before = await call('GET', `/api/admin/customers/${ctx.customers[0].id}`);
+  const oldShippedAt = before.shipments.find((s) => s.id === ctx.shipmentId).shippedAt;
   await call('PATCH', `/api/admin/shipments/${ctx.shipmentId}`, {
     trackingNo: 'SF123456789',
   });
@@ -862,6 +869,8 @@ test('填单号、收国内运费', async () => {
   assert.equal(detail.summary.goodsUnpaidJpy, 0);
   assert.equal(detail.summary.freightUnpaidFen, 0);
   assert.equal(detail.shipments[0].trackingNo, 'SF123456789');
+  // 补改单号不该把发货时间挪成改的这一刻
+  assert.equal(detail.shipments.find((s) => s.id === ctx.shipmentId).shippedAt, oldShippedAt);
 });
 
 test('客户申请发货：勾货 → 群主确认收款 → 填单号寄出', async () => {

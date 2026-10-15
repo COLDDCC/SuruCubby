@@ -36,7 +36,7 @@ shipmentRoutes.get('/:id', async (c) => {
   return c.json({ shipment, items: items.results });
 });
 
-/** 生成一次国内寄出。运费未付时默认拦截，force = true 可强制继续。 */
+/** 生成一次国内寄出：勾上来的这一批直接变「已寄出」，单号可以当场填也可以之后补。运费未付时默认拦截，force = true 可强制继续。 */
 shipmentRoutes.post('/', async (c) => {
   const body = await readJson<{ customerId?: unknown; itemIds?: unknown; force?: boolean; trackingNo?: string }>(c);
   const customerId = requireInt(body.customerId, '客户 ID');
@@ -91,12 +91,14 @@ shipmentRoutes.post('/', async (c) => {
 
   const at = nowIso();
   const id = await nextId(db, 'shipments');
+  const tracking = optionalString(body.trackingNo);
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
-        'INSERT INTO shipments (id, customer_id, tracking_no, fee_fen, fee_paid, created_at) VALUES (?, ?, ?, ?, 0, ?)',
+        'INSERT INTO shipments (id, customer_id, tracking_no, fee_fen, fee_paid, created_at, shipped_at) VALUES (?, ?, ?, ?, 0, ?, ?)',
       )
-      .bind(id, customerId, optionalString(body.trackingNo), feeFen, at),
+      // 当场填了单号才算真的寄出去，发货时间就记这一刻；留空的是「先生成、单号回头补」
+      .bind(id, customerId, tracking, feeFen, at, tracking ? at : null),
   ];
   for (const item of items.results) {
     statements.push(
@@ -115,12 +117,16 @@ shipmentRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '寄出 ID');
   const body = await readJson<{ trackingNo?: string; shippedAt?: string; feePaid?: boolean }>(c);
   const db = c.env.DB;
-  const shipment = await db.prepare('SELECT id FROM shipments WHERE id = ?').bind(id).first();
+  const shipment = await db
+    .prepare('SELECT id, shipped_at AS shippedAt FROM shipments WHERE id = ?')
+    .bind(id)
+    .first<{ id: number; shippedAt: string | null }>();
   if (!shipment) throw notFound('寄出记录不存在');
 
   if (body.feePaid !== undefined) throw badRequest('请通过收款记录确认或撤销运费');
   const trackingNo = optionalString(body.trackingNo);
-  const shippedAt = trackingNo && !body.shippedAt ? nowIso() : optionalString(body.shippedAt);
+  // 已经有发货时间的（当场填过单号生成的），补改单号时不许把发货时间挪到今天
+  const shippedAt = trackingNo && !shipment.shippedAt ? nowIso() : optionalString(body.shippedAt);
   await db
     .prepare(
       `UPDATE shipments SET tracking_no = COALESCE(?, tracking_no),
