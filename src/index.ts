@@ -144,8 +144,8 @@ function notFoundPage(path: string): string {
 <body><div class="wrap"><div class="card">
 <h1>找不到这个页面</h1>
 <p class="muted">地址是 <code>${escapeHtml(path)}</code>，本站没有这一页。可能是链接少了一段，或者群主后来换过。</p>
-<p>买家请用群主发的 QQ 号和密码登录：<a href="/login">/login</a>（账号就是 QQ 号，初始密码 123456）。</p>
-<p class="small muted">群主后台在 <a href="/admin/">/admin/</a>。</p>
+<p>从首页进就行：<a href="/">/</a>，进去先选「我是团员」或「我是群主」。团员的账号就是 QQ 号，初始密码 123456。</p>
+<p class="small muted">以前的专属链接 <code>/w/xxxxxxxx</code> 和群主后台 <code>/admin/</code> 都还能直接打开。</p>
 </div></div></body></html>`;
 }
 

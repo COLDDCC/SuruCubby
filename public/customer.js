@@ -553,7 +553,7 @@ function bindWarehouse(data){
  const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
  const logout=app.querySelector('#logout');
  // 退出不走 send()：那玩意会立刻重新拉一次仓库，白跑一趟还先把页面画出来
- if(logout)logout.onclick=handle(async()=>{await api(`${endpoint}/logout`,{method:'POST'});token='';history.replaceState(null,'','/login');renderVerify('已经退出了，再进来要用 QQ 号和密码','ok');});
+ if(logout)logout.onclick=handle(async()=>{await api(`${endpoint}/logout`,{method:'POST'});token='';location.href='/?out=1';});
  const add=app.querySelector('#add-address');
  if(add)add.onclick=handle(()=>{
   const v=(id)=>(app.querySelector(id)?.value ?? '').trim();

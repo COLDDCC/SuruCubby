@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>骏河屋拼团个人仓库</title>
+<title>骏河屋拼团 · 个人仓库</title>
 <link rel="icon" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -11,9 +11,38 @@
 <div class="wrap">
   <div class="card">
     <h1>骏河屋拼团 · 个人仓库</h1>
-    <p class="muted">客户请用群主发的 QQ 号和密码登录：<a href="/login">/login</a>（账号就是你的 QQ 号，第一次的初始密码见群主发的那条，进去后改成自己的）。以前的专属链接 <code>/w/xxxxxxxx</code> 照样能打开，登进去是同一个人。</p>
-    <p><a class="btn" href="/admin/">进入后台</a></p>
+    <p class="muted">先选一下你是谁，后面只看该看的东西。</p>
+
+    <div class="row">
+      <button id="tab-user" class="btn" type="button">我是团员</button>
+      <button id="tab-admin" class="btn ghost" type="button">我是群主</button>
+    </div>
+
+    <form id="form-user">
+      <label for="qq">QQ 号</label>
+      <input id="qq" name="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789">
+      <label for="user-pw">密码</label>
+      <div class="row">
+        <input id="user-pw" type="password" autocomplete="current-password" placeholder="初始密码见群主发给你的那条">
+        <button class="btn" type="submit">进入</button>
+      </div>
+      <p class="small muted">密码忘了或者被别人改过？在群里问一声群主，他能给你重设回初始密码。</p>
+    </form>
+
+    <form id="form-admin" hidden>
+      <label for="admin-pw">后台密码</label>
+      <div class="row">
+        <input id="admin-pw" type="password" autocomplete="current-password">
+        <button class="btn" type="submit">进入后台</button>
+      </div>
+      <p class="small muted">这个密码只有你自己知道，团员看不到后台。</p>
+    </form>
+
+    <p id="msg" class="small" role="status" aria-live="polite" hidden></p>
+
+    <p class="small muted">以前群发的专属链接 <code>/w/xxxxxxxx</code> 照样能打开，登进去是同一个人。</p>
   </div>
 </div>
+<script type="module" src="/entry.js"></script>
 </body>
 </html>

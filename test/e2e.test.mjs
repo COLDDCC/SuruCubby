@@ -1461,7 +1461,7 @@ test('打错的地址要有话说：404 不再是一片空白，带斜杠的入�
   assert.match(nope.headers.get('content-type') ?? '', /text\/html/, '404 要返回一页说明，不是空正文');
   const body = await nope.text();
   assert.match(body, /找不到这个页面/);
-  assert.match(body, /href="\/login"/, '要告诉买家去 /login');
+  assert.match(body, /href="\/"/, '要告诉买家从首页进');
 
   // 回显的地址必须转义，不能让 URL 里的标签直接进 DOM
   const xss = await (await fetch(`${BASE}/%3Cscript%3Eboom%3C%2Fscript%3E`)).text();
@@ -1858,4 +1858,48 @@ test('订单总览：每一单都列出来，带单号、人数、各状态件�
     { raw: true },
   );
   assert.equal(longImport.status, 400);
+});
+
+test('入口合成一页：首页先选身份再分流，老地址一个都不许断', async () => {
+  const home = await fetch(`${BASE}/`);
+  assert.equal(home.status, 200);
+  assert.match(home.headers.get('content-type') ?? '', /text\/html/);
+  const page = await home.text();
+  assert.match(page, /我是团员/, '首页要让人先选身份');
+  assert.match(page, /我是群主/);
+  assert.match(page, /id="form-user"/, '团员那张表单');
+  assert.match(page, /id="form-admin"/, '群主那张表单');
+  assert.match(page, /src="\/entry\.js"/, '首页得挂上分流那段脚本');
+
+  const out = await fetch(`${BASE}/?out=1`);
+  assert.equal(out.status, 200, '退出后跳回首页不该 404');
+  assert.match(await out.text(), /我是团员/);
+
+  // 这页调的还是原来那两个接口，报错话术要能直接显示给人看
+  const badUser = await fetch(`${BASE}/api/w/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ qq: '987654321', password: '不对的密码' }),
+  });
+  assert.equal(badUser.status, 401);
+  assert.match((await badUser.json()).error, /QQ 号或密码不对/);
+
+  const badAdmin = await fetch(`${BASE}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: '不对的后台密码' }),
+  });
+  assert.equal(badAdmin.status, 401);
+  // 群主密码按 IP 计数，错一次就立刻用对的清掉，别把后面的用例锁在门外
+  const goodAdmin = await fetch(`${BASE}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password: PASSWORD }),
+  });
+  assert.equal(goodAdmin.status, 200);
+
+  for (const p of ['/login', '/login/', '/me', '/w', '/w/', '/admin/', '/admin']) {
+    const res = await fetch(`${BASE}${p}`);
+    assert.equal(res.status, 200, `${p} 是发出去过的地址，不能断`);
+  }
 });
