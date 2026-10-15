@@ -136,9 +136,13 @@ function shippableOf(item) {
 }
 
 function itemCard(item) {
-  const paid = item.goodsPaid
-    ? '<span class="badge ok">货款已付</span>'
-    : '<span class="badge danger">货款未付</span>';
+  // 汇总卡按后端口径把取消/退款的件剔掉了，件上就不该再显示「未付」，不然上下两个数对不上
+  const dead = item.status === 'cancelled' || item.status === 'refunded';
+  const paid = dead
+    ? ''
+    : item.goodsPaid
+      ? '<span class="badge ok">货款已付</span>'
+      : '<span class="badge danger">货款未付</span>';
   const missing = item.missing ? '<span class="badge warn">缺件</span>' : '';
   const title = item.productUrl
     ? `<a href="${escapeHtml(item.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a>`
@@ -176,7 +180,7 @@ function itemCard(item) {
         </div>
         ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
         ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
-        ${item.intlFeeFen === null ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
+        ${item.intlFeeFen === null || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
         ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
         ${noFee}
         ${note}
@@ -385,7 +389,11 @@ function render(data) {
               </div>
               <div class="small muted">${beijingTime(r.createdAt)}${to ? ` · 寄到 ${escapeHtml(to)}` : ''}</div>
               ${list.length ? `<details class="small"><summary>看看申请了哪些</summary><ul>${list
-                .map((i) => `<li>${escapeHtml(i.title)}${i.intlPaid ? '' : ` · 国际运费 ${money(i.intlFeeFen ?? 0)} 待付`}</li>`)
+                .map((i) => `<li>${escapeHtml(i.title)}${
+                  i.intlPaid || i.status === 'cancelled' || i.status === 'refunded'
+                    ? ''
+                    : ` · 国际运费 ${money(i.intlFeeFen ?? 0)} 待付`
+                }</li>`)
                 .join('')}</ul></details>` : ''}
               ${r.status === 'pending' ? `<p><button class="small plain" data-cancel-request="${r.id}">取消申请</button></p>` : ''}
             </div>`;

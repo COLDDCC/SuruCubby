@@ -1180,6 +1180,25 @@ test('/img/ 只认规范 key，乱传路径拿不到东西', async () => {
   assert.equal(res.status, 404);
 });
 
+test('打错的地址要有话说：404 不再是一片空白，带斜杠的入口照样是客户页', async () => {
+  const nope = await fetch(`${BASE}/zhe-ge-di-zhi-bu-cun-zai`);
+  assert.equal(nope.status, 404);
+  assert.match(nope.headers.get('content-type') ?? '', /text\/html/, '404 要返回一页说明，不是空正文');
+  const body = await nope.text();
+  assert.match(body, /找不到这个页面/);
+  assert.match(body, /href="\/login"/, '要告诉买家去 /login');
+
+  // 回显的地址必须转义，不能让 URL 里的标签直接进 DOM
+  const xss = await (await fetch(`${BASE}/%3Cscript%3Eboom%3C%2Fscript%3E`)).text();
+  assert.ok(!/<script>/.test(xss), '回显路径要转义掉标签');
+
+  for (const p of ['/login', '/login/', '/me', '/w', '/w/']) {
+    const res = await fetch(`${BASE}${p}`);
+    assert.equal(res.status, 200, `${p} 该给到客户页`);
+    assert.match(await res.text(), /id="app"/);
+  }
+});
+
 test('图片代理只认库里存着的物品，不是开放代理', async () => {
   const missing = await fetch(`${BASE}/img/i/99999999`);
   assert.equal(missing.status, 404);

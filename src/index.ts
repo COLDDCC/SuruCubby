@@ -126,14 +126,48 @@ async function serveAsset(env: Env, base: URL, path: string): Promise<Response> 
   return new Response('找不到页面', { status: 404 });
 }
 
+/** 404 页要回显客户输错的那段地址，所以先转义，不能把 URL 原样拼进 HTML。 */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function notFoundPage(path: string): string {
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>找不到这个页面</title><link rel="stylesheet" href="/style.css"></head>
+<body><div class="wrap"><div class="card">
+<h1>找不到这个页面</h1>
+<p class="muted">地址是 <code>${escapeHtml(path)}</code>，本站没有这一页。可能是链接少了一段，或者群主后来换过。</p>
+<p>买家请用群主发的 QQ 号和密码登录：<a href="/login">/login</a>（账号就是 QQ 号，初始密码 123456）。</p>
+<p class="small muted">群主后台在 <a href="/admin/">/admin/</a>。</p>
+</div></div></body></html>`;
+}
+
 app.notFound(async (c) => {
   const url = new URL(c.req.url);
   if (url.pathname.startsWith('/api/')) return c.json({ error: '接口不存在' }, 404);
+  // 尾随斜杠和不带 token 的 /w 都算同一个入口，别让手机端撞出一片空白
+  const clean = url.pathname.replace(/\/+$/, '') || '/';
   // 客户专属页：/w/{token} 统一返回同一个页面，token 由前端从地址里取
-  if (url.pathname.startsWith('/w/')) return serveAsset(c.env, url, '/customer.html');
   // 统一入口：客户输 QQ 号 + 密码自己进，不用群主挨个发链接
-  if (url.pathname === '/login' || url.pathname === '/me') return serveAsset(c.env, url, '/customer.html');
-  return c.env.ASSETS.fetch(c.req.raw);
+  if (clean === '/login' || clean === '/me' || clean === '/w' || clean.startsWith('/w/')) {
+    return serveAsset(c.env, url, '/customer.html');
+  }
+  const assets = await c.env.ASSETS.fetch(c.req.raw);
+  // 静态资源找不到时返回的是空正文 404，手机上就是一整片白，这里换成有话说的页面
+  if (assets.status === 404 && assets.headers.get('content-type') === null) {
+    return new Response(notFoundPage(url.pathname), {
+      status: 404,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    });
+  }
+  return assets;
 });
 
 export default app;

@@ -9,9 +9,13 @@
   --brand: #0ea5e9;
   --brand-ink: #0a6f96;
   --on-brand: #0a2e42;
-  --danger: #d93a3a;
-  --ok: #17924f;
-  --warn: #b7791f;
+  --danger: #c92f2f;
+  --danger-bg: #fceaea;
+  /* 状态色要压在最常出现的底色上过 WCAG 小字 4.5:1：
+     原来的 #17924f / #d93a3a / #b7791f 在白卡上只有 3.9 / 4.5 / 3.6，深色模式更只有 2.3~3.6 */
+  --ok: #0f7a41;
+  --ok-bg: #d8f2e3;
+  --warn: #96621a;
   --warn-bg: #fdf3d7;
   --radius: 12px;
 }
@@ -25,7 +29,18 @@
     --line: #2e333b;
     --brand: #0ea5e9;
     --brand-ink: #7dd3fc;
+    /* 深底上要换成亮色才看得清；胶囊底跟着改成同色的半透明，
+       不然浅色胶囊压在深卡上像贴了张白纸 */
+    --danger: #ff8f8f;
+    --danger-bg: rgba(255, 143, 143, 0.16);
+    --ok: #5ddc9a;
+    --ok-bg: rgba(93, 220, 154, 0.16);
+    --warn: #f0c26b;
     --warn-bg: #3a3116;
+  }
+  /* 危险按钮是「亮红底 + 字」，浅色那套白字压上去就没了 */
+  button.danger {
+    color: #2a0f0d;
   }
 }
 
@@ -239,7 +254,7 @@ th {
   color: var(--text);
 }
 .badge.ok {
-  background: #d8f2e3;
+  background: var(--ok-bg);
   color: var(--ok);
 }
 .badge.warn {
@@ -247,7 +262,7 @@ th {
   color: var(--warn);
 }
 .badge.danger {
-  background: #fbe0e0;
+  background: var(--danger-bg);
   color: var(--danger);
 }
 
@@ -285,11 +300,14 @@ th {
 }
 .item img,
 .item .noimg {
+  /* 骏河屋封面本来就是竖的（约 1:1.42），照后台列表那条规矩来：
+     竖框 + contain，整张都在框里，裁掉一头就没法对货了 */
   width: 64px;
-  height: 64px;
+  height: 92px;
+  object-fit: contain;
+  background: var(--bg);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  object-fit: cover;
-  background: var(--line);
   flex: none;
 }
 .item .noimg {
@@ -567,6 +585,27 @@ tr.hit > td {
     flex-basis: auto;
     width: 100%;
     max-height: none;
+  }
+}
+
+/* 手机首屏：四个数字卡固定两列，字号收一档。
+   28px 的「¥12,345.67」要 154px，一列卡只剩 149px，钱多一点就折成两行 */
+@media (max-width: 480px) {
+  .wrap {
+    padding: 12px;
+  }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .stat {
+    padding: 10px;
+  }
+  .stat .value {
+    font-size: 19px;
+  }
+  .stat.big .value {
+    font-size: 24px;
   }
 }
 
