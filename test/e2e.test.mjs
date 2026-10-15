@@ -1743,3 +1743,74 @@ test('群主重置链接时把 QQ 连错锁定一起清掉', async () => {
   assert.equal(again.res.status, 200, '重置后马上能登进来');
   assert.equal(again.data.mustChange, true, '重置链接不动密码，还是初始那一个');
 });
+
+test('脏输入不能变成钱，也不能悄悄存进去：单价上限、超长文本、不存在的件', async () => {
+  // 1) 单价会乘进所有人的运费。填一个「安全整数」级别的天文数字不会报错，
+  //    但乘出来早就不精确了，整箱分摊的钱是歪的，所以必须封顶。
+  const before = await call('GET', '/api/admin/settings');
+  for (const v of [9007199254740991, 1e21, -100, 'abc', true]) {
+    const r = await call('POST', '/api/admin/settings', { intlPriceFenPerKg: v }, { raw: true });
+    assert.equal(r.status, 400, `单价 ${JSON.stringify(v)} 不该被收下`);
+    assert.match(r.data.error, /单价|不合法/);
+  }
+  assert.equal(
+    (await call('GET', '/api/admin/settings')).intlPriceFenPerKg,
+    before.intlPriceFenPerKg,
+    '打脏的之后单价一个字都没变',
+  );
+  // 国内运费同理：它是按人按次收的钱，也不能填成 1 万公斤的运费
+  assert.equal((await call('POST', '/api/admin/settings', { domesticFeeFen: 9007199254740991 }, { raw: true })).status, 400);
+  const sane = await call('POST', '/api/admin/settings', { intlPriceYuanPerKg: 12.5 });
+  assert.equal(sane.intlPriceFenPerKg, 1250, '正常单价照旧存得进去');
+  await call('POST', '/api/admin/settings', { intlPriceFenPerKg: before.intlPriceFenPerKg });
+
+  // 2) 超长文本：粘错一整页字不会报错，但会把后台表格顶成一堵墙，这笔账以后谁也看不清
+  const LONG = 'x'.repeat(5000);
+  const badName = await call('POST', '/api/admin/packages', { name: LONG }, { raw: true });
+  assert.equal(badName.status, 400);
+  assert.match(badName.data.error, /太长/);
+  const created = await call('POST', '/api/admin/customers', { qq: `${stamp + 401}`.slice(-9), nickname: `长文本${stamp}` });
+  assert.equal((await call('PATCH', `/api/admin/customers/${created.id}`, { nickname: LONG }, { raw: true })).status, 400);
+  assert.equal((await call('PATCH', `/api/admin/customers/${created.id}`, { note: LONG }, { raw: true })).status, 400);
+  // 拦住之后原来的值一个字都不能动
+  const untouched = (await call('GET', `/api/admin/customers/${created.id}`)).customer;
+  assert.equal(untouched.nickname, `长文本${stamp}`, '被拦下来之后昵称一个字都不该变');
+
+  // 3) 不存在的件：以前接口照传入条数报「挪好了」，页面显示成功但货一件没动
+  const imported = await call('POST', '/api/admin/import/commit', {
+    fileName: `护栏-${stamp}.xlsx`,
+    fileHash: `guard-${stamp}`,
+    sheet: { headers: HEADERS, rows: [['护栏这件', null, null, null, 700, `护栏客${stamp}`, '700']] },
+    batchName: `护栏团${stamp}`,
+    assignments: [{ cn: `护栏客${stamp}`, newCustomer: { qq: `${stamp + 402}`.slice(-9), nickname: `护栏客${stamp}` } }],
+  });
+  const realItem = (await call('GET', `/api/admin/packages/${imported.packageId}`)).items[0];
+  const target = await call('POST', '/api/admin/packages', { name: `护栏另一箱${stamp}` });
+  const ghost = await call(
+    'POST',
+    `/api/admin/packages/${target.id}/items`,
+    { itemIds: [realItem.id + 999999], action: 'add' },
+    { raw: true },
+  );
+  assert.equal(ghost.status, 400, '不存在的件不能说挪好了');
+  assert.match(ghost.data.error, /不在系统里/);
+
+  // 同一件传两遍是「挪一件」，不是「挪两件」
+  const dup = await call('POST', `/api/admin/packages/${target.id}/items`, {
+    itemIds: [realItem.id, realItem.id],
+    action: 'add',
+  });
+  assert.equal(dup.count, 1);
+  assert.deepEqual(
+    (await call('GET', `/api/admin/packages/${target.id}`)).items.map((i) => i.id),
+    [realItem.id],
+    '说挪过来了就得真在箱里',
+  );
+  const removeFromOther = await call(
+    'POST',
+    `/api/admin/packages/${imported.packageId}/items`,
+    { itemIds: [realItem.id], action: 'remove' },
+    { raw: true },
+  );
+  assert.equal(removeFromOther.status, 400, '这件已经在别的箱子里，不能从这一箱移出');
+});

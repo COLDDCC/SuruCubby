@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, intList, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, intList, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
 import { domesticFeeFen, isSelfReturn, nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
 
 export const shipmentRoutes = new Hono<{ Bindings: Env }>();
@@ -94,7 +94,7 @@ shipmentRoutes.post('/', async (c) => {
 
   const at = nowIso();
   const id = await nextId(db, 'shipments');
-  const tracking = optionalString(body.trackingNo);
+  const tracking = bound(optionalString(body.trackingNo), '快递单号', 60);
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
@@ -127,7 +127,7 @@ shipmentRoutes.patch('/:id', async (c) => {
   if (!shipment) throw notFound('寄出记录不存在');
 
   if (body.feePaid !== undefined) throw badRequest('请通过收款记录确认或撤销运费');
-  const trackingNo = optionalString(body.trackingNo);
+  const trackingNo = bound(optionalString(body.trackingNo), '快递单号', 60);
   // 已经有发货时间的（当场填过单号生成的），补改单号时不许把发货时间挪到今天
   const shippedAt = trackingNo && !shipment.shippedAt ? nowIso() : optionalString(body.shippedAt);
   await db

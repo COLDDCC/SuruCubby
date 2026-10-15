@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
 
 export const paymentRoutes = new Hono<{ Bindings: Env }>();
@@ -41,7 +41,7 @@ paymentRoutes.post('/', async (c) => {
   const kind = body.kind;
   const db = c.env.DB;
   const at = nowIso();
-  const note = optionalString(body.note);
+  const note = bound(optionalString(body.note), '备注', 200);
   const paymentId = await nextId(db, 'payments');
 
   if (kind === 'goods') {
@@ -160,7 +160,7 @@ paymentRoutes.post('/all-goods', async (c) => {
   const batchId = requireInt(body.batchId, '批次 ID');
   const db = c.env.DB;
   const at = nowIso();
-  const note = optionalString(body.note);
+  const note = bound(optionalString(body.note), '备注', 200);
 
   const rows = await db
     .prepare(
@@ -216,7 +216,7 @@ paymentRoutes.post('/all-intl', async (c) => {
   const packageId = requireInt(body.packageId, '包裹 ID');
   const db = c.env.DB;
   const at = nowIso();
-  const note = optionalString(body.note);
+  const note = bound(optionalString(body.note), '备注', 200);
 
   const rows = await db
     .prepare(

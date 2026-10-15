@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { isItemStatus } from '../../lib/status.ts';
 import { surugaCode } from '../../lib/images.ts';
@@ -98,7 +98,7 @@ itemRoutes.patch('/:id', async (c) => {
     statements.push(
       db
         .prepare('UPDATE items SET exception_note = ?, updated_at = ? WHERE id = ?')
-        .bind(optionalString(body.exceptionNote), at, id),
+        .bind(bound(optionalString(body.exceptionNote), '异常备注', 200), at, id),
     );
   }
   if (body.missing !== undefined) {

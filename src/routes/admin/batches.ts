@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { fetchOgImage } from '../../lib/ogImage.ts';
 import { cacheImage, isHttpUrl, liveImageUrl, surugaImageCandidates } from '../../lib/images.ts';
 import { nowIso } from '../../lib/db.ts';
@@ -58,7 +58,7 @@ batchRoutes.get('/:id', async (c) => {
 batchRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
   const body = await readJson<{ name?: string; orderedAt?: string; orderNo?: string; japanTrackingNo?: string }>(c);
-  const name = optionalString(body.name);
+  const name = bound(optionalString(body.name), '批次名', 60);
   const orderedAt = optionalString(body.orderedAt);
   await c.env.DB.prepare(
     'UPDATE batches SET name = COALESCE(?, name), ordered_at = COALESCE(?, ordered_at) WHERE id = ?',

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, notFound, optionalString, readJson, requireInt, requireString } from '../../lib/http.ts';
+import { badRequest, bound, notFound, optionalString, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { isSelfReturn, nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
 import { hashPassword, passwordProblem } from '../../lib/password.ts';
@@ -58,20 +58,28 @@ customerRoutes.post('/', async (c) => {
   }>(c);
   const qq = requireString(body.qq, 'QQ 号');
   if (!/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
-  const nickname = requireString(body.nickname, '昵称');
+  const nickname = bound(requireString(body.nickname, '昵称'), '昵称', 30);
   const db = c.env.DB;
   const exists = await db.prepare('SELECT id FROM customers WHERE qq = ?').bind(qq).first();
   if (exists) throw badRequest('这个 QQ 号已经有客户了');
   const id = await nextId(db, 'customers');
   const token = randomToken();
   // 表里写的既可能是昵称也可能是另一个叫法，两个都得登记，不然下次导入认不出这个人
-  const aliases = [...new Set([nickname, optionalString(body.alias)].filter((x): x is string => !!x))];
+  const aliases = [...new Set([nickname, bound(optionalString(body.alias), '别名', 30)].filter((x): x is string => !!x))];
   await db.batch([
     db
       .prepare(
         'INSERT INTO customers (id, qq, nickname, token, note, real_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .bind(id, qq, nickname, token, optionalString(body.note), optionalString(body.realName), nowIso()),
+      .bind(
+        id,
+        qq,
+        nickname,
+        token,
+        bound(optionalString(body.note), '备注', 200),
+        bound(optionalString(body.realName), '真名', 30),
+        nowIso(),
+      ),
     ...aliases.map((alias) =>
       db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(alias, id),
     ),
@@ -289,7 +297,7 @@ customerRoutes.patch('/:id', async (c) => {
   }>(c);
   const qq = optionalString(body.qq);
   if (qq !== null && !/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
-  const nickname = optionalString(body.nickname);
+  const nickname = bound(optionalString(body.nickname), '昵称', 30);
   const db = c.env.DB;
   if (nickname !== null) {
     const taken = await db
@@ -322,7 +330,14 @@ customerRoutes.patch('/:id', async (c) => {
       .prepare(
         'UPDATE customers SET nickname = COALESCE(?, nickname), qq = COALESCE(?, qq), real_name = COALESCE(?, real_name), note = COALESCE(?, note), self_return = COALESCE(?, self_return) WHERE id = ?',
       )
-      .bind(nickname, qq, optionalString(body.realName), optionalString(body.note), selfReturn, id),
+      .bind(
+        nickname,
+        qq,
+        bound(optionalString(body.realName), '真名', 30),
+        bound(optionalString(body.note), '备注', 200),
+        selfReturn,
+        id,
+      ),
     // 改完昵称，新名字必须也能在表里认出来；旧别名留着，早前的表还能对上
     ...(nickname === null
       ? []

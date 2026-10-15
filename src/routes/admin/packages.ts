@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import {
   badRequest,
+  bound,
   intList,
   notFound,
   optionalString,
@@ -30,7 +31,7 @@ packageRoutes.get('/', async (c) => {
 
 packageRoutes.post('/', async (c) => {
   const body = await readJson<{ name?: string; batchIds?: number[] }>(c);
-  const name = requireString(body.name, '包裹名');
+  const name = bound(requireString(body.name, '包裹名'), '包裹名', 60);
   const db = c.env.DB;
   const id = await nextId(db, 'packages');
   const statements = [
@@ -95,7 +96,7 @@ packageRoutes.patch('/:id', async (c) => {
   await c.env.DB.prepare(
     'UPDATE packages SET name = COALESCE(?, name), tracking_no = COALESCE(?, tracking_no) WHERE id = ?',
   )
-    .bind(optionalString(body.name), optionalString(body.trackingNo), id)
+    .bind(bound(optionalString(body.name), '包裹名', 60), bound(optionalString(body.trackingNo), '国际单号', 60), id)
     .run();
   if (optionalString(body.trackingNo)) {
     const pkg = await c.env.DB.prepare('SELECT allocated_at AS a FROM packages WHERE id=?')
@@ -195,10 +196,23 @@ packageRoutes.post('/:id/batches', async (c) => {
 packageRoutes.post('/:id/items', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   const body = await readJson<{ itemIds?: unknown; action?: string }>(c);
-  const itemIds = intList(body.itemIds, '物品 ID');
+  const itemIds = [...new Set(intList(body.itemIds, '物品 ID'))];
   const action = body.action === 'remove' ? 'remove' : 'add';
   const at = nowIso();
   const db = c.env.DB;
+  // 页面上的按钮可能拿着早已删掉 / 合并走的 ID：这些件一件都不会动，
+  // 但接口要是照传入条数报「挪好了 3 件」，群主就会以为货已经过来了。
+  const found = await db
+    .prepare(`SELECT id, package_id AS packageId FROM items WHERE id IN (${placeholders(itemIds.length)})`)
+    .bind(...itemIds)
+    .all<{ id: number; packageId: number | null }>();
+  if (found.results.length !== itemIds.length) {
+    throw badRequest(`有 ${itemIds.length - found.results.length} 件已经不在系统里了，刷新页面再挪`);
+  }
+  if (action === 'remove') {
+    const elsewhere = found.results.filter((r) => r.packageId !== id);
+    if (elsewhere.length) throw badRequest('有东西不在这个包裹里，刷新页面再移出');
+  }
   await assertMovable(db, id, itemIds);
   const statements = itemIds.map((itemId) =>
     action === 'add'

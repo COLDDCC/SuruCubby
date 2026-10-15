@@ -49,6 +49,15 @@ export function optionalString(value: unknown): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+/**
+ * 入库前卡长度。粘错一整页文字进来不会报错，但会把后台的表格顶成一堵墙，
+ * 而且这笔账以后谁也看不清——宁可当场拦一句「太长了」。
+ */
+export function bound(value: string | null, label: string, max: number): string | null {
+  if (value !== null && value.length > max) throw badRequest(`${label}太长了，最多 ${max} 个字（现在 ${value.length} 个）`);
+  return value;
+}
+
 export function intList(value: unknown, field: string): number[] {
   if (!Array.isArray(value) || value.length === 0) throw badRequest(`${field} 不能为空`);
   return value.map((v) => requireInt(v, field));

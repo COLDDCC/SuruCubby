@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg, isSelfReturn } from '../../lib/db.ts';
 import { allocate, feeFromWeight, splitGroupFee } from '../../lib/allocate.ts';
 import { toFen } from '../../lib/money.ts';
@@ -249,7 +249,7 @@ weighRoutes.post('/:id/weigh/missing', async (c) => {
   const body = await readJson<{ itemId?: unknown; missing?: boolean; note?: string }>(c);
   const itemId = requireInt(body.itemId, '物品 ID');
   const missing = body.missing !== false;
-  const note = optionalString(body.note);
+  const note = bound(optionalString(body.note), '备注', 200);
 
   const item = await c.env.DB.prepare(
     'SELECT id, status, weigh_group_id AS weighGroupId FROM items WHERE id = ? AND package_id = ?',
