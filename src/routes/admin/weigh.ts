@@ -63,6 +63,24 @@ async function ensureGroupEditable(env: Env, groupId: number): Promise<void> {
   }
 }
 
+/**
+ * 秤只管还没走完的件。寄出／签收之后运费和重量都是定案了，分摊那几条 SQL 一直不算它们，
+ * 所以页面和认领/称重接口也不能算，否则会出现点了永远存不进数的按钮。
+ */
+const isOffScale = (status: string) => status === 'shipped' || status === 'delivered';
+
+/** 这一位在这一箱里还有没有要上秤的货（缺件、砍单、已寄出 / 已签收都不算）。 */
+async function hasScaleItems(db: D1Database, packageId: number, customerId: number): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM items WHERE package_id = ? AND customer_id = ? AND missing = 0
+         AND status NOT IN ('cancelled','refunded','shipped','delivered') LIMIT 1`,
+    )
+    .bind(packageId, customerId)
+    .first();
+  return !!row;
+}
+
 weighRoutes.get('/:id/weigh', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   const pkg = await loadPackage(c.env, id);
@@ -74,7 +92,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
             i.weigh_group_id AS weighGroupId, i.goods_fee_jpy AS goodsFeeJpy, i.weight_g AS weightG
        FROM items i
        JOIN customers c ON c.id = i.customer_id
-      WHERE i.package_id = ? AND i.status NOT IN ('cancelled', 'refunded')
+      WHERE i.package_id = ? AND i.status NOT IN ('cancelled', 'refunded', 'shipped', 'delivered')
       ORDER BY c.nickname, i.id`,
   )
     .bind(id)
@@ -108,6 +126,13 @@ weighRoutes.get('/:id/weigh', async (c) => {
       feePaid: number;
     }>();
   const groupByCustomer = new Map(groups.results.map((g) => [g.customerId, g]));
+
+  // 已经走完秤的那几件不在上面列了，但要在进度条里说一句，不然群主以为这一箱少了货
+  const offScaleRows = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM items WHERE package_id = ? AND status IN ('shipped', 'delivered')`,
+  )
+    .bind(id)
+    .first<{ n: number }>();
 
   const byCustomer = new Map<
     number,
@@ -174,6 +199,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
       totalCustomers: customers.filter((c2) => !c2.selfReturn).length,
       selfReturnItems: items.results.length - joined.length,
       selfReturnCustomers: customers.filter((c2) => c2.selfReturn).length,
+      offScaleItems: offScaleRows?.n ?? 0,
     },
   });
 });
@@ -194,6 +220,9 @@ weighRoutes.post('/:id/weigh/claim', async (c) => {
   if (!item) throw notFound('这件东西不在这个包裹里');
   if (item.status === 'cancelled' || item.status === 'refunded') {
     throw badRequest('已取消 / 已退款的物品不参与称重');
+  }
+  if (isOffScale(item.status)) {
+    throw badRequest('这件已经寄出 / 签收了，运费早就定案，不用再上秤');
   }
 
   if (claimed) {
@@ -223,11 +252,12 @@ weighRoutes.post('/:id/weigh/missing', async (c) => {
   const note = optionalString(body.note);
 
   const item = await c.env.DB.prepare(
-    'SELECT id, weigh_group_id AS weighGroupId FROM items WHERE id = ? AND package_id = ?',
+    'SELECT id, status, weigh_group_id AS weighGroupId FROM items WHERE id = ? AND package_id = ?',
   )
     .bind(itemId, id)
-    .first<{ id: number; weighGroupId: number | null }>();
+    .first<{ id: number; status: string; weighGroupId: number | null }>();
   if (!item) throw notFound('这件东西不在这个包裹里');
+  if (isOffScale(item.status)) throw badRequest('这件已经寄出 / 签收了，不用标缺件');
   if (item.weighGroupId) await ensureGroupEditable(c.env, item.weighGroupId);
 
   if (missing) {
@@ -418,8 +448,11 @@ weighRoutes.post('/:id/weigh/item',async c=>{
  const id=requireInt(c.req.param('id'),'包裹 ID'); await loadPackage(c.env,id);
  const body=await readJson<{itemId:unknown;weightG:unknown}>(c); const itemId=requireInt(body.itemId,'物品 ID'); const weight=requireInt(body.weightG,'重量');
  if(weight<=0 || weight>1000000) throw badRequest('重量必须为1至1000000克');
- const item=await c.env.DB.prepare("SELECT customer_id AS cid FROM items WHERE id=? AND package_id=? AND status NOT IN ('cancelled','refunded','shipped','delivered')").bind(itemId,id).first<{cid:number}>();
- if(!item) throw notFound('物品不在此包裹'); const gid=await ensureGroup(c.env,id,item.cid);
+ const item=await c.env.DB.prepare('SELECT customer_id AS cid, status FROM items WHERE id=? AND package_id=?').bind(itemId,id).first<{cid:number;status:string}>();
+ if(!item) throw notFound('物品不在此包裹');
+ if(item.status==='cancelled'||item.status==='refunded') throw badRequest('已取消 / 已退款的物品不参与称重');
+ if(isOffScale(item.status)) throw badRequest('这件已经寄出 / 签收了，运费早就定案，不用再上秤');
+ const gid=await ensureGroup(c.env,id,item.cid);
  await ensureGroupEditable(c.env,gid);
  await c.env.DB.batch([
  c.env.DB.prepare('UPDATE items SET weight_g=?,weigh_group_id=?,missing=0,updated_at=? WHERE id=?').bind(weight,gid,nowIso(),itemId),
@@ -435,18 +468,27 @@ weighRoutes.post('/:id/weigh/group', async (c) => {
   await loadPackage(c.env, id);
   const body = await readJson<{ customerId?: unknown; weighGroupId?: unknown; weightG?: unknown }>(c);
   const db = c.env.DB;
+  const raw = body.weightG;
+  const hasWeight = raw !== undefined && raw !== null && raw !== '';
   let groupId: number | null = null;
+  let customerId: number;
   if (body.weighGroupId !== undefined && body.weighGroupId !== null && body.weighGroupId !== '') {
     groupId = requireInt(body.weighGroupId, '称重组 ID');
+    const owner = await db
+      .prepare('SELECT id, customer_id AS customerId FROM weigh_groups WHERE id = ? AND package_id = ?')
+      .bind(groupId, id)
+      .first<{ id: number; customerId: number }>();
+    if (!owner) throw notFound('这一摞不存在');
+    customerId = owner.customerId;
   } else {
-    const customerId = requireInt(body.customerId, '客户 ID');
-    groupId = await ensureGroup(c.env, id, customerId);
+    customerId = requireInt(body.customerId, '客户 ID');
   }
-  const group = await db
-    .prepare('SELECT id FROM weigh_groups WHERE id = ? AND package_id = ?')
-    .bind(groupId, id)
-    .first<{ id: number }>();
-  if (!group) throw notFound('这一摞不存在');
+  // 这一位在这一箱已经没有要称的货了（全签收或全缺件），就别给他建一摞永远算不了费的空账。
+  // 注意不能看「这一摞里挂了几件」——整摞称重本来就允许先填重量、后认领。
+  if (hasWeight && !(await hasScaleItems(db, id, customerId))) {
+    throw badRequest('这一位在这一箱没有要称的货了（都缺件、取消或签收完了），不用填整摞重量');
+  }
+  if (groupId === null) groupId = await ensureGroup(c.env, id, customerId);
   await ensureGroupEditable(c.env, groupId);
 
   const weighed = await db
@@ -467,7 +509,6 @@ weighRoutes.post('/:id/weigh/group', async (c) => {
     throw badRequest('这一摞已经逐件称过了，重量由每件自己加起来；要改成整摞称，先把那几件的重量清掉');
   }
 
-  const raw = body.weightG;
   const weight = raw === undefined || raw === null || raw === '' ? null : requireInt(raw, '整摞重量');
   if (weight !== null && (weight <= 0 || weight > 1000000)) {
     throw badRequest('整摞重量必须为 1 至 1000000 克');
@@ -629,11 +670,10 @@ weighRoutes.post('/:id/allocate/undo', async (c) => {
     .first<{ count: number }>();
   if ((paid?.count ?? 0) > 0) throw badRequest('已经有人付过这个包裹的国际运费，不能撤销分摊');
 
+  // 只有真走掉我们这一步的件才锁住撤销。不拼邮的人当面结掉也是 delivered，
+  // 但那一笔根本没进这箱的账，不能因此让整箱退不回去。
   const shipped = await db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM items
-        WHERE package_id = ? AND status IN ('shipped','delivered')`,
-    )
+    .prepare('SELECT COUNT(*) AS count FROM items WHERE package_id = ? AND shipment_id IS NOT NULL')
     .bind(id)
     .first<{ count: number }>();
   if ((shipped?.count ?? 0) > 0) throw badRequest('这个包裹里已经有东西寄出了，不能撤销分摊');

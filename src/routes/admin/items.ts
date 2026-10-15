@@ -22,7 +22,7 @@ itemRoutes.get('/search', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT i.id, i.title, i.image_url AS imageUrl, i.product_url AS productUrl, i.status,
             i.package_id AS packageId, i.batch_id AS batchId, i.customer_id AS customerId,
-            c.nickname, b.name AS batchName, p.name AS packageName, p.allocated_at AS allocatedAt
+            c.nickname, c.self_return AS selfReturn, b.name AS batchName, p.name AS packageName, p.allocated_at AS allocatedAt
        FROM items i
        JOIN customers c ON c.id = i.customer_id
        JOIN batches b ON b.id = i.batch_id
@@ -44,6 +44,7 @@ itemRoutes.get('/search', async (c) => {
       batchId: number;
       customerId: number;
       nickname: string;
+      selfReturn: number;
       batchName: string;
       packageName: string | null;
       allocatedAt: string | null;

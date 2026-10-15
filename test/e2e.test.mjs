@@ -872,6 +872,105 @@ test('不拼邮的人：认领、称重、分摊、寄出这条链整段都不�
   assert.match(notOff.data.error, /不拼邮/);
 });
 
+test('已经寄出 / 签收的件不在这台秤上：改回拼邮也不能再收一次运费', async () => {
+  const box = `回秤${stamp}`;
+  const people = [`${box}甲`, `${box}乙`];
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: box,
+    fileHash: box,
+    sheet: {
+      headers: ['名称', 'cn', '实际价格'],
+      rows: [
+        ['甲的第一件', people[0], 100],
+        ['乙的唯一一件', people[1], 100],
+      ],
+    },
+    assignments: people.map((cn, i) => ({
+      cn,
+      newCustomer: { qq: `${stamp + 300 + i}`.slice(-9), nickname: cn },
+    })),
+  });
+  const pkgId = added.packageId;
+  await call('POST', `/api/admin/packages/${pkgId}/status`, { status: 'cn_arrived' });
+
+  const opened = await call('GET', `/api/admin/packages/${pkgId}/weigh`);
+  const find = (n) => opened.customers.find((c) => c.nickname === n);
+  const yi = find(people[1]);
+  const yiItem = yi.items[0].id;
+
+  // 不拼邮 → 当面结掉 → 又改回拼邮（下一箱一起走）。这件已经签收的货不该再回到秤上。
+  await call('PATCH', `/api/admin/customers/${yi.customerId}`, { selfReturn: true });
+  await call('POST', `/api/admin/customers/${yi.customerId}/received`, {});
+  await call('PATCH', `/api/admin/customers/${yi.customerId}`, { selfReturn: false });
+
+  const weigh = await call('GET', `/api/admin/packages/${pkgId}/weigh`);
+  assert.ok(!weigh.customers.some((c) => c.nickname === people[1]), '已签收的那位整张卡都不该在称重台上');
+  assert.equal(weigh.progress.offScaleItems, 1);
+  assert.equal(weigh.progress.expectedItems, 1, '「应有几件」只数还没走完的');
+  assert.equal(weigh.progress.unclaimedItems, 1, '不然「整箱全部认领」点了个空，按钮永远挂着');
+
+  for (const [path, body] of [
+    ['weigh/claim', { itemId: yiItem, claimed: true }],
+    ['weigh/item', { itemId: yiItem, weightG: 500 }],
+    ['weigh/missing', { itemId: yiItem, missing: true }],
+    ['weigh/group', { customerId: yi.customerId, weightG: 500 }],
+  ]) {
+    const res = await call('POST', `/api/admin/packages/${pkgId}/${path}`, body, { raw: true });
+    assert.equal(res.status, 400, `${path} 不该让已签收的件回秤`);
+    assert.match(res.data.error, /寄出|签收/, `${path}: ${res.data.error}`);
+  }
+
+  // 甲那一件照旧走秤、照旧分摊；已签收那件不进账，也不该把「撤销分摊」锁死。
+  // 「先把整摞重量填上、回头再认领」是称重台的正常用法，不能被上面那条拦截误伤。
+  await call('POST', `/api/admin/packages/${pkgId}/weigh/group`, {
+    customerId: find(people[0]).customerId,
+    weightG: 1000,
+  });
+  assert.equal(
+    (await call('POST', `/api/admin/packages/${pkgId}/weigh/claim-all`, {})).claimed,
+    1,
+    '只有甲那件进摞，乙那件已签收不该被认领',
+  );
+  const preview = await call('POST', `/api/admin/packages/${pkgId}/allocate/preview`, {
+    totalFeeYuan: '50.00',
+  });
+  assert.equal(preview.fullBox, true, '已签收那件不算「没认领」，手填实收才填得动');
+  assert.deepEqual(preview.rows.map((r) => r.nickname), [people[0]]);
+  assert.equal(preview.totalFeeFen, 5000);
+  const committed = await call('POST', `/api/admin/packages/${pkgId}/allocate/commit`, {
+    totalFeeYuan: '50.00',
+  });
+  assert.equal(committed.itemsMovedToStock, 1);
+  const undone = await call('POST', `/api/admin/packages/${pkgId}/allocate/undo`, {});
+  assert.equal(undone.ok, true, '当面结掉的那件没有寄出记录，不该锁住整箱撤销');
+
+  // 已经当面签收的那件也不能再被挪去别的包裹，不然物流记录就乱了
+  const otherBox = await call('POST', '/api/admin/packages', { name: `${box}另一箱` });
+  const moved = await call(
+    'POST',
+    `/api/admin/packages/${otherBox.id}/items`,
+    { itemIds: [yiItem], action: 'add' },
+    { raw: true },
+  );
+  assert.equal(moved.status, 400);
+  assert.match(moved.data.error, /签收/, moved.data.error);
+
+  // 两个人一个标了一个没标，合并会把「这堆货走不走我们这条链」变成猜
+  const other = await call('POST', '/api/admin/customers', {
+    qq: `${stamp + 399}`.slice(-9),
+    nickname: `${box}重复号`,
+  });
+  await call('PATCH', `/api/admin/customers/${other.id}`, { selfReturn: true });
+  const merged = await call(
+    'POST',
+    '/api/admin/customers/merge',
+    { sourceId: other.id, targetId: find(people[0]).customerId },
+    { raw: true },
+  );
+  assert.equal(merged.status, 400);
+  assert.match(merged.data.error, /不拼邮/);
+});
+
 test('货款收款与撤销', async () => {
   const customerId = ctx.customers[0].id;
   const payment = await call('POST', '/api/admin/payments', {

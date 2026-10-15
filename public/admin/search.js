@@ -18,6 +18,7 @@ export function showSearch(show) {
  * 搜货号：一般只打尾号（8913 命中 ZHOTI678913），也认商品名片段和客户名。
  * 站在称重台 / 包裹页时先只搜这一箱 —— 一箱几十件，先按人筛比一行行下拉快。
  * 落点按这件东西现在在哪一步来：没分摊就在称重台，算过费了在包裹详情，没进包裹就在批次。
+ * 已经不在这台秤上的（不拼邮、已寄出/已签收）就送到客户详情页，称重台里找不到他。
  */
 function currentPackage() {
   const hit = location.hash.match(/^#\/(?:weigh|packages)\/(\d+)/);
@@ -25,6 +26,9 @@ function currentPackage() {
 }
 
 function target(item) {
+  if (item.selfReturn || item.status === 'shipped' || item.status === 'delivered') {
+    return { hash: `#/customers/${item.customerId}`, where: '客户详情页' };
+  }
   if (!item.packageId) return { hash: `#/batches/${item.batchId}?item=${item.id}`, where: '批次' };
   return item.allocatedAt
     ? { hash: `#/packages/${item.packageId}?item=${item.id}`, where: '包裹' }

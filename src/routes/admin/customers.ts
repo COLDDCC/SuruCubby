@@ -423,9 +423,21 @@ customerRoutes.post('/merge', async (c) => {
   if (sourceId === targetId) throw badRequest('不能自己合并自己');
 
   const db = c.env.DB;
-  const source = await db.prepare('SELECT id FROM customers WHERE id = ?').bind(sourceId).first();
-  const target = await db.prepare('SELECT id FROM customers WHERE id = ?').bind(targetId).first();
+  const source = await db
+    .prepare('SELECT id, self_return AS selfReturn FROM customers WHERE id = ?')
+    .bind(sourceId)
+    .first<{ id: number; selfReturn: number }>();
+  const target = await db
+    .prepare('SELECT id, self_return AS selfReturn FROM customers WHERE id = ?')
+    .bind(targetId)
+    .first<{ id: number; selfReturn: number }>();
   if (!source || !target) throw notFound('客户不存在');
+  // 合并只挪物品，不替谁决定拼不拼邮：一个拼邮一个不拼邮，合完之后这一堆货到底走不走我们这条链就说不清了
+  if (source.selfReturn !== target.selfReturn) {
+    throw badRequest(
+      `「不拼邮」的标记两边不一样（${source.selfReturn ? '被合并那位' : '保留那位'}标了），先在详情页把两人改成一样再合并`,
+    );
+  }
 
   // 同一包裹里两边都有称重组时，把物品并到 target 的组，重量与运费相加
   const conflicts = await db

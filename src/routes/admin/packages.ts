@@ -227,10 +227,12 @@ async function assertMovable(db: D1Database, target: number, itemIds?: number[],
   if (!ids.length) return;
   const rows = await db
     .prepare(
-      `SELECT i.id FROM items i LEFT JOIN packages p ON p.id=i.package_id WHERE ${itemIds ? 'i.id' : 'i.batch_id'} IN (${placeholders(ids.length)}) AND (p.allocated_at IS NOT NULL OR i.shipment_id IS NOT NULL OR EXISTS(SELECT 1 FROM request_items ri WHERE ri.item_id=i.id))`,
+      `SELECT i.id, (i.status IN ('shipped','delivered')) AS handed FROM items i LEFT JOIN packages p ON p.id=i.package_id WHERE ${itemIds ? 'i.id' : 'i.batch_id'} IN (${placeholders(ids.length)}) AND (p.allocated_at IS NOT NULL OR i.shipment_id IS NOT NULL OR i.status IN ('shipped','delivered') OR EXISTS(SELECT 1 FROM request_items ri WHERE ri.item_id=i.id))`,
     )
     .bind(...ids)
-    .all();
+    .all<{ id: number; handed: number }>();
+  // 已经不在这条链上的货（寄出过、或不拼邮当面结掉的）挪它只会把物流记录搞乱
+  if (rows.results.some((r) => r.handed)) throw badRequest('有东西已经寄出或当面签收过了，不用再挪包裹');
   if (rows.results.length) throw badRequest('有物品已计费或已申请发货，请先撤销对应流程');
 }
 packageRoutes.route('/', weighRoutes);

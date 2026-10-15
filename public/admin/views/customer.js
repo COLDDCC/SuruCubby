@@ -257,7 +257,7 @@ export async function render(view, [id]) {
       if (data.customer.selfReturn) {
         if (
           !(await confirmBox(
-            `把「${data.customer.nickname}」改回拼邮？改回后他要重新认领、称重、摊运费，那一箱的「整箱」口径也会把他算回去。`,
+            `把「${data.customer.nickname}」改回拼邮？改回后他还没交接的件要重新认领、称重、摊运费，那一箱的「整箱」口径也会把他算回去。已经点过「当面给他了」的那几件是「已签收」，不会再回到秤上，也不会重收一次运费。`,
             { okText: '改回拼邮' },
           ))
         )

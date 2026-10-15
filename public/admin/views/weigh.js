@@ -57,6 +57,7 @@ export async function render(view, [id]) {
         openStacks.length ? ` / 还有 <strong>${openStacks.length}</strong> 摞` : ""
       }</span>
       ${p.missingItems ? `<span class="badge warn">缺件 ${p.missingItems}</span>` : ""}
+      ${p.offScaleItems ? `<span class="badge">已寄出/已签收 ${p.offScaleItems} 件（不在秤上）</span>` : ""}
       ${
         p.selfReturnCustomers
           ? `<span class="badge">不拼邮 ${p.selfReturnCustomers} 人 / ${p.selfReturnItems} 件</span>`
@@ -69,7 +70,7 @@ export async function render(view, [id]) {
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
-      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。<strong>不用等全箱称完</strong>：哪一摞称好了就先「算分摊」那一摞，那个人马上就能申请发货，剩下的人称好了再算一次，账各记各的。已经算过运费的那几摞要改，得先「撤销分摊」。</p>
+      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。<strong>不用等全箱称完</strong>：哪一摞称好了就先「算分摊」那一摞，那个人马上就能申请发货，剩下的人称好了再算一次，账各记各的。已经算过运费的那几摞要改，得先「撤销分摊」。<strong>已经寄出或签收的件不在这台秤上</strong>（进度、认领、分摊都不算它们），改回拼邮也不会再收一次运费。</p>
       ${
         p.unclaimedItems > 0
           ? `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button>
@@ -103,7 +104,8 @@ export async function render(view, [id]) {
           <button class="small plain" data-action="backToGroup" data-customer="${c.customerId}" data-nickname="${escapeHtml(c.nickname)}">改回拼邮</button>
         </div>
         <p class="small muted">这批货他自己带回国／另找转运，后面不再走我们这条链：不认领、不称重、不摊国际运费、不能申请发货、也不发国内快递。
-          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，他的这几件会重新回到「待认领」里。
+          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，还没交接的件会重新回到「待认领」里；
+          已经点过「当面给他了」的那几件已经算签收，不会再回这台秤上，也不会再收一次运费。
           <a href="#/customers/${c.customerId}">他的详情页</a>那儿有「这几件已经当面给他了」，货交接完在那儿结掉就行。</p>
       </div>`,
       )
@@ -215,7 +217,7 @@ export async function render(view, [id]) {
     backToGroup: async ({ customer, nickname }) => {
       try {
         await api.patch(`/api/admin/customers/${customer}`, { selfReturn: false });
-        toast(`「${nickname}」改回拼邮了，重新认领称重就行`);
+        toast(`「${nickname}」改回拼邮了，还没交接的件重新回到待认领；已经签收的那几件不再上秤`);
         await reload();
       } catch (err) {
         toast(err.message, true);
