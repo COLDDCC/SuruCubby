@@ -65,11 +65,21 @@ export async function render(view, [id]) {
     </div>
     ${[...byCustomer.values()]
       .map(
-        (g) => `<div class="card">
+        (g) => {
+          const stackFee = g.items.reduce((sum, i) => sum + (i.intlFeeFen ?? 0), 0);
+          return `<div class="card">
         <h3><a href="#/customers/${g.customerId}">${escapeHtml(g.nickname)}</a>
-          <span class="muted small">${g.items.length} 件</span></h3>
+          ${g.selfReturn ? '<span class="badge">不拼邮</span>' : ''}
+          <span class="muted small">${g.items.length} 件${
+            stackFee ? ` · 这一摞运费 ${money(stackFee)}` : ''
+          }</span></h3>
+          ${
+            g.selfReturn
+              ? '<p class="small muted">这一位不拼邮：这几件不进这一箱的运费分摊，也不发国内快递；货款照旧按表里记。</p>'
+              : ''
+          }
         <div class="scroll-x"><table>
-          <thead><tr><th>图</th><th>名称</th><th>状态</th><th class="right">应付</th><th></th></tr></thead>
+          <thead><tr><th>图</th><th>名称</th><th>状态</th><th class="right">应付</th><th class="right">重量</th><th class="right">国际运费</th><th></th></tr></thead>
           <tbody>${g.items
             .map(
               (i) => `<tr data-focus-item="${i.id}">
@@ -78,11 +88,14 @@ export async function render(view, [id]) {
                 <div>${codeTag(i)}</div></td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
+              <td class="right small">${i.weightG ? `${Number(i.weightG).toLocaleString()} g` : '—'}</td>
+              <td class="right money">${i.intlFeeFen === null || i.intlFeeFen === undefined ? '—' : money(i.intlFeeFen)}</td>
               <td class="right"><button class="small plain" data-action="itemStatus" data-item="${i.id}" data-status="${i.status}">改状态</button></td>
             </tr>`,
             )
             .join('')}</tbody></table></div>
-      </div>`,
+      </div>`;
+        },
       )
       .join('')}`;
 

@@ -798,6 +798,21 @@ test('不拼邮的人：认领、称重、分摊、寄出这条链整段都不�
   assert.equal(committed.itemsMovedToStock, 3);
   assert.equal((await call('GET', `/api/admin/packages/${pkgId}`)).package.totalFeeFen, 8800);
 
+  // 「每件之和 = 这一摞 = 这一箱（去掉尾差）」这条硬等式，包裹详情页上每一行都能手算
+  const boxPage = await call('GET', `/api/admin/packages/${pkgId}`);
+  const perItem = boxPage.items.reduce((s, i) => s + (i.intlFeeFen ?? 0), 0);
+  const perStack = (await call('GET', `/api/admin/packages/${pkgId}/weigh`)).customers
+    .filter((c) => c.intlFeeFen !== null)
+    .reduce((s, c) => s + c.intlFeeFen, 0);
+  assert.equal(perItem, perStack, '每件加起来必须等于那一摞');
+  assert.equal(perStack + (boxPage.rounding?.diffFen ?? 0), 8800, '各摞之和 + 尾差 = 这一箱');
+  assert.equal(
+    boxPage.items.find((i) => i.customerId === yiId).intlFeeFen,
+    null,
+    '不拼邮那件一分运费都不该摊',
+  );
+  assert.equal(boxPage.items.filter((i) => i.selfReturn).length, 1, '包裹页也要看得出这一位不拼邮');
+
   // 乙自己带回国：货款照旧记，运费和寄出跟他无关
   const yi = added.createdCustomers.find((c) => c.nickname === people[1]);
   const yiView = await call('GET', `/api/admin/customers/${yi.id}`);

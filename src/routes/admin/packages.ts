@@ -61,9 +61,10 @@ packageRoutes.get('/:id', async (c) => {
   if (!pkg) throw notFound('包裹不存在');
 
   const items = await c.env.DB.prepare(
-    `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
+    `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, c.self_return AS selfReturn, i.title, i.image_url AS imageUrl,
             i.product_url AS productUrl,
             i.status, i.goods_fee_jpy AS goodsFeeJpy, i.missing, i.exception_note AS exceptionNote,
+            i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen,
             i.weigh_group_id AS weighGroupId, i.batch_id AS batchId
        FROM items i
        JOIN customers c ON c.id = i.customer_id
