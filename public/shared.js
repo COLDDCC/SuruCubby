@@ -80,6 +80,35 @@ export function toast(message, isError = false) {
 }
 
 /**
+ * 复制一段文本。`navigator.clipboard` 只在 HTTPS 或 localhost 下存在，
+ * 客户从局域网 http 地址打开时没有它，硬调会直接抛异常，所以留一条兜底。
+ */
+export async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 被权限拦了，继续走兜底 */
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let done = false;
+  try {
+    done = document.execCommand('copy');
+  } catch {
+    done = false;
+  }
+  ta.remove();
+  return done;
+}
+
+/**
  * 封面图统一走自己域名下的 /img/i/{id}：Worker 转一道 + 边缘缓存，
  * 国内快一些，换图床也不用改页面。万一代理不通（对方防盗链等），
  * 自动退回直接外链，再不行才显示「无图」。

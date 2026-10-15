@@ -1,4 +1,4 @@
-import { beijingTime, codeTag, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, codeTag, copyText, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
@@ -127,6 +127,14 @@ function renderMustChange(data) {
   document.getElementById('peek').onclick = () => render(data);
 }
 
+/**
+ * 能勾去发货的件，和后端 `POST /:token/requests` 查的一模一样：
+ * 可发货、没标缺件、运费已经拆到这一件上。少一条就是点了必被拦，别摆出来让人白点。
+ */
+function shippableOf(item) {
+  return item.status === 'cn_stock' && !item.missing && item.intlFeeFen !== null;
+}
+
 function itemCard(item) {
   const paid = item.goodsPaid
     ? '<span class="badge ok">货款已付</span>'
@@ -138,13 +146,17 @@ function itemCard(item) {
   const note = item.exceptionNote
     ? `<div class="small" style="color:var(--warn)">${escapeHtml(item.exceptionNote)}</div>`
     : '';
-  const selectable = item.status === 'cn_stock' && !item.missing;
-  // 已经报过申请的、群主标了缺件的都勾不了，得说清楚为什么勾不了
+  const selectable = shippableOf(item);
+  // 已经报过申请的、群主标了缺件的、运费还没拆到这件的都勾不了，得说清楚为什么勾不了
   const picker = selectable
     ? `<label class="pick"><input type="checkbox" data-ship-item="${item.id}" ${item.requestId ? 'disabled' : ''}>${
         item.requestId ? '已申请' : '发货'
       }</label>`
     : '';
+  const noFee =
+    item.status === 'cn_stock' && !item.missing && item.intlFeeFen === null
+      ? '<div class="small muted">这一摞的运费还没拆到这一件上，在群里说一声，群主重算一次分摊就能勾。</div>'
+      : '';
   return `
     <div class="item">
       ${picker}
@@ -166,6 +178,7 @@ function itemCard(item) {
         ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
         ${item.intlFeeFen === null ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
         ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
+        ${noFee}
         ${note}
       </div>
     </div>`;
@@ -204,11 +217,37 @@ function addressForm(count) {
 
 /** 勾了东西才给提交；一件都勾不了的时候别杵着一个死按钮。 */
 function shipPanel(data) {
-  const shippable = (data.items || []).filter((i) => i.status === 'cn_stock' && !i.missing);
+  const addresses = data.addresses || [];
+  const items = data.items || [];
+  const shippable = items.filter(shippableOf);
   const open = shippable.filter((i) => !i.requestId);
-  const rows = (data.addresses || []).map(
+
+  // 初始密码下后端拦住一切写操作，填地址、提交都会撞 403 —— 那就别放按钮，只指上面那条横幅
+  if (data.mustChange) {
+    return `
+    <div class="card">
+      <h2>申请发货</h2>
+      <p class="small">先把上面那个共用的初始密码改成你自己的，这一栏才让填地址、勾商品。</p>
+      ${
+        addresses.length
+          ? `<p class="small muted" style="margin:0 0 4px">已经存过的收货地址</p>
+             ${addresses
+               .map(
+                 (a) =>
+                   `<p class="small" style="margin:2px 0">${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</p>`,
+               )
+               .join('')}`
+          : ''
+      }
+    </div>`;
+  }
+
+  // 一件东西都还没有的新客户：给他地址表单只会让人瞎填
+  if (!items.length && !addresses.length) return '';
+
+  const rows = addresses.map(
     (a) => `<label class="row">
-      <input name="ship-address" type="radio" value="${a.id}" ${(data.addresses || []).length === 1 ? 'checked' : ''}>
+      <input name="ship-address" type="radio" value="${a.id}" ${addresses.length === 1 ? 'checked' : ''}>
       <span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span>
       <button class="small plain" data-delete-address="${a.id}">删除</button>
     </label>`,
@@ -218,8 +257,10 @@ function shipPanel(data) {
   let hint = '';
   if (!open.length) {
     hint = shippable.length
-      ? '<p class="small muted">可发货的几件都已经报过申请了，等群主确认收款。</p>'
-      : '<p class="small muted">现在还没有能发的商品。东西到国内、群主算完运费，这里就会让你勾。</p>';
+      ? '<p class="small muted">能发的几件都已经报过申请了，等群主确认收款。</p>'
+      : items.length
+        ? '<p class="small muted">现在还没有能发的商品。东西到国内、群主算完运费，这里就会让你勾。</p>'
+        : '<p class="small muted">群主还没把你买的东西录进仓库。录进来这一页自己会更新，不用你做什么。</p>';
   } else if (!rows.length) {
     hint = '<p class="small muted">还没有收货地址，填一个保存后勾选的商品才提交得了。</p>';
   }
@@ -228,7 +269,7 @@ function shipPanel(data) {
       <h2>申请发货</h2>
       <p class="small muted" style="margin:0 0 4px">收货地址（最多 3 个）</p>
       ${rows.join('')}
-      ${addressForm((data.addresses || []).length)}
+      ${addressForm(addresses.length)}
       ${hint}
       ${cta}
     </div>`;
@@ -404,7 +445,9 @@ function render(data) {
       <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。${
         s.stockCount
           ? `可发货 ${s.stockCount} 件，随时可以要求发货。`
-          : '现在还没有能发的商品——东西回到国内、群主把运费算好，这一页就会让你勾。'
+          : items.length
+            ? '现在还没有能发的商品——东西回到国内、群主把运费算好，这一页就会让你勾。'
+            : '群主还没把你买的东西录进仓库，录进来之后这一页自己会更新。'
       }</p>
     </div>
     ${pwNotice}
@@ -453,7 +496,7 @@ function bindWarehouse(data){
  const endpoint=`/api/w/${encodeURIComponent(token)}`;
  const send=async(path,method,body)=>{const r=await api(endpoint+path,{method,headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw Error(r.data.error||'保存失败');await boot();};
  const handle=fn=>async e=>{const el=e.currentTarget;el.disabled=true;try{await fn();}catch(err){toast(err.message,true);}finally{el.disabled=false;}};
- app.querySelectorAll('[data-copy]').forEach(el=>el.onclick=handle(async()=>{await navigator.clipboard.writeText(el.dataset.copy);toast('单号已复制');}));
+ app.querySelectorAll('[data-copy]').forEach(el=>el.onclick=handle(async()=>{if(!await copyText(el.dataset.copy))throw Error('这个浏览器不让网页复制，手动选中单号拷一下');toast('单号已复制');}));
  app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
  const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
