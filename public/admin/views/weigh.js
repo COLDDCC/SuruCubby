@@ -103,7 +103,8 @@ export async function render(view, [id]) {
           <button class="small plain" data-action="backToGroup" data-customer="${c.customerId}" data-nickname="${escapeHtml(c.nickname)}">改回拼邮</button>
         </div>
         <p class="small muted">这批货他自己带回国／另找转运，后面不再走我们这条链：不认领、不称重、不摊国际运费、不能申请发货、也不发国内快递。
-          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，他的这几件会重新回到「待认领」里。</p>
+          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，他的这几件会重新回到「待认领」里。
+          <a href="#/customers/${c.customerId}">他的详情页</a>那儿有「这几件已经当面给他了」，货交接完在那儿结掉就行。</p>
       </div>`,
       )
       .join("")}

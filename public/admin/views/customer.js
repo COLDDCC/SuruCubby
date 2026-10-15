@@ -19,6 +19,10 @@ export async function render(view, [id]) {
   const data = await api.get(`/api/admin/customers/${id}`);
   const s = data.summary;
   const stock = data.items.filter((i) => i.status === 'cn_stock');
+  // 和后端 POST /:id/received 的条件保持一致，不然按钮上写的件数跟点完的件数对不上
+  const receivedCount = data.items.filter(
+    (i) => !i.missing && !i.shipmentId && !['cancelled', 'refunded', 'delivered'].includes(i.status),
+  ).length;
 
   view.innerHTML = `
     <div class="card">
@@ -46,7 +50,11 @@ export async function render(view, [id]) {
           : '跟群里一起拼邮回来'
       } <button class="small plain" data-action="selfReturn">${
         data.customer.selfReturn ? '改回拼邮' : '标成不拼邮'
-      }</button></p>
+      }</button>${
+        data.customer.selfReturn && receivedCount
+          ? ` <button class="small" data-action="received">这几件已经当面给他了（结掉 ${receivedCount} 件）</button>`
+          : ''
+      }</p>
       <p class="small muted">真名（只有后台看得到，客户自己的页面不显示）：${
         data.realName ? escapeHtml(data.realName) : '没填'
       } <button class="small plain" data-action="realName">改</button></p>
@@ -85,7 +93,7 @@ export async function render(view, [id]) {
       <h3>可发货（${stock.length} 件）</h3>
       ${
         data.customer.selfReturn
-          ? `<p class="small muted">这位不拼邮，国内快递不用我们寄。他改回拼邮后这里才能操作。</p>`
+          ? `<p class="small muted">这位不拼邮，国内快递不用我们寄，所以这一栏不动。他改回拼邮后这里才能操作；<strong>货已经当面给他了</strong>就点上面那行的「这几件已经当面给他了」，这几件直接结成的「已签收」。</p>`
           : stock.length
           ? `<form id="shipForm">
           ${stock
@@ -271,6 +279,22 @@ export async function render(view, [id]) {
         toast('已标成不拼邮，后面这条链不再算他');
       } catch (err) {
         return toast(err.message, true);
+      }
+      reload();
+    },
+    received: async () => {
+      if (
+        !(await confirmBox(
+          `把「${data.customer.nickname}」这几件标成「已签收」？他不拼邮，所以不生成寄出记录、也不收国内运费，就是把这几件结掉。标错了想让物品回到「回国中」，在物品上把状态改回去就行。`,
+          { okText: `已给他了（${receivedCount} 件）` },
+        ))
+      )
+        return;
+      try {
+        const r = await api.post(`/api/admin/customers/${id}/received`);
+        toast(`已结掉 ${r.count} 件，都标成「已签收」了`);
+      } catch (err) {
+        toast(err.message, true);
       }
       reload();
     },

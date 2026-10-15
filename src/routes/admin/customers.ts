@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, optionalString, readJson, requireInt, requireString } from '../../lib/http.ts';
-import { nextId, nowIso } from '../../lib/db.ts';
+import { isSelfReturn, nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
 import { hashPassword, passwordProblem } from '../../lib/password.ts';
 import { buildCustomerView } from '../../lib/customerView.ts';
@@ -348,6 +348,35 @@ customerRoutes.patch('/:id', async (c) => {
       : []),
   ]);
   return c.json({ ok: true, selfReturn: selfReturn === null ? undefined : selfReturn === 1 });
+});
+
+/**
+ * 不拼邮的人：货当面交给他（或他自己从转运那儿收到了）就点这个，
+ * 这几件直接结成「已签收」——不走称重分摊、不生成寄出、也不记国内运费。
+ */
+customerRoutes.post('/:id/received', async (c) => {
+  const id = requireInt(c.req.param('id'), '客户 ID');
+  const db = c.env.DB;
+  if (!(await isSelfReturn(db, id))) {
+    throw badRequest('只有标了「不拼邮」的客户才用这一步；拼邮的照旧走称重分摊和寄出');
+  }
+  const rows = await db
+    .prepare(
+      `SELECT id, status FROM items
+        WHERE customer_id = ? AND missing = 0 AND shipment_id IS NULL
+          AND status NOT IN ('cancelled','refunded','delivered')`,
+    )
+    .bind(id)
+    .all<{ id: number; status: string }>();
+  if (!rows.results.length) throw badRequest('他这边没有要结掉的货（要么已经标过，要么缺件/砍单了）');
+  const at = nowIso();
+  await db.batch(
+    rows.results.flatMap((i) => [
+      db.prepare('UPDATE items SET status = ?, updated_at = ? WHERE id = ?').bind('delivered', at, i.id),
+      statusLogStmt(db, i.id, i.status, 'delivered', at),
+    ]),
+  );
+  return c.json({ ok: true, count: rows.results.length });
 });
 
 customerRoutes.post('/:id/reset-token', async (c) => {

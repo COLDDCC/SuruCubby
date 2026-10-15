@@ -854,6 +854,22 @@ test('不拼邮的人：认领、称重、分摊、寄出这条链整段都不�
     3,
     '已经算过费的甲丙三件不受影响',
   );
+
+  // 货当面给他了就能结掉：不生成寄出、不记国内运费
+  const received = await call('POST', `/api/admin/customers/${yi.id}/received`, {});
+  assert.equal(received.count, 1);
+  const yiDone = await call('GET', `/api/admin/customers/${yi.id}`);
+  assert.equal(yiDone.items[0].status, 'delivered');
+  assert.equal(yiDone.shipments.length, 0, '当面给的不该有寄出记录');
+  assert.equal(yiDone.summary.domesticUnpaidFen, 0, '当面给的不该冒出国内运费');
+  const twice = await call('POST', `/api/admin/customers/${yi.id}/received`, {}, { raw: true });
+  assert.equal(twice.status, 400);
+  assert.match(twice.data.error, /没有要结掉的货/);
+
+  // 拼邮的人不许用这一步绕过称重和寄出
+  const notOff = await call('POST', `/api/admin/customers/${jia.id}/received`, {}, { raw: true });
+  assert.equal(notOff.status, 400);
+  assert.match(notOff.data.error, /不拼邮/);
 });
 
 test('货款收款与撤销', async () => {

@@ -45,9 +45,11 @@ const ITEMS = [
   ['灌篮高手 完全版 全31卷', 2, 8000, 5200, '小K', null],
   ['Q posket 鬼灭之刃 祢豆子', 3, 1500, 900, '芋圆', 430],
   ['S.H.Figuarts 假面骑士 空我', 0, 4200, 2900, '芋圆', 550],
+  ['一番赏 链锯人 玛奇玛', 3, 2500, 1600, '喵酱', 400],
+  ['POP UP PARADE 雷姆', 0, 3200, 2100, '喵酱', 620],
 ];
 
-const QQ = { 阿狸: '123456789', 团子: '234567891', 小K: '345678912', 芋圆: '456789123' };
+const QQ = { 阿狸: '123456789', 团子: '234567891', 小K: '345678912', 芋圆: '456789123', 喵酱: '567891234' };
 
 const sheet = {
   headers: ['名称', '图片', '商品链接', '平时价格', '实际价格', 'cn'],
@@ -81,6 +83,10 @@ for (const status of ['jp_warehouse', 'intl_transit', 'cn_arrived']) {
 const customers = (await call('GET', '/api/admin/customers')).customers;
 const byName = Object.fromEntries(customers.map((c) => [c.nickname, c]));
 
+// 喵酱这次自己带回国：标「不拼邮」，货款照记，但称重、摊运费、发快递这一条链都不算她。
+// 标了之后这一箱的「整箱弄完了」不会被她那两件未认领的卡住，下面的实收总额照样能填。
+await call('PATCH', `/api/admin/customers/${byName['喵酱'].id}`, { selfReturn: true });
+
 // 小K：有一件被骏河屋砍单，货款已经付过了 → 进待退款
 // 必须在称重分摊之前做：砍单要趁物品还没计费，已计费的后端会挡住
 const k = await call('GET', `/api/admin/customers/${byName['小K'].id}`);
@@ -93,6 +99,8 @@ await call('PATCH', `/api/admin/items/${cancelled.id}`, { status: 'cancelled', e
 const weightByTitle = new Map(ITEMS.map(([title, , , , , weightG]) => [title, weightG]));
 const weigh = await call('GET', `/api/admin/packages/${packageId}/weigh`);
 for (const customer of weigh.customers) {
+  // 不拼邮的那位根本不进称重台的操作范围，点她的封面会被后端拦住
+  if (customer.selfReturn) continue;
   for (const item of customer.items) {
     await call('POST', `/api/admin/packages/${packageId}/weigh/claim`, { itemId: item.id, claimed: true });
     if (item.title.startsWith('灌篮高手')) {
@@ -131,5 +139,9 @@ await call('PATCH', `/api/admin/shipments/${shipment.id}`, { trackingNo: 'SF1234
 
 console.log('\n演示客户登录（统一入口 /login，或点下面的专属链接）：');
 for (const c of (await call('GET', '/api/admin/customers')).customers) {
-  console.log(`  ${c.nickname.padEnd(4)} QQ ${c.qq}  密码 123456  ${BASE}/w/${c.token}`);
+  console.log(
+    `  ${c.nickname.padEnd(4)} QQ ${c.qq}  密码 123456  ${BASE}/w/${c.token}${
+      c.selfReturn ? '  ← 这一位不拼邮，后面的运费和快递都不算她' : ''
+    }`,
+  );
 }
