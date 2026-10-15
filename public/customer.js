@@ -37,6 +37,7 @@ async function api(path, options) {
 }
 
 function renderVerify(message, kind = 'err') {
+  document.body.classList.remove('has-shipbar');
   app.innerHTML = `
     <div class="card">
       <h1>我的仓库</h1>
@@ -86,6 +87,7 @@ function renderVerify(message, kind = 'err') {
 
 /** 还在用统一的初始密码时先进这一屏：不改密码就下不了单。 */
 function renderMustChange(data) {
+  document.body.classList.remove('has-shipbar');
   app.innerHTML = `
     <div class="card">
       <h1>先改一下密码</h1>
@@ -256,8 +258,6 @@ function shipPanel(data) {
       <button class="small plain" data-delete-address="${a.id}">删除</button>
     </label>`,
   );
-  const picked = `<p id="shipping-total" class="small"></p>`;
-  const cta = open.length && rows.length ? `${picked}<button id="request-shipping">提交发货申请</button>` : '';
   let hint = '';
   if (!open.length) {
     hint = shippable.length
@@ -275,7 +275,25 @@ function shipPanel(data) {
       ${rows.join('')}
       ${addressForm(addresses.length)}
       ${hint}
-      ${cta}
+    </div>`;
+}
+
+/**
+ * 底部常驻的结算条：手机上要翻着勾几十件，合计和提交按钮得一直看得见，
+ * 藏在面板里就得来回滚（抄的 ShipLocker / fish-groupbuy-order 那套底部条做法）。
+ * 勾不了件、或者还没地址时不出现——不摆点不动的按钮。
+ */
+function shipBar(data) {
+  if (data.mustChange) return '';
+  const items = data.items || [];
+  const open = items.filter((i) => shippableOf(i) && !i.requestId);
+  if (!open.length || !(data.addresses || []).length) return '';
+  return `
+    <div class="shipbar">
+      <div class="shipbar-inner">
+        <div class="total" id="shipping-total">勾上要寄的商品</div>
+        <button id="request-shipping" disabled>提交发货申请</button>
+      </div>
     </div>`;
 }
 
@@ -332,9 +350,10 @@ function render(data) {
           <div class="item" style="display:block">
             <div class="row" style="justify-content:space-between">
               <strong>${escapeHtml(g.packageName)}</strong>
-              <span class="${fee.unpaid ? 'unpaid' : 'paid'} money">${shown}</span>
             </div>
-            <div class="small muted">你这一摞 ${Number(g.weightG || 0).toLocaleString()} g，共 ${g.items.length} 件</div>
+            <div class="kv"><span>你这一摞重量</span><b>${Number(g.weightG || 0).toLocaleString()} g</b></div>
+            <div class="kv"><span>件数</span><b>${g.items.length} 件</b></div>
+            <div class="kv"><span>这一摞国际运费</span><b class="${fee.unpaid ? 'unpaid' : 'paid'} money">${shown}</b></div>
             <details class="small"><summary>看看是哪些东西</summary>
               <ul>${g.items.map((i) => `<li>${escapeHtml(i.title)}</li>`).join('')}</ul>
             </details>
@@ -436,6 +455,8 @@ function render(data) {
        </div>`
     : '';
 
+  const barHtml = shipBar(data);
+
   app.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content:space-between">
@@ -467,8 +488,10 @@ function render(data) {
     ${shipHtml}
     ${closedHtml}
     ${timelineHtml}
-    <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>`;
+    <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>
+    ${barHtml}`;
   bindWarehouse(data);
+  document.body.classList.toggle('has-shipbar', barHtml !== '');
 
   app.querySelectorAll('[data-ship-item]').forEach((el) => {
     if (!el.disabled && keep.selected.has(Number(el.dataset.shipItem))) el.checked = true;
@@ -520,9 +543,18 @@ function bindWarehouse(data){
  });
  const selected=()=>[...app.querySelectorAll('[data-ship-item]:checked')].map(el=>Number(el.dataset.shipItem));
  const totalEl=app.querySelector('#shipping-total');
- const refresh=()=>{if(!totalEl)return;const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);totalEl.textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「可发货」商品后提交。';};
- app.querySelectorAll('[data-ship-item]').forEach(el=>el.onchange=refresh);refresh();
  const submit=app.querySelector('#request-shipping');
+ const refresh=()=>{
+  if(!totalEl||!submit)return;
+  const ids=selected();
+  const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);
+  submit.disabled=!ids.length;
+  totalEl.innerHTML=ids.length
+    // 只拼 money() 出来的数字和件数，不拼任何客户能写的文本
+    ? `已选 ${ids.length} 件 · <b>${money(intl+data.domesticFeeFen)}</b><small>国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)}，扫码转给群主</small>`
+    : '勾上要寄的商品';
+ };
+ app.querySelectorAll('[data-ship-item]').forEach(el=>el.onchange=refresh);refresh();
  if(submit)submit.onclick=handle(()=>{
   const ids=selected();
   if(!ids.length)throw Error('先勾选要寄的商品');

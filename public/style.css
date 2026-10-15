@@ -609,6 +609,61 @@ tr.hit > td {
   }
 }
 
+/* 底部常驻结算条：手机上要一直滚着翻几十件商品，勾选时合计不能藏在面板里看不见 */
+.shipbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  background: var(--card);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.1);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+}
+.shipbar-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.shipbar .total {
+  min-width: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.shipbar .total b {
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+}
+.shipbar .total small {
+  display: block;
+  font-size: 12px;
+}
+body.has-shipbar {
+  padding-bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+/* 左标题右数字：钱是怎么出来的，一行一项能对着算 */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  padding: 1px 0;
+}
+.kv span {
+  color: var(--muted);
+}
+.kv b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+
 .progress-bar {
   position: sticky;
   top: 0;
