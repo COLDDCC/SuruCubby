@@ -1,19 +1,29 @@
-import { beijingTime, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, codeTag, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
 const app = document.getElementById('app');
 
+/** 重新渲染后要留下的东西：勾过的商品和滚到的位置 */
+const keep = { selected: new Set(), scrollY: 0 };
+
 const GROUPS = [
-  { title: '在日本', statuses: ['ordered', 'jp_warehouse'], note: '' },
-  { title: '运输中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
   {
     title: '可发货',
     statuses: ['cn_stock'],
     note: '勾选要寄的商品，选择地址后提交申请。扫码转账后由群主确认。',
   },
+  { title: '在日本', statuses: ['ordered', 'jp_warehouse'], note: '' },
+  { title: '运输中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
   { title: '已寄出 / 已签收', statuses: ['shipped', 'delivered'], note: '' },
 ];
+
+const REQUEST_LABEL = {
+  pending: '待群主确认收款',
+  paid: '已收款，等群主寄出',
+  shipped: '已寄出',
+  cancelled: '已取消',
+};
 
 async function api(path, options) {
   const res = await fetch(path, { credentials: 'same-origin', ...options });
@@ -32,13 +42,14 @@ function renderVerify(message, kind = 'err') {
       <h1>我的仓库</h1>
       <p class="muted">输入你的 QQ 号和密码。第一次进来密码是群主发的初始密码，进去之后会让你换成自己的。</p>
       <label for="qq">QQ 号</label>
-      <input id="qq" inputmode="numeric" autocomplete="off" placeholder="例如 123456789">
+      <input id="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789">
       <label for="pw">密码</label>
       <div class="row">
         <input id="pw" type="password" autocomplete="current-password" placeholder="初始密码见群主发给你的那条">
         <button id="go">进入</button>
       </div>
       <p id="err" class="${kind === 'ok' ? 'paid' : 'unpaid'} small">${message ? escapeHtml(message) : ''}</p>
+      <p class="small muted">密码忘了或者被别人改过？在群里问一声群主，他能给你重设一个初始密码。</p>
     </div>`;
   const input = document.getElementById('qq');
   const pw = document.getElementById('pw');
@@ -53,7 +64,8 @@ function renderVerify(message, kind = 'err') {
     });
     button.disabled = false;
     if (!ok) {
-      err.textContent = data.error || '验证失败';
+      // 服务端会告诉还剩几次机会，别让人试到被锁 15 分钟
+      err.textContent = data.left ? `${data.error}（还能再试 ${data.left} 次）` : data.error || '验证失败';
       return;
     }
     token = data.token;
@@ -66,6 +78,9 @@ function renderVerify(message, kind = 'err') {
   pw.onkeydown = (e) => {
     if (e.key === 'Enter') submit();
   };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') pw.focus();
+  };
   input.focus();
 }
 
@@ -76,10 +91,10 @@ function renderMustChange(data) {
       <h1>先改一下密码</h1>
       <p class="muted">群主发的初始密码大家都一样，谁都可能登进你的页面。设一个只有你自己知道的，之后下单、填地址才认。</p>
       <label for="np">新密码（6 到 32 位，不要有空格）</label>
-      <input id="np" type="password" autocomplete="new-password">
+      <input id="np" type="password" autocomplete="new-password" maxlength="32">
       <label for="np2">再输一次</label>
       <div class="row">
-        <input id="np2" type="password" autocomplete="new-password">
+        <input id="np2" type="password" autocomplete="new-password" maxlength="32">
         <button id="save">保存</button>
         <button id="peek" class="plain">先随便看看</button>
       </div>
@@ -116,69 +131,170 @@ function itemCard(item) {
   const paid = item.goodsPaid
     ? '<span class="badge ok">货款已付</span>'
     : '<span class="badge danger">货款未付</span>';
+  const missing = item.missing ? '<span class="badge warn">缺件</span>' : '';
   const title = item.productUrl
     ? `<a href="${escapeHtml(item.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a>`
     : escapeHtml(item.title);
   const note = item.exceptionNote
     ? `<div class="small" style="color:var(--warn)">${escapeHtml(item.exceptionNote)}</div>`
     : '';
+  const selectable = item.status === 'cn_stock' && !item.missing;
+  // 已经报过申请的、群主标了缺件的都勾不了，得说清楚为什么勾不了
+  const picker = selectable
+    ? `<label class="pick"><input type="checkbox" data-ship-item="${item.id}" ${item.requestId ? 'disabled' : ''}>${
+        item.requestId ? '已申请' : '发货'
+      }</label>`
+    : '';
   return `
     <div class="item">
-      ${item.status==='cn_stock' ? `<label><input type="checkbox" data-ship-item="${item.id}" ${item.requestId ? 'disabled' : ''}>${item.requestId ? '已申请' : '发货'}</label>` : ''}
+      ${picker}
       ${thumb(item)}
       <div class="body">
         <div class="title">${title}</div>
+        <div class="small row" style="gap:6px;margin-top:2px">
+          ${codeTag(item)}
+          <span class="muted">${escapeHtml(item.packageName || item.batchName || '')}</span>
+        </div>
         <div class="small muted">
           实际价格 ${yen(item.actualPriceJpy)} ·
           应付 <span class="money">${yen(item.goodsFeeJpy)}</span>
         </div>
         <div class="small row" style="gap:6px;margin-top:4px">
-          <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}
+          <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}${missing}
         </div>
         ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
         ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
         ${item.intlFeeFen === null ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
+        ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
         ${note}
       </div>
     </div>`;
 }
 
+/**
+ * 一摞的运费：件上的数加起来就是这一摞（分摊确认时是同一份数）。
+ * 老账里有的摞只记了摞的钱、没拆到件上，那种就照摞说。
+ */
+function stackFee(group, items) {
+  const live = items.filter(
+    (i) => i.weighGroupId === group.id && i.status !== 'cancelled' && i.status !== 'refunded',
+  );
+  const withFee = live.filter((i) => i.intlFeeFen !== null);
+  if (!withFee.length) {
+    const total = Number(group.intlFeeFen ?? 0);
+    return { total, unpaid: group.feePaid ? 0 : total };
+  }
+  return {
+    total: withFee.reduce((s, i) => s + i.intlFeeFen, 0),
+    unpaid: withFee.filter((i) => !i.intlPaid).reduce((s, i) => s + i.intlFeeFen, 0),
+  };
+}
+
+function addressForm(count) {
+  if (count >= 3) return '<p class="small muted">地址最多 3 个。要换就先删掉一个再填新的。</p>';
+  return `
+    <label for="recipient">收件人</label>
+    <input id="recipient" maxlength="100" placeholder="收件人姓名">
+    <label for="phone">电话</label>
+    <input id="phone" maxlength="40" inputmode="tel" placeholder="手机号">
+    <label for="detail">详细地址</label>
+    <input id="detail" maxlength="500" placeholder="省市区 + 小区门牌，写全一点">
+    <p><button id="add-address">保存地址</button></p>`;
+}
+
+/** 勾了东西才给提交；一件都勾不了的时候别杵着一个死按钮。 */
+function shipPanel(data) {
+  const shippable = (data.items || []).filter((i) => i.status === 'cn_stock' && !i.missing);
+  const open = shippable.filter((i) => !i.requestId);
+  const rows = (data.addresses || []).map(
+    (a) => `<label class="row">
+      <input name="ship-address" type="radio" value="${a.id}" ${(data.addresses || []).length === 1 ? 'checked' : ''}>
+      <span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span>
+      <button class="small plain" data-delete-address="${a.id}">删除</button>
+    </label>`,
+  );
+  const picked = `<p id="shipping-total" class="small"></p>`;
+  const cta = open.length && rows.length ? `${picked}<button id="request-shipping">提交发货申请</button>` : '';
+  let hint = '';
+  if (!open.length) {
+    hint = shippable.length
+      ? '<p class="small muted">可发货的几件都已经报过申请了，等群主确认收款。</p>'
+      : '<p class="small muted">现在还没有能发的商品。东西到国内、群主算完运费，这里就会让你勾。</p>';
+  } else if (!rows.length) {
+    hint = '<p class="small muted">还没有收货地址，填一个保存后勾选的商品才提交得了。</p>';
+  }
+  return `
+    <div class="card">
+      <h2>申请发货</h2>
+      <p class="small muted" style="margin:0 0 4px">收货地址（最多 3 个）</p>
+      ${rows.join('')}
+      ${addressForm((data.addresses || []).length)}
+      ${hint}
+      ${cta}
+    </div>`;
+}
+
 function render(data) {
+  // 增删地址会整页重画，勾过的商品和滚到的位置得留住
+  keep.scrollY = window.scrollY;
+  keep.selected = new Set(
+    [...app.querySelectorAll('[data-ship-item]:checked')].map((el) => Number(el.dataset.shipItem)),
+  );
+
   const s = data.summary;
   const items = data.items || [];
   const shownStatuses = new Set(GROUPS.flatMap((g) => g.statuses));
   const closed = items.filter((i) => !shownStatuses.has(i.status));
 
-  const groupsHtml = GROUPS.map((group) => {
-    const list = items.filter((i) => group.statuses.includes(i.status));
+  // 「可发货」那一组紧贴着发货面板，勾完就能提交；别让它被其它组隔开
+  const stockGroup = GROUPS.find((g) => g.statuses.includes('cn_stock'));
+  const stockHtml = (() => {
+    const list = items.filter((i) => stockGroup.statuses.includes(i.status));
     if (list.length === 0) return '';
     return `
+      <div class="card">
+        <h2>${stockGroup.title}<span class="muted small"> · ${list.length} 件</span></h2>
+        ${stockGroup.note ? `<p class="small muted">${stockGroup.note}</p>` : ''}
+        ${list.map(itemCard).join('')}
+      </div>`;
+  })();
+  const groupsHtml = GROUPS.filter((g) => g !== stockGroup)
+    .map((group) => {
+      const list = items.filter((i) => group.statuses.includes(i.status));
+      if (list.length === 0) return '';
+      return `
       <div class="card">
         <h2>${group.title}<span class="muted small"> · ${list.length} 件</span></h2>
         ${group.note ? `<p class="small muted">${group.note}</p>` : ''}
         ${list.map(itemCard).join('')}
       </div>`;
-  }).join('');
+    })
+    .join('');
 
   const intlHtml = (data.weighGroups || []).length
     ? `<div class="card">
         <h2>国际运费</h2>
         ${data.weighGroups
-          .map(
-            (g) => `
+          .map((g) => {
+            const fee = stackFee(g, items);
+            // 整摞都没付时别再写两遍一样的数
+            const shown = fee.unpaid
+              ? fee.unpaid === fee.total
+                ? `${money(fee.total)} 待付`
+                : `${money(fee.total)} 待付 ${money(fee.unpaid)}`
+              : `${money(fee.total)} 已付`;
+            return `
           <div class="item" style="display:block">
             <div class="row" style="justify-content:space-between">
               <strong>${escapeHtml(g.packageName)}</strong>
-              <span class="${g.feePaid ? 'paid' : 'unpaid'} money">
-                ${money(g.intlFeeFen)} ${g.feePaid ? '已付' : `待付 ${money(items.filter(i=>i.weighGroupId===g.id && !i.intlPaid && i.status!=='cancelled' && i.status!=='refunded').some(i=>i.intlFeeFen!==null) ? items.filter(i=>i.weighGroupId===g.id && !i.intlPaid && i.status!=='cancelled' && i.status!=='refunded').reduce((s,i)=>s+(i.intlFeeFen??0),0) : g.intlFeeFen)}`}
-              </span>
+              <span class="${fee.unpaid ? 'unpaid' : 'paid'} money">${shown}</span>
             </div>
             <div class="small muted">你这一摞 ${Number(g.weightG || 0).toLocaleString()} g，共 ${g.items.length} 件</div>
             <details class="small"><summary>看看是哪些东西</summary>
               <ul>${g.items.map((i) => `<li>${escapeHtml(i.title)}</li>`).join('')}</ul>
             </details>
-          </div>`,
-          )
+          </div>`;
+          })
           .join('')}
        </div>`
     : '';
@@ -191,7 +307,11 @@ function render(data) {
             (s2) => `
           <div class="item" style="display:block">
             <div class="row" style="justify-content:space-between">
-              <strong>${s2.trackingNo ? escapeHtml(s2.trackingNo) : '单号待填'}</strong>
+              <strong>${
+                s2.trackingNo
+                  ? `${escapeHtml(s2.trackingNo)} <button class="small plain" data-copy="${escapeHtml(s2.trackingNo)}">复制</button>`
+                  : '单号待填'
+              }</strong>
               <span class="${s2.feePaid ? 'paid' : 'unpaid'} money">${money(s2.feeFen)} ${s2.feePaid ? '已付' : '未付'}</span>
             </div>
             <div class="small muted">${s2.items.length} 件 · ${beijingTime(s2.shippedAt || s2.createdAt)}</div>
@@ -201,6 +321,36 @@ function render(data) {
           </div>`,
           )
           .join('')}
+       </div>`
+    : '';
+
+  const requestsHtml = (data.requests || []).length
+    ? `<div class="card">
+        <h2>发货申请</h2>
+        ${data.requests
+          .map((r) => {
+            let to = '';
+            try {
+              const a = JSON.parse(r.addressSnapshot);
+              if (a && a.recipient) to = `${a.recipient} ${a.phone || ''} ${a.detail || ''}`;
+            } catch {
+              /* 快照不是 JSON 就别让整页白屏 */
+            }
+            const list = items.filter((i) => i.requestId === r.id);
+            return `<div class="item" style="display:block">
+              <div class="row" style="justify-content:space-between">
+                <strong>#${r.id} · ${r.itemCount} 件 · ${escapeHtml(REQUEST_LABEL[r.status] || r.status)}</strong>
+                <span class="money">${money(r.domesticFeeFen)} 国内运费</span>
+              </div>
+              <div class="small muted">${beijingTime(r.createdAt)}${to ? ` · 寄到 ${escapeHtml(to)}` : ''}</div>
+              ${list.length ? `<details class="small"><summary>看看申请了哪些</summary><ul>${list
+                .map((i) => `<li>${escapeHtml(i.title)}${i.intlPaid ? '' : ` · 国际运费 ${money(i.intlFeeFen ?? 0)} 待付`}</li>`)
+                .join('')}</ul></details>` : ''}
+              ${r.status === 'pending' ? `<p><button class="small plain" data-cancel-request="${r.id}">取消申请</button></p>` : ''}
+            </div>`;
+          })
+          .join('')}
+        <p class="small muted">国际运费在上面「国际运费」那一摞里一起算，这里只列国内运费。</p>
        </div>`
     : '';
 
@@ -229,26 +379,38 @@ function render(data) {
        </div>`
     : '';
 
+  const pwNotice = data.mustChange
+    ? `<div class="card" style="border-color:var(--warn);background:var(--warn-bg)">
+        <h2>密码还是大家共用的那个初始密码</h2>
+        <p class="small">谁都知道这个密码，别人填你的 QQ 就能登进来。改成只有你知道的才能下单、填地址（改完要重新登一次）。</p>
+        <button id="change-pw">改密码</button>
+       </div>`
+    : '';
+
   app.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h1 style="margin:0">${escapeHtml(data.customer.nickname)} 的仓库</h1>
-        <span class="muted small">${items.length} 件</span>
+        <span class="row small muted">${items.length} 件 <button id="logout" class="small plain">退出登录</button></span>
       </div>
       <div class="grid" style="margin-top:12px">
         <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
         <div class="stat"><div class="label">国际运费待付</div><div class="value money">${money(s.intlUnpaidFen)}</div></div>
         <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
-        <div class="stat big"><div class="label">运费待付</div><div class="value money">${money(s.freightUnpaidFen)}</div></div>
+        <div class="stat big"><div class="label">运费待付</div><div class="value money" ${
+          s.freightUnpaidFen ? '' : 'style="color:var(--ok)"'
+        }>${money(s.freightUnpaidFen)}</div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。可发货 ${s.stockCount} 件，随时可以要求发货。</p>
+      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。${
+        s.stockCount
+          ? `可发货 ${s.stockCount} 件，随时可以要求发货。`
+          : '现在还没有能发的商品——东西回到国内、群主把运费算好，这一页就会让你勾。'
+      }</p>
     </div>
-    <div class="card"><h2>收货地址（最多3个）</h2>
-      ${(data.addresses||[]).map(a=>`<label class="row"><input name="ship-address" type="radio" value="${a.id}"><span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span><button class="small plain" data-delete-address="${a.id}">删除</button></label>`).join('')}
-      ${(data.addresses||[]).length<3 ? '<label>收件人</label><input id="recipient"><label>电话</label><input id="phone"><label>详细地址</label><input id="detail"><p><button id="add-address">保存地址</button></p>' : ''}
-      <p id="shipping-total" class="small"></p><button id="request-shipping">提交发货申请</button>
-    </div>
-    ${(data.requests||[]).length ? `<div class="card"><h2>发货申请</h2>${data.requests.map(r=>`<p>申请 #${r.id} · ${escapeHtml({pending:'待确认收款',paid:'已收款，待寄出',shipped:'已寄出',cancelled:'已取消'}[r.status])}${r.status==='pending'?` <button class="small plain" data-cancel-request="${r.id}">取消</button>`:''}</p>`).join('')}</div>`:''}
+    ${pwNotice}
+    ${stockHtml}
+    ${shipPanel(data)}
+    ${requestsHtml}
     ${groupsHtml}
     ${intlHtml}
     ${shipHtml}
@@ -256,6 +418,14 @@ function render(data) {
     ${timelineHtml}
     <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>`;
   bindWarehouse(data);
+
+  app.querySelectorAll('[data-ship-item]').forEach((el) => {
+    if (!el.disabled && keep.selected.has(Number(el.dataset.shipItem))) el.checked = true;
+  });
+  keep.selected = new Set(
+    [...app.querySelectorAll('[data-ship-item]:checked')].map((el) => Number(el.dataset.shipItem)),
+  );
+  if (keep.scrollY) window.scrollTo(0, keep.scrollY);
 }
 
 async function boot() {
@@ -286,9 +456,27 @@ function bindWarehouse(data){
  app.querySelectorAll('[data-copy]').forEach(el=>el.onclick=handle(async()=>{await navigator.clipboard.writeText(el.dataset.copy);toast('单号已复制');}));
  app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
- const add=app.querySelector('#add-address');if(add)add.onclick=handle(()=>send('/addresses','POST',{recipient:app.querySelector('#recipient').value,phone:app.querySelector('#phone').value,detail:app.querySelector('#detail').value}));
+ const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
+ const logout=app.querySelector('#logout');
+ // 退出不走 send()：那玩意会立刻重新拉一次仓库，白跑一趟还先把页面画出来
+ if(logout)logout.onclick=handle(async()=>{await api(`${endpoint}/logout`,{method:'POST'});token='';history.replaceState(null,'','/login');renderVerify('已经退出了，再进来要用 QQ 号和密码','ok');});
+ const add=app.querySelector('#add-address');
+ if(add)add.onclick=handle(()=>{
+  const v=(id)=>(app.querySelector(id)?.value ?? '').trim();
+  const recipient=v('#recipient'),phone=v('#phone'),detail=v('#detail');
+  if(!recipient||!phone||!detail)throw Error('收件人、电话、地址都要填全');
+  return send('/addresses','POST',{recipient,phone,detail});
+ });
  const selected=()=>[...app.querySelectorAll('[data-ship-item]:checked')].map(el=>Number(el.dataset.shipItem));
- const refresh=()=>{const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);app.querySelector('#shipping-total').textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「可发货」商品后提交。';};
+ const totalEl=app.querySelector('#shipping-total');
+ const refresh=()=>{if(!totalEl)return;const ids=selected();const intl=data.items.filter(i=>ids.includes(i.id)&&!i.intlPaid).reduce((s,i)=>s+(i.intlFeeFen??0),0);totalEl.textContent=ids.length?`已选${ids.length}件，国际运费 ${money(intl)} + 国内运费 ${money(data.domesticFeeFen)} = ${money(intl+data.domesticFeeFen)}。扫码转账给群主。`: '勾选绿色「可发货」商品后提交。';};
  app.querySelectorAll('[data-ship-item]').forEach(el=>el.onchange=refresh);refresh();
- app.querySelector('#request-shipping').onclick=handle(()=>{const address=app.querySelector('[name="ship-address"]:checked');if(!address)throw Error('请选择收货地址');return send('/requests','POST',{itemIds:selected(),addressId:Number(address.value)});});
+ const submit=app.querySelector('#request-shipping');
+ if(submit)submit.onclick=handle(()=>{
+  const ids=selected();
+  if(!ids.length)throw Error('先勾选要寄的商品');
+  const address=app.querySelector('[name="ship-address"]:checked');
+  if(!address)throw Error('请选择收货地址');
+  return send('/requests','POST',{itemIds:ids,addressId:Number(address.value)});
+ });
 }

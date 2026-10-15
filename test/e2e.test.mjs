@@ -183,6 +183,29 @@ test('客户登录：QQ + 初始密码进来，只看得到自己的东西，金
   ctx.cookie = res.headers.getSetCookie()[0].split(';')[0];
 });
 
+test('退出登录：还穿着初始密码也退得出去，Cookie 会被清掉', async () => {
+  // 第二个客户：createdCustomers 的顺序不等于 QQS 的顺序，token 一律从登录返回里取
+  const sess = await login(QQS[1], '123456');
+  assert.equal(sess.res.status, 200);
+  assert.equal(sess.data.mustChange, true, '这一位还在用初始密码');
+  const token = sess.data.token;
+  const cookie = sess.res.headers.getSetCookie()[0].split(';')[0];
+
+  // 下单、填地址会被初始密码挡住，退出不能跟着被挡——「先随便看看」的人得走得掉
+  const out = await fetch(`${BASE}/api/w/${token}/logout`, { method: 'POST', headers: { cookie } });
+  assert.equal(out.status, 200, '退出登录不该被初始密码拦住');
+  const cleared = out.headers.getSetCookie().find((x) => x.startsWith(`sc_w_${token}=`));
+  assert.ok(cleared, '退出要下发清除该客户 Cookie 的头');
+  assert.match(cleared, /^sc_w_[^=]+=(;|Max-Age=0)/, 'Cookie 值要清空');
+
+  // 浏览器没了这条 Cookie，光有专属链接也看不到仓库
+  assert.equal((await fetch(`${BASE}/api/w/${token}`)).status, 401);
+
+  // 会话是无状态签名的，退出清的是浏览器那一份；要把别人彻底踢掉得改密码（旧 Cookie 当场验不过）
+  const reuse = await fetch(`${BASE}/api/w/${token}`, { headers: { cookie } });
+  assert.equal(reuse.status, 200, 'Cookie 字符串本身没失效，失效的是浏览器里那一份');
+});
+
 test('还是初始密码时下不了单，改成自己的之后旧密码立刻不好使', async () => {
   const token = ctx.customers[0].token;
   const blocked = await fetch(`${BASE}/api/w/${token}/addresses`, {
