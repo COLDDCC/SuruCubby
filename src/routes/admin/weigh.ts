@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
-import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg } from '../../lib/db.ts';
+import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg, isSelfReturn } from '../../lib/db.ts';
 import { allocate, feeFromWeight, splitGroupFee } from '../../lib/allocate.ts';
 import { toFen } from '../../lib/money.ts';
 
@@ -28,8 +28,11 @@ async function loadPackage(env: Env, id: number): Promise<PackageRow> {
   return pkg;
 }
 
-/** 取得（必要时创建）某包裹里某客户的称重组。 */
+/** 取得（必要时创建）某包裹里某客户的称重组。标了「不拼邮」的人压根不该有这一摞。 */
 async function ensureGroup(env: Env, packageId: number, customerId: number): Promise<number> {
+  if (await isSelfReturn(env.DB, customerId)) {
+    throw badRequest('这位客户标了「不拼邮」，不用认领称重；要恢复拼邮在客户详情页改');
+  }
   const existing = await env.DB.prepare(
     'SELECT id FROM weigh_groups WHERE package_id = ? AND customer_id = ?',
   )
@@ -65,7 +68,8 @@ weighRoutes.get('/:id/weigh', async (c) => {
   const pkg = await loadPackage(c.env, id);
 
   const items = await c.env.DB.prepare(
-    `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, i.title, i.image_url AS imageUrl,
+    `SELECT i.id, i.customer_id AS customerId, c.nickname, c.qq, c.self_return AS selfReturn,
+            i.title, i.image_url AS imageUrl,
             i.product_url AS productUrl, i.status, i.missing, i.exception_note AS exceptionNote,
             i.weigh_group_id AS weighGroupId, i.goods_fee_jpy AS goodsFeeJpy, i.weight_g AS weightG
        FROM items i
@@ -79,6 +83,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
       customerId: number;
       nickname: string;
       qq: string;
+      selfReturn: number;
       title: string;
       imageUrl: string | null;
       productUrl: string | null;
@@ -110,6 +115,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
       customerId: number;
       nickname: string;
       qq: string;
+      selfReturn: number;
       items: typeof items.results;
       weightG: number | null;
       intlFeeFen: number | null;
@@ -127,6 +133,7 @@ weighRoutes.get('/:id/weigh', async (c) => {
         customerId: item.customerId,
         nickname: item.nickname,
         qq: item.qq,
+        selfReturn: item.selfReturn,
         items: [],
         weightG: group?.weightG ?? null,
         intlFeeFen: group?.intlFeeFen ?? null,
@@ -146,9 +153,13 @@ weighRoutes.get('/:id/weigh', async (c) => {
   const customers = [...byCustomer.values()].sort((a, b) =>
     a.nickname.localeCompare(b.nickname, 'zh-Hans-CN'),
   );
-  const expected = items.results.length;
-  const found = items.results.filter((i) => i.weighGroupId && !i.missing).length;
-  const weighed = customers.filter((c2) => c2.weightG !== null && c2.weightG > 0).length;
+  // 「不拼邮」的那些人不在这箱的账里：进度、还差几件都不算他们，不然永远凑不满整箱
+  const joined = items.results.filter((i) => !i.selfReturn);
+  const expected = joined.length;
+  const found = joined.filter((i) => i.weighGroupId && !i.missing).length;
+  const weighed = customers.filter(
+    (c2) => !c2.selfReturn && c2.weightG !== null && c2.weightG > 0,
+  ).length;
 
   return c.json({
     package: pkg,
@@ -157,10 +168,12 @@ weighRoutes.get('/:id/weigh', async (c) => {
     progress: {
       expectedItems: expected,
       foundItems: found,
-      unclaimedItems: items.results.filter((i) => !i.weighGroupId && !i.missing).length,
-      missingItems: items.results.filter((i) => i.missing).length,
+      unclaimedItems: joined.filter((i) => !i.weighGroupId && !i.missing).length,
+      missingItems: joined.filter((i) => i.missing).length,
       weighedCustomers: weighed,
-      totalCustomers: customers.length,
+      totalCustomers: customers.filter((c2) => !c2.selfReturn).length,
+      selfReturnItems: items.results.length - joined.length,
+      selfReturnCustomers: customers.filter((c2) => c2.selfReturn).length,
     },
   });
 });
@@ -241,6 +254,7 @@ interface GroupRow {
   customerId: number;
   nickname: string;
   qq: string;
+  selfReturn: number;
   groupWeightG: number | null;
   weightG: number | null;
   intlFeeFen: number | null;
@@ -266,7 +280,8 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   if (totalFeeFen !== null && totalFeeFen < 0) throw badRequest('国际运费不能是负数');
 
   const groups = await env.DB.prepare(
-    `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, g.weight_g AS groupWeightG,
+    `SELECT g.id, g.customer_id AS customerId, c.nickname, c.qq, c.self_return AS selfReturn,
+            g.weight_g AS groupWeightG,
             g.intl_fee_fen AS intlFeeFen,
             (SELECT COUNT(*) FROM items i WHERE i.weigh_group_id = g.id AND i.missing = 0
                AND i.status NOT IN ('cancelled','refunded','shipped','delivered')) AS itemCount,
@@ -300,13 +315,17 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
 
   const unclaimedItems = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM items WHERE package_id = ? AND missing = 0
-       AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weigh_group_id IS NULL`,
+       AND status NOT IN ('cancelled','refunded','shipped','delivered') AND weigh_group_id IS NULL
+       AND customer_id NOT IN (SELECT id FROM customers WHERE self_return = 1)`,
   )
     .bind(packageId)
     .first<{ n: number }>();
-  const chargedStacks = groups.results.filter((g) => g.intlFeeFen !== null).length;
+  // 「不拼邮」的那几摞既不进账，也不算「还差几摞没称」，否则手填实收永远凑不满整箱
+  const stacks = groups.results.filter((g) => !g.selfReturn);
+  const selfReturnStacks = groups.results.length - stacks.length;
+  const chargedStacks = stacks.filter((g) => g.intlFeeFen !== null).length;
   // 一箱几十个人不必等全箱称完：谁称完了就先算谁，没称的那几摞这次不进账，状态也不动。
-  const pending = groups.results.filter((g) => g.itemCount > 0 && g.intlFeeFen === null);
+  const pending = stacks.filter((g) => g.itemCount > 0 && g.intlFeeFen === null);
   // 一摞有两种称法：逐件都称过就按各件重量分，只把整摞放秤上就按件数均摊。
   // 一件称过一件没称的摞算「整摞」—— 用整摞那个总数，免得半摞的重量把分母带偏。
   for (const g of pending) {
@@ -388,6 +407,7 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
     fullBox,
     pendingStacks: notWeighed.length,
     pendingNames: notWeighed.map((g) => g.nickname),
+    selfReturnStacks,
     unclaimedItems: unclaimedItems?.n ?? 0,
     chargedStacks,
     rows,
@@ -464,6 +484,7 @@ weighRoutes.post('/:id/weigh/claim-all', async (c) => {
   const pending = await db
     .prepare(
       `SELECT i.id, i.customer_id AS customerId FROM items i
+        JOIN customers c ON c.id = i.customer_id AND c.self_return = 0
         WHERE i.package_id = ? AND i.weigh_group_id IS NULL AND i.missing = 0
           AND i.status NOT IN ('cancelled','refunded','shipped','delivered')
         ORDER BY i.id`,

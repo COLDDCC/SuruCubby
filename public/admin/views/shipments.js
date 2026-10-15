@@ -36,9 +36,18 @@ export async function createShipment(payload) {
 
 /** 选客户 → 勾这一批 → 填单号 → 标成已发货。寄出页和客户详情共用这一套。 */
 export async function shipModal(candidates, onDone) {
-  const list = candidates.filter((c) => c.stockCount > 0);
+  // 标了「不拼邮」的人不在这条链上：后端也会拒绝，这里直接从名单里去掉
+  const offList = candidates.filter((c) => c.selfReturn && c.stockCount > 0);
+  const list = candidates.filter((c) => c.stockCount > 0 && !c.selfReturn);
   if (!list.length) {
-    toast('现在没有一位客户有「可发货」的商品。得先在称重台把那一摞称完、算过分摊，商品才会变成可发货。', true);
+    toast(
+      offList.length
+        ? `有可发货商品的 ${offList.length} 位都标了「不拼邮」（${offList
+            .map((c) => c.nickname)
+            .join('、')}），不用我们寄。其他客户还没有「可发货」的商品——得先在称重台把那一摞称完、算过分摊。`
+        : '现在没有一位客户有「可发货」的商品。得先在称重台把那一摞称完、算过分摊，商品才会变成可发货。',
+      true,
+    );
     return;
   }
   openModal((box, close) => {

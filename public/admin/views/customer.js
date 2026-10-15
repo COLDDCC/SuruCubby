@@ -40,6 +40,13 @@ export async function render(view, [id]) {
       <p class="small muted">货款按日元记，客户付款当天按汇率折成人民币；运费是人民币，两者不合并算总数。</p>
       <p class="small muted">别名：${data.aliases.map((a) => escapeHtml(a)).join('、') || '无'}
         <button class="small plain" data-action="addAlias">加别名</button></p>
+      <p class="small ${data.customer.selfReturn ? '' : 'paid'}">拼邮：${
+        data.customer.selfReturn
+          ? '标了「不拼邮」——他自己带回国或另找转运，认领称重、国际运费分摊、发货申请和国内快递这一整条链都不算他；货款照旧按表里记'
+          : '跟群里一起拼邮回来'
+      } <button class="small plain" data-action="selfReturn">${
+        data.customer.selfReturn ? '改回拼邮' : '标成不拼邮'
+      }</button></p>
       <p class="small muted">真名（只有后台看得到，客户自己的页面不显示）：${
         data.realName ? escapeHtml(data.realName) : '没填'
       } <button class="small plain" data-action="realName">改</button></p>
@@ -77,7 +84,9 @@ export async function render(view, [id]) {
     <div class="card">
       <h3>可发货（${stock.length} 件）</h3>
       ${
-        stock.length
+        data.customer.selfReturn
+          ? `<p class="small muted">这位不拼邮，国内快递不用我们寄。他改回拼邮后这里才能操作。</p>`
+          : stock.length
           ? `<form id="shipForm">
           ${stock
             .map(
@@ -234,6 +243,35 @@ export async function render(view, [id]) {
       }
       await api.post(`/api/admin/customers/${id}/password`, { password: pw });
       toast(pw === '' ? '已退回初始密码 123456' : '密码已设好，私发给他');
+      reload();
+    },
+    selfReturn: async () => {
+      if (data.customer.selfReturn) {
+        if (
+          !(await confirmBox(
+            `把「${data.customer.nickname}」改回拼邮？改回后他要重新认领、称重、摊运费，那一箱的「整箱」口径也会把他算回去。`,
+            { okText: '改回拼邮' },
+          ))
+        )
+          return;
+        await api.patch(`/api/admin/customers/${id}`, { selfReturn: false });
+        toast('已改回拼邮');
+        reload();
+        return;
+      }
+      if (
+        !(await confirmBox(
+          `标「${data.customer.nickname}」为不拼邮？标了之后：这几件货不用认领称重、不进国际运费分摊、不能申请发货，也不发国内快递；货款照旧按表里记，一分不多一分不少。已经算过运费、有没处理完的申请或寄出过的会被拦住，要先撤销。`,
+          { danger: true, okText: '标成不拼邮' },
+        ))
+      )
+        return;
+      try {
+        await api.patch(`/api/admin/customers/${id}`, { selfReturn: true });
+        toast('已标成不拼邮，后面这条链不再算他');
+      } catch (err) {
+        return toast(err.message, true);
+      }
       reload();
     },
     merge: async () => {

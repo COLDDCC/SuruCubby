@@ -225,6 +225,26 @@ function addressForm(count) {
 function shipPanel(data) {
   const addresses = data.addresses || [];
   const items = data.items || [];
+  // 群主标了「这一批你自己带回国 / 另找转运」：这一栏整个就不归我们管了，摆着只会让人瞎勾
+  if (data.customer?.selfReturn) {
+    return `
+    <div class="card">
+      <h2>发货</h2>
+      <p class="small">群主把你这一批标成了「不拼邮」，后面的称重、国际运费和国内快递都不走我们这条线，货款照旧按下单表算。
+        要是改主意要跟群里一起拼回来，在群里说一声，群主在后台改回来这里就恢复了。</p>
+      ${
+        addresses.length
+          ? `<p class="small muted" style="margin:0 0 4px">已经存过的收货地址</p>
+             ${addresses
+               .map(
+                 (a) =>
+                   `<p class="small" style="margin:2px 0">${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</p>`,
+               )
+               .join('')}`
+          : ''
+      }
+    </div>`;
+  }
   const shippable = items.filter(shippableOf);
   const open = shippable.filter((i) => !i.requestId);
 
@@ -284,7 +304,7 @@ function shipPanel(data) {
  * 勾不了件、或者还没地址时不出现——不摆点不动的按钮。
  */
 function shipBar(data) {
-  if (data.mustChange) return '';
+  if (data.mustChange || data.customer?.selfReturn) return '';
   const items = data.items || [];
   const open = items.filter((i) => shippableOf(i) && !i.requestId);
   if (!open.length || !(data.addresses || []).length) return '';

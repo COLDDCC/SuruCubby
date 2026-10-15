@@ -5,7 +5,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
   const db = env.DB;
 
   const customer = await db
-    .prepare('SELECT id, qq, nickname, note, token, created_at AS createdAt FROM customers WHERE id = ?')
+    .prepare('SELECT id, qq, nickname, note, token, self_return AS selfReturn, created_at AS createdAt FROM customers WHERE id = ?')
     .bind(customerId)
     .first<{
       id: number;
@@ -13,6 +13,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
       nickname: string;
       note: string | null;
       token: string;
+      selfReturn: number;
       createdAt: string;
     }>();
   if (!customer) return null;
@@ -135,7 +136,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
   return {
     domesticFeeFen: Number((await db.prepare("SELECT value FROM settings WHERE key='domestic_fee_fen'").first<{value:string}>())?.value ?? 1000),
     addresses: addresses.results, requests: requests.results,
-    customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, createdAt: customer.createdAt },
+    customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, selfReturn: !!customer.selfReturn, createdAt: customer.createdAt },
     summary: {
       goodsUnpaidJpy,
       intlUnpaidFen,

@@ -40,6 +40,18 @@ export async function intlPriceFenPerKg(env: Env): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10000;
 }
 
+/**
+ * 这位客户标了「不拼邮」（自己带回国 / 另找转运）：
+ * 认领、称重、国际运费分摊、发货申请、国内寄出这条链一步都不该再算他，货款照旧。
+ */
+export async function isSelfReturn(db: D1Database, customerId: number): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT self_return AS n FROM customers WHERE id = ?')
+    .bind(customerId)
+    .first<{ n: number }>();
+  return !!row?.n;
+}
+
 /** 生成一条状态变更日志的 SQL 语句。 */
 export function statusLogStmt(
   db: D1Database,

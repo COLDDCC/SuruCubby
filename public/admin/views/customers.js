@@ -28,7 +28,7 @@ export async function render(view, params, query = '') {
             <div class="main">
               <a href="#/customers/${c.id}">${escapeHtml(c.nickname)}</a>${
                 c.realName ? `<span class="small muted">（${escapeHtml(c.realName)}）</span>` : ''
-              }
+              }${c.selfReturn ? ' <span class="badge">不拼邮</span>' : ''}
               <div class="small muted">QQ ${escapeHtml(c.qq)} · ${c.itemCount} 件 · 可发货 ${c.stockCount}${
                 c.passwordInitial ? ' · <span class="unpaid">还在用初始密码</span>' : ''
               }</div>

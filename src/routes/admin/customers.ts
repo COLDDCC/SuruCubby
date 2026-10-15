@@ -28,7 +28,7 @@ customerRoutes.get('/', async (c) => {
   const q = c.req.query('q')?.trim() ?? '';
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(
-    `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.created_at AS createdAt,
+    `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.self_return AS selfReturn, c.created_at AS createdAt,
             c.password_hash IS NULL AS passwordInitial,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id) AS itemCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
@@ -285,6 +285,7 @@ customerRoutes.patch('/:id', async (c) => {
     qq?: string;
     realName?: string;
     note?: string;
+    selfReturn?: boolean;
   }>(c);
   const qq = optionalString(body.qq);
   if (qq !== null && !/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
@@ -297,18 +298,56 @@ customerRoutes.patch('/:id', async (c) => {
       .first<{ ownerId: number }>();
     if (taken && taken.ownerId !== id) throw badRequest(`「${nickname}」这个名字已经是别的客户在用了`);
   }
+  const selfReturn = body.selfReturn === undefined ? null : body.selfReturn ? 1 : 0;
+  // 标「不拼邮」= 这个人从称重、摊运费、发快递这条链上整段退出。已经走在链上的账不能悬空，
+  // 所以有算过费的摞 / 没处理完的申请 / 寄出过的，一律先撤销再标。
+  if (selfReturn === 1) {
+    const busy = await db
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM weigh_groups WHERE customer_id = ? AND intl_fee_fen IS NOT NULL) AS chargedStacks,
+                (SELECT COUNT(*) FROM shipping_requests WHERE customer_id = ? AND status IN ('pending','paid')) AS openRequests,
+                (SELECT COUNT(*) FROM shipments WHERE customer_id = ?) AS shipments`,
+      )
+      .bind(id, id, id)
+      .first<{ chargedStacks: number; openRequests: number; shipments: number }>();
+    if (busy?.chargedStacks) {
+      throw badRequest('这位已经有算过运费的摞了，先在称重台「撤销分摊」再标不拼邮');
+    }
+    if (busy?.openRequests) throw badRequest('还有没处理完的发货申请，先去「发货申请」页处理掉');
+    if (busy?.shipments) throw badRequest('这位已经寄出过，先在「寄出」页撤销那次寄出');
+  }
+  const at = nowIso();
   await db.batch([
     db
       .prepare(
-        'UPDATE customers SET nickname = COALESCE(?, nickname), qq = COALESCE(?, qq), real_name = COALESCE(?, real_name), note = COALESCE(?, note) WHERE id = ?',
+        'UPDATE customers SET nickname = COALESCE(?, nickname), qq = COALESCE(?, qq), real_name = COALESCE(?, real_name), note = COALESCE(?, note), self_return = COALESCE(?, self_return) WHERE id = ?',
       )
-      .bind(nickname, qq, optionalString(body.realName), optionalString(body.note), id),
+      .bind(nickname, qq, optionalString(body.realName), optionalString(body.note), selfReturn, id),
     // 改完昵称，新名字必须也能在表里认出来；旧别名留着，早前的表还能对上
     ...(nickname === null
       ? []
       : [db.prepare('INSERT OR IGNORE INTO customer_aliases (alias, customer_id) VALUES (?, ?)').bind(nickname, id)]),
+    // 标上不拼邮就把他之前那点认领退回未认领，空出来的那一摞删掉，称重台里立刻不再出现他
+    ...(selfReturn === 1
+      ? [
+          db
+            .prepare(
+              `UPDATE items SET weigh_group_id = NULL, updated_at = ?
+                WHERE customer_id = ? AND weigh_group_id IN
+                  (SELECT id FROM weigh_groups WHERE customer_id = ? AND intl_fee_fen IS NULL)`,
+            )
+            .bind(at, id, id),
+          db
+            .prepare(
+              `DELETE FROM weigh_groups
+                WHERE customer_id = ? AND intl_fee_fen IS NULL
+                  AND id NOT IN (SELECT ref_id FROM payments WHERE ref_type = 'weigh_group')`,
+            )
+            .bind(id),
+        ]
+      : []),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, selfReturn: selfReturn === null ? undefined : selfReturn === 1 });
 });
 
 customerRoutes.post('/:id/reset-token', async (c) => {

@@ -24,14 +24,17 @@ export async function render(view, [id]) {
     if (!live.length) return false;
     return live.every((i) => i.weightG) || (c.weightG ?? 0) > 0;
   };
-  const chargedStacks = data.customers.filter((c) => c.intlFeeFen !== null);
-  const readyStacks = data.customers.filter(isReady);
-  const openStacks = data.customers.filter((c) => c.intlFeeFen === null);
+  // 标了「不拼邮」的人从这条链上整段退出：不进称重进度、不进分摊，卡片也只留一行说明
+  const joined = data.customers.filter((c) => !c.selfReturn);
+  const offList = data.customers.filter((c) => c.selfReturn);
+  const chargedStacks = joined.filter((c) => c.intlFeeFen !== null);
+  const readyStacks = joined.filter(isReady);
+  const openStacks = joined.filter((c) => c.intlFeeFen === null);
 
   const unpaidGroups = chargedStacks.filter((c) => !c.feePaid);
   const unpaidIntl = unpaidGroups.reduce((sum, c) => sum + c.intlFeeFen, 0);
 
-  const stockCustomers = data.customers.filter((c) =>
+  const stockCustomers = joined.filter((c) =>
     c.items.some((i) => i.status === "cn_stock"),
   );
   const stockCount = stockCustomers.reduce(
@@ -54,6 +57,11 @@ export async function render(view, [id]) {
         openStacks.length ? ` / 还有 <strong>${openStacks.length}</strong> 摞` : ""
       }</span>
       ${p.missingItems ? `<span class="badge warn">缺件 ${p.missingItems}</span>` : ""}
+      ${
+        p.selfReturnCustomers
+          ? `<span class="badge">不拼邮 ${p.selfReturnCustomers} 人 / ${p.selfReturnItems} 件</span>`
+          : ""
+      }
       ${stockCount ? `<span class="badge ok">可发货 ${stockCount} 件</span>` : ""}
     </div>
     <div class="card">
@@ -85,7 +93,21 @@ export async function render(view, [id]) {
           : ""
       }
     </div>
-    ${data.customers
+    ${offList
+      .map(
+        (c) => `
+      <div class="card" data-customer-card="${c.customerId}">
+        <div class="row" style="justify-content:space-between">
+          <h3 style="margin:0">${escapeHtml(c.nickname)} <span class="badge">不拼邮</span>
+            <span class="muted small">${c.items.length} 件</span></h3>
+          <button class="small plain" data-action="backToGroup" data-customer="${c.customerId}" data-nickname="${escapeHtml(c.nickname)}">改回拼邮</button>
+        </div>
+        <p class="small muted">这批货他自己带回国／另找转运，后面不再走我们这条链：不认领、不称重、不摊国际运费、不能申请发货、也不发国内快递。
+          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，他的这几件会重新回到「待认领」里。</p>
+      </div>`,
+      )
+      .join("")}
+    ${joined
       .map((c) => {
         const live = c.items.filter((i) => !i.missing);
         const weighedUnits = live.filter((i) => i.weightG).length;
@@ -95,7 +117,8 @@ export async function render(view, [id]) {
       <div class="card" data-customer-card="${c.customerId}">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0">${escapeHtml(c.nickname)}
-            <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ""}</span></h3>
+            <span class="muted small">${c.found}/${c.expected} 件${c.missing ? ` · 缺 ${c.missing}` : ""}</span>
+            ${charged ? "" : `<button class="small plain" data-action="selfOff" data-customer="${c.customerId}" data-nickname="${escapeHtml(c.nickname)}">他不拼邮</button>`}</h3>
           ${
             charged || byUnit
               ? `<span class="small muted">这一摞 ${
@@ -155,7 +178,11 @@ export async function render(view, [id]) {
           readyStacks.length ? `（称好的 ${readyStacks.length} 摞）` : ""
         }</button>
       </div>
-      <p class="small muted">单价 × 各摞重量之和就是这一箱运费，每人摊多少当场出来；点「算分摊」只把<strong>称好的那几摞</strong>入账，没称的照旧不动。包装箱重量按比例摊给所有人，尾差算需求方的。转运仓那天收得不一样，预览里可以直接改总额再确认——但手填实收总额得整箱都称完认领完才行，不然这笔钱会全压在已经称好的那几个人头上。</p>
+      <p class="small muted">单价 × 各摞重量之和就是这一箱运费，每人摊多少当场出来；点「算分摊」只把<strong>称好的那几摞</strong>入账，没称的照旧不动。包装箱重量按比例摊给所有人，尾差算需求方的。转运仓那天收得不一样，预览里可以直接改总额再确认——但手填实收总额得整箱都称完认领完才行，不然这笔钱会全压在已经称好的那几个人头上。${
+        offList.length
+          ? `<strong>标了「不拼邮」的 ${offList.length} 个人不参与这一箱的分摊</strong>，凑「整箱」也不把他们算进去。`
+          : ""
+      }</p>
       ${
         readyStacks.length === 0
           ? `<p class="small warn">现在还没有一摞称好：把某一摞「存整摞」填一个总重，或逐件填完重量，就能先算那一摞。</p>`
@@ -168,6 +195,31 @@ export async function render(view, [id]) {
   const reload = () => render(view, [id]);
 
   bindActions(view, {
+    selfOff: async ({ customer, nickname }) => {
+      if (
+        !(await confirmBox(
+          `把「${nickname}」标成不拼邮？标了之后：他这几件不用认领称重、不参与国际运费分摊、不能申请发货，也不发国内快递；货款照旧按表里记。已经算过运费或有寄出记录的会被拦住，得先撤销。`,
+          { danger: true, okText: "标成不拼邮" },
+        ))
+      )
+        return;
+      try {
+        await api.patch(`/api/admin/customers/${customer}`, { selfReturn: true });
+        toast(`已把「${nickname}」标成不拼邮，这一箱的账里不再算他`);
+        await reload();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    },
+    backToGroup: async ({ customer, nickname }) => {
+      try {
+        await api.patch(`/api/admin/customers/${customer}`, { selfReturn: false });
+        toast(`「${nickname}」改回拼邮了，重新认领称重就行`);
+        await reload();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    },
     claimAll: async (_p, el) => {
       el.disabled = true;
       try {
@@ -300,6 +352,11 @@ export async function render(view, [id]) {
                     p.pendingNames.length ? `（${p.pendingNames.join("、")}）` : ""
                   }${p.unclaimedItems ? `、${p.unclaimedItems} 件没认领` : ""}。
                   这些人这次不进账、状态也不变，等称好了再点一次「算分摊」就行。</p>`
+            }
+            ${
+              p.selfReturnStacks
+                ? `<p class="small muted">另有 ${p.selfReturnStacks} 摞标了「不拼邮」，不算进这一箱的账，也不用凑整箱。</p>`
+                : ""
             }
             <div class="scroll-x"><table>
               <thead><tr><th>客户</th><th class="right">重量</th><th class="right">占比</th><th class="right">应付运费</th></tr></thead>

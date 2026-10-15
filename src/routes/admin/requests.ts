@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
-import { nextId, nowIso, domesticFeeFen, statusLogStmt } from '../../lib/db.ts';
+import { nextId, nowIso, domesticFeeFen, statusLogStmt, isSelfReturn } from '../../lib/db.ts';
 import { clearCustomerSession, customerSession } from '../../lib/session.ts';
 import { usingInitialPassword } from '../../lib/password.ts';
 export const requestAdminRoutes=new Hono<{Bindings:Env}>();
@@ -32,6 +32,8 @@ requestCustomerRoutes.delete('/:token/addresses/:id',async c=>{
 requestCustomerRoutes.post('/:token/requests',async c=>{
  const cid=identity(c),db=c.env.DB;
  const b=await readJson<{itemIds:number[];addressId:number}>(c);
+ // 标了「不拼邮」的人（自己带回国 / 另找转运）不在这条链上，货款照旧但不用申请发货
+ if(await isSelfReturn(db,cid)) throw badRequest('这一批你不走拼邮，不用申请发货；有变动在群里说一声，群主改回来就行');
  if(!Array.isArray(b.itemIds)||!b.itemIds.length||b.itemIds.length>500) throw badRequest('请勾选1至500件商品');
  const ids=[...new Set(b.itemIds.map(x=>requireInt(x,'物品 ID')))];
  const address=await db.prepare('SELECT recipient,phone,detail FROM addresses WHERE id=? AND customer_id=?').bind(requireInt(b.addressId,'地址 ID'),cid).first();

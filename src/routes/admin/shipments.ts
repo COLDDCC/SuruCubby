@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, intList, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
-import { domesticFeeFen, nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
+import { domesticFeeFen, isSelfReturn, nextId, nowIso, statusLogStmt } from '../../lib/db.ts';
 
 export const shipmentRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,6 +42,9 @@ shipmentRoutes.post('/', async (c) => {
   const customerId = requireInt(body.customerId, '客户 ID');
   const itemIds = intList(body.itemIds, '物品 ID');
   const db = c.env.DB;
+  if (await isSelfReturn(db, customerId)) {
+    throw badRequest('这位客户标了「不拼邮」，不用我们寄国内快递；要恢复拼邮在客户详情页改');
+  }
 
   const items = await db
     .prepare(
