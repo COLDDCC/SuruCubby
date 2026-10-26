@@ -113,6 +113,7 @@ importRoutes.post('/preview', async (c) => {
       amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
       customers: groups.length,
       unmatched: matched.filter((m) => !m.match.customer).length,
+      direct: parsed.rows.filter((r) => r.route === 'direct').length,
     },
     groups: matched.map(({ group, match }) => ({
       ...group,
@@ -280,8 +281,9 @@ importRoutes.post('/commit', async (c) => {
   let itemId = await nextId(db, 'items');
   const insertItem = db.prepare(
     `INSERT INTO items (id, batch_id, customer_id, package_id, row_no, title, image_url, product_url,
-                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?)`,
+                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at,
+                        route, import_address)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?, ?, ?)`,
   );
   const insertLog = db.prepare('INSERT INTO status_logs (item_id, from_status, to_status, at) VALUES (?, NULL, ?, ?)');
 
@@ -294,7 +296,8 @@ importRoutes.post('/commit', async (c) => {
         itemId,
         batchId,
         customerId,
-        packageId,
+        // 直邮的件不进回国箱：日本仓直接按客户打包寄出
+        row.route === 'direct' ? null : packageId,
         row.rowNo,
         row.title,
         row.imageUrl,
@@ -304,6 +307,8 @@ importRoutes.post('/commit', async (c) => {
         row.goodsFeeJpy,
         now,
         now,
+        row.route,
+        row.directAddress,
       ),
       insertLog.bind(itemId, 'ordered', now),
     );
@@ -322,6 +327,7 @@ importRoutes.post('/commit', async (c) => {
     batchId,
     packageId,
     itemCount: parsed.rows.length,
+    directCount: parsed.rows.filter((r) => r.route === 'direct').length,
     amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
     customerCount: rowsByCustomer.size,
     createdCustomers,

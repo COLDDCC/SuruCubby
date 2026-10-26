@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, bound, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
+import { revertDirectPayment } from '../staff/direct.ts';
 
 export const paymentRoutes = new Hono<{ Bindings: Env }>();
 
@@ -276,6 +277,9 @@ paymentRoutes.delete('/:id', async (c) => {
     for (const item of items.results) {
       statements.push(db.prepare('UPDATE items SET goods_paid = 0, updated_at = ? WHERE id = ?').bind(at, item.itemId));
     }
+    statements.push(db.prepare('DELETE FROM payment_items WHERE payment_id = ?').bind(id));
+  } else if (payment.kind === 'direct' && payment.refId !== null) {
+    statements.push(...(await revertDirectPayment(db, payment.refId)));
     statements.push(db.prepare('DELETE FROM payment_items WHERE payment_id = ?').bind(id));
   } else if (payment.kind === 'item_intl' && payment.refId !== null) {
     const item = await db

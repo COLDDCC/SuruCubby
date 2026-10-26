@@ -40,6 +40,18 @@ export async function intlPriceFenPerKg(env: Env): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10000;
 }
 
+/** 日本直邮单价（分 / kg），默认 120 元 /kg；称重时按这个价算并存档。 */
+export async function directPriceFenPerKg(env: Env): Promise<number> {
+  const raw = await getSetting(env, 'direct_price_fen_per_kg', '12000');
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 12000;
+}
+
+/** 直邮运费：⌈重量克 × 单价分 ÷ 1000⌉，整数分，不出现小数。 */
+export function directFeeFen(weightG: number, rateFenPerKg: number): number {
+  return Math.ceil((weightG * rateFenPerKg) / 1000);
+}
+
 /**
  * 这位客户标了「不拼邮」（自己带回国 / 另找转运）：
  * 认领、称重、国际运费分摊、发货申请、国内寄出这条链一步都不该再算他，货款照旧。

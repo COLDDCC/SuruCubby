@@ -79,6 +79,18 @@ dashboardRoutes.get('/', async (c) => {
       earliestAt: string | null;
     }>();
 
+  const directUnpaid = await db
+    .prepare(
+      `SELECT d.id AS parcelId, d.customer_id AS customerId, c.nickname, c.qq, d.weight_g AS weightG,
+              d.fee_fen AS feeFen, d.weighed_at AS weighedAt,
+              (SELECT COUNT(*) FROM items i WHERE i.direct_parcel_id = d.id) AS itemCount
+         FROM direct_parcels d
+         JOIN customers c ON c.id = d.customer_id
+        WHERE d.status = 'awaiting_payment'
+        ORDER BY d.id`,
+    )
+    .all();
+
   const now = Date.now();
   const domesticStock = stockRows.results
     .map((row) => ({
@@ -91,6 +103,7 @@ dashboardRoutes.get('/', async (c) => {
     goodsUnpaid: goodsUnpaid.results,
     intlUnpaid: intlUnpaid.results,
     domesticUnpaid: domesticUnpaid.results,
+    directUnpaid: directUnpaid.results,
     pendingRefunds: pendingRefunds.results,
     domesticStock,
   });

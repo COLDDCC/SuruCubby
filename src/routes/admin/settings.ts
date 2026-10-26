@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
+import { directPriceFenPerKg, domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
 import { toFen } from '../../lib/money.ts';
 
@@ -10,6 +10,7 @@ settingsRoutes.get('/', async (c) =>
   c.json({
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    directPriceFenPerKg: await directPriceFenPerKg(c.env),
   }),
 );
 
@@ -52,11 +53,14 @@ settingsRoutes.post('/', async (c) => {
     domesticFeeFen?: unknown;
     intlPriceYuanPerKg?: unknown;
     intlPriceFenPerKg?: unknown;
+    directPriceYuanPerKg?: unknown;
+    directPriceFenPerKg?: unknown;
   }>(c);
 
-  const out: { domesticFeeFen: number; intlPriceFenPerKg: number } = {
+  const out: { domesticFeeFen: number; intlPriceFenPerKg: number; directPriceFenPerKg: number } = {
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    directPriceFenPerKg: await directPriceFenPerKg(c.env),
   };
 
   const hasDomestic =
@@ -90,6 +94,22 @@ settingsRoutes.post('/', async (c) => {
     out.intlPriceFenPerKg = fen;
   }
 
-  if (!hasDomestic && !hasIntl) throw badRequest('没有要保存的内容');
+  const hasDirect =
+    (body.directPriceFenPerKg !== undefined && body.directPriceFenPerKg !== null) ||
+    body.directPriceYuanPerKg !== undefined;
+  if (hasDirect) {
+    const fen = capFen(
+      body.directPriceFenPerKg !== undefined && body.directPriceFenPerKg !== null
+        ? requireFen(body.directPriceFenPerKg, '直邮单价')
+        : yuanToFenValue(body.directPriceYuanPerKg, '直邮单价'),
+      '直邮单价',
+      MAX_INTL_PRICE_FEN,
+    );
+    requirePositiveFen(fen, '直邮单价');
+    await setSetting(c.env, 'direct_price_fen_per_kg', String(fen));
+    out.directPriceFenPerKg = fen;
+  }
+
+  if (!hasDomestic && !hasIntl && !hasDirect) throw badRequest('没有要保存的内容');
   return c.json(out);
 });

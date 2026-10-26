@@ -28,7 +28,9 @@ export type FieldKey =
   | "actualPriceJpy"
   | "goodsFeeJpy"
   | "quantity"
-  | "cn";
+  | "cn"
+  | "route"
+  | "directAddress";
 
 export interface ParsedRow {
   rowNo: number;
@@ -40,6 +42,10 @@ export interface ParsedRow {
   cn: string;
   /** 这一件应付的货款，单位：円 */
   goodsFeeJpy: number;
+  /** 发货方式：表里没写就是拼团 */
+  route: "group" | "direct";
+  /** 直邮地址（只有直邮行才留） */
+  directAddress: string | null;
 }
 
 export interface SkippedRow {
@@ -124,6 +130,19 @@ const COLUMNS: ColumnSpec[] = [
     label: "图片",
     required: false,
     aliases: ["图片", "图片链接", "封面", "图"],
+  },
+  {
+    field: "route",
+    label: "发货方式",
+    required: false,
+    aliases: ["发货方式", "寄送方式", "邮寄方式", "配送方式", "发货", "路线", "直邮拼团"],
+  },
+  {
+    field: "directAddress",
+    label: "直邮地址",
+    required: false,
+    // 排在「商品链接」前面：它的别名里有「地址」两个字，不能让「收货地址」被当成商品链接
+    aliases: ["直邮地址", "收货地址", "收件地址", "寄送地址", "邮寄地址", "收件人地址"],
   },
   {
     field: "productUrl",
@@ -264,6 +283,18 @@ export function extractUrlFromText(raw: unknown): string | null {
   return null;
 }
 
+const DIRECT_WORDS = /直邮|直发|直寄|直送|单独寄|单独发|ems|epacket|e包裹|小包|航空|sal/i;
+const GROUP_WORDS = /拼团|拼邮|拼箱|集运|合箱|合包|回国|转运|团/;
+
+/** 发货方式单元格 → group / direct；空 = 拼团；看不懂返回 null。 */
+export function parseRoute(raw: Cell): "group" | "direct" | null {
+  const value = text(raw);
+  if (value === "") return "group";
+  if (DIRECT_WORDS.test(value)) return "direct";
+  if (GROUP_WORDS.test(value)) return "group";
+  return null;
+}
+
 function text(cell: Cell): string {
   if (cell === null || cell === undefined) return "";
   return String(cell).trim();
@@ -362,6 +393,20 @@ export function parseSheet(
       return;
     }
 
+    const route = parseRoute(get("route"));
+    if (route === null) {
+      errors.push({
+        rowNo,
+        reason: `「发货方式」看不懂：${text(get("route"))}（写「直邮」或「拼团」，空着就是拼团）`,
+      });
+      return;
+    }
+    const directAddress = route === "direct" ? text(get("directAddress")) || null : null;
+    if (directAddress && directAddress.length > 300) {
+      errors.push({ rowNo, reason: "直邮地址太长了，最多 300 个字" });
+      return;
+    }
+
     let quantity = 1;
     if (index.quantity !== undefined) {
       const raw = get("quantity");
@@ -425,6 +470,8 @@ export function parseSheet(
         goodsFeeJpy:
           Math.floor(goodsFeeJpy / quantity) +
           (unit < goodsFeeJpy % quantity ? 1 : 0),
+        route,
+        directAddress,
       });
     }
   });

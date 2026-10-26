@@ -3,6 +3,8 @@
 export const STATUS_LABELS = {
   ordered: '已下单',
   jp_warehouse: '已到日本仓',
+  direct_unpaid: '直邮待付款',
+  direct_ready: '直邮待寄出',
   intl_transit: '回国中',
   cn_arrived: '回国中',
   cn_stock: '可发货',
@@ -11,6 +13,8 @@ export const STATUS_LABELS = {
   cancelled: '缺货取消',
   refunded: '已退款',
 };
+
+export const ROUTE_LABELS = { group: '拼团', direct: '直邮' };
 
 export const PACKAGE_BULK_STATUSES = ['ordered', 'jp_warehouse', 'intl_transit'];
 
