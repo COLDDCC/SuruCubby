@@ -137,6 +137,35 @@ const shipment = await call('POST', '/api/admin/shipments', {
 });
 await call('PATCH', `/api/admin/shipments/${shipment.id}`, { trackingNo: 'SF1234567890' });
 
+// 第二单：日本直邮 + 拼团混在一张表里，演示日本仓签收、分拣、直邮打包
+const second = await call('POST', '/api/admin/import/commit', {
+  fileName: '第13团.xlsx',
+  fileHash: 'demo-13',
+  batchName: '10月20日 第13团',
+  orderNo: 'SURUGA-20261020',
+  japanTrackingNo: '4908-1234-5678',
+  sheet: {
+    headers: ['名称', '图片', '商品链接', '实际价格', 'cn', '发货方式', '收货地址'],
+    rows: [
+      ['GSC figma 初音未来 V4X', `https://images.suruga-ya.jp/database/pics/figure/DEMO2001.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2001', 5200, '团子', '直邮', null],
+      ['MegaHouse G.E.M. 鬼灭之刃 炭治郎', `https://images.suruga-ya.jp/database/pics/figure/DEMO2002.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2002', 3900, '团子', '直邮', null],
+      ['ONE PIECE 全彩版 1-12', `https://images.suruga-ya.jp/database/pics/book/DEMO2003.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2003', 4400, '芋圆', '直邮', '广东省深圳市南山区科技园某栋 1201 芋圆 13800001234'],
+      ['一番赏 间谍过家家 阿尼亚', `https://images.suruga-ya.jp/database/pics/prize/DEMO2004.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2004', 1300, '小K', '拼团', null],
+      ['figma 进击的巨人 利威尔', `https://images.suruga-ya.jp/database/pics/figure/DEMO2005.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2005', 4100, '阿狸', '', null],
+    ],
+  },
+  assignments: [],
+});
+console.log(`第二单：${second.itemCount} 件，其中直邮 ${second.directCount} 件`);
+const secondItems = (await call('GET', `/api/admin/batches/${second.batchId}`)).items;
+await call('POST', '/api/admin/staff', { username: 'tokyo', displayName: '东京仓小王', role: 'jp', password: 'tokyo-demo' });
+// 签收其中四件，留一件演示「待签收」
+await call('POST', '/api/staff/jp/receive', { itemIds: secondItems.filter((i) => !i.title.startsWith('figma 进击')).map((i) => i.id) });
+const yuyuan = secondItems.find((i) => i.title.startsWith('ONE PIECE'));
+const parcel = await call('POST', '/api/staff/direct/parcels', { customerId: yuyuan.customerId, itemIds: [yuyuan.id], weightG: 1850 });
+console.log(`芋圆的直邮包裹 #${parcel.id}：运费 ${parcel.feeFen / 100} 元，等付款`);
+console.log('日本仓演示账号：tokyo / tokyo-demo');
+
 console.log('\n演示客户登录（统一入口 /login，或点下面的专属链接）：');
 for (const c of (await call('GET', '/api/admin/customers')).customers) {
   console.log(

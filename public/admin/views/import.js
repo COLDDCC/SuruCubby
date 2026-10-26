@@ -167,6 +167,8 @@ function renderPreview(view) {
       <p class="small">共 ${p.totals.rows} 行 · ${p.totals.customers} 位客户 · 货款合计 <span class="money">${yen(
         p.totals.amountJpy,
       )}</span>${unmatched.length ? ` · <span class="unpaid">${unmatched.length} 个名字要先处理</span>` : ''}</p>
+      <p class="small">发货方式：拼团 <b>${p.totals.rows - (p.totals.direct || 0)}</b> 件 · 直邮 <b>${p.totals.direct || 0}</b> 件
+        <span class="muted">（表里「发货方式」写直邮 / 拼团，空着算拼团；直邮的件不进回国箱，「收货地址」列会存成直邮地址。导入后也能在批次页改。）</span></p>
       ${
         p.errors.length
           ? `<div class="card" style="border-color:var(--danger)">
@@ -318,7 +320,7 @@ function renderPreview(view) {
             newCustomer: a.newCustomer,
           })),
         });
-        toast(`导入成功：${result.itemCount} 件，${result.customerCount} 位客户`);
+        toast(`导入成功：${result.itemCount} 件（其中直邮 ${result.directCount || 0} 件），${result.customerCount} 位客户`);
         if (result.createdCustomers.length) {
           const lines = result.createdCustomers
             .map((c) => `${c.nickname}（QQ ${c.qq}）: ${location.origin}/w/${c.token} 初始密码 123456`)

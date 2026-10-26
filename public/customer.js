@@ -14,6 +14,7 @@ const GROUPS = [
     note: '勾选要寄的商品，选择地址后提交申请。扫码转账后由群主确认。',
   },
   { title: '在日本', statuses: ['ordered', 'jp_warehouse'], note: '' },
+  { title: '直邮待付款 / 待寄出', statuses: ['direct_unpaid', 'direct_ready'], note: '运费、寄到哪、单号都在「直邮包裹」里。' },
   { title: '运输中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
   { title: '已寄出 / 已签收', statuses: ['shipped', 'delivered'], note: '' },
 ];
@@ -175,6 +176,7 @@ function itemCard(item) {
         <div class="title">${title}</div>
         <div class="small row" style="gap:6px;margin-top:2px">
           ${codeTag(item)}
+          ${item.route === 'direct' ? '<span class="badge warn">直邮</span>' : ''}
           <span class="muted">${escapeHtml(item.packageName || item.batchName || '')}</span>
         </div>
         <div class="small muted">
@@ -300,6 +302,89 @@ function shipPanel(data) {
       ${addressForm(addresses.length)}
       ${hint}
     </div>`;
+}
+
+function addressLine(a) {
+  if (!a) return '';
+  if (a.raw) return a.raw;
+  return [a.recipient, a.phone, a.detail].filter(Boolean).join(' · ');
+}
+
+const PARCEL_HINT = {
+  packing: '日本仓正在打包，称好重量后这里会显示运费。',
+  awaiting_payment: '按显示的运费扫码转给群主，群主确认后日本仓就寄出。',
+  paid: '运费已收到，等日本仓寄出，寄出后这里会出单号。',
+  shipped: '已经从日本寄出了，复制单号去查物流。',
+  delivered: '已签收。',
+};
+
+/** 直邮包裹：每一包的状态、运费、单号、寄到哪、里面是哪几本。 */
+function directParcelsHtml(data) {
+  const parcels = data.directParcels || [];
+  if (!parcels.length) return '';
+  return `<div class="card">
+    <h2>直邮包裹<span class="muted small"> · ${parcels.length} 包</span></h2>
+    ${parcels
+      .map(
+        (p) => `<div class="item" style="display:block">
+          <div class="row" style="justify-content:space-between">
+            <strong>${escapeHtml(p.statusLabel)}</strong>
+            ${
+              p.feeFen !== null
+                ? `<span class="money ${p.status === 'awaiting_payment' ? 'unpaid' : 'paid'}">${money(p.feeFen)} ${p.status === 'awaiting_payment' ? '待付' : '已付'}</span>`
+                : ''
+            }
+          </div>
+          ${
+            p.trackingNo
+              ? `<div class="row" style="gap:6px;margin-top:4px"><span class="small muted">${escapeHtml(p.carrier || '国际单号')}</span>
+                  <b>${escapeHtml(p.trackingNo)}</b> <button class="small plain" data-copy="${escapeHtml(p.trackingNo)}">复制</button></div>`
+              : ''
+          }
+          ${p.weightG ? `<div class="kv"><span>重量</span><b>${Number(p.weightG).toLocaleString()} g</b></div>` : ''}
+          ${p.weightG ? `<div class="kv"><span>单价</span><b>${money(p.rateFenPerKg)} / kg</b></div>` : ''}
+          <div class="small muted" style="margin-top:4px">寄到：${escapeHtml(addressLine(p.address))}</div>
+          <div class="small" style="margin-top:6px">这一包里有 ${p.items.length} 件：</div>
+          <ul class="small" style="margin:2px 0 0;padding-left:18px">${p.items.map((i) => `<li>${escapeHtml(i.title)}</li>`).join('')}</ul>
+          <p class="small muted" style="margin:6px 0 0">${PARCEL_HINT[p.status] ?? ''}</p>
+        </div>`,
+      )
+      .join('')}
+  </div>`;
+}
+
+/**
+ * 直邮寄到哪：只在「有直邮的件还没打包、导入表里也没写地址」时出现。
+ * 只有一个地址时自动用它，这一栏只是告诉客户一声。
+ */
+function directAddressPanel(data) {
+  if (data.mustChange) return '';
+  const waiting = (data.items || []).filter(
+    (i) => i.route === 'direct' && !i.directParcelId && !i.hasImportAddress && ['ordered', 'jp_warehouse'].includes(i.status),
+  );
+  if (!waiting.length) return '';
+  const addresses = data.addresses || [];
+  const chosen = data.customer?.directAddressId;
+  let body;
+  if (!addresses.length) {
+    body = '<p class="small unpaid">你还没有收货地址。在下面「申请发货」那里先存一个地址，日本仓才能给你打包。</p>';
+  } else if (addresses.length === 1) {
+    body = `<p class="small">会寄到：${escapeHtml(addressLine(addresses[0]))}</p>
+      <p class="small muted">只存了一个地址就自动用它；想换就先在下面加一个新地址，再回来选。</p>`;
+  } else {
+    body = addresses
+      .map(
+        (a) => `<label class="row"><input type="radio" name="direct-address" value="${a.id}" ${a.id === chosen ? 'checked' : ''}>
+          <span class="small">${escapeHtml(addressLine(a))}</span></label>`,
+      )
+      .join('');
+    if (!addresses.some((a) => a.id === chosen)) body += '<p class="small unpaid">选一个，日本仓才能打包。</p>';
+  }
+  return `<div class="card">
+    <h2>直邮寄到哪</h2>
+    <p class="small muted" style="margin-top:0">你有 ${waiting.length} 件是从日本直接寄给你的（不跟拼团回国）。</p>
+    ${body}
+  </div>`;
 }
 
 /**
@@ -459,6 +544,7 @@ function render(data) {
        </div>`
     : '';
 
+  const directHtml = directParcelsHtml(data);
   const closedHtml = closed.length
     ? `<div class="card">
         <details><summary>已取消 / 已退款（${closed.length} 件）</summary>
@@ -503,7 +589,11 @@ function render(data) {
       <div class="grid" style="margin-top:12px">
         <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
         <div class="stat"><div class="label">国际运费待付</div><div class="value money">${money(s.intlUnpaidFen)}</div></div>
-        <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
+        ${
+          s.directUnpaidFen
+            ? `<div class="stat"><div class="label">直邮运费待付</div><div class="value money">${money(s.directUnpaidFen)}</div></div>`
+            : `<div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>`
+        }
         <div class="stat big"><div class="label">运费待付</div><div class="value money" ${
           s.freightUnpaidFen ? '' : 'style="color:var(--ok)"'
         }>${money(s.freightUnpaidFen)}</div></div>
@@ -520,10 +610,10 @@ function render(data) {
     ${
       wide
         ? `<div class="cols">
-            <div class="main">${stockHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}</div>
-            <aside class="side">${shipPanel(data)}${requestsHtml}</aside>
+            <div class="main">${stockHtml}${directHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}</div>
+            <aside class="side">${directAddressPanel(data)}${shipPanel(data)}${requestsHtml}</aside>
           </div>`
-        : `${stockHtml}${shipPanel(data)}${requestsHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}`
+        : `${directHtml}${directAddressPanel(data)}${stockHtml}${shipPanel(data)}${requestsHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}`
     }
     <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>
     ${barHtml}`;
@@ -567,6 +657,7 @@ function bindWarehouse(data){
  app.querySelectorAll('[data-copy]').forEach(el=>el.onclick=handle(async()=>{if(!await copyText(el.dataset.copy))throw Error('这个浏览器不让网页复制，手动选中单号拷一下');toast('单号已复制');}));
  app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
+ app.querySelectorAll('input[name="direct-address"]').forEach(el=>el.onchange=handle(()=>send('/direct-address','POST',{addressId:Number(el.value)})));
  const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
  const logout=app.querySelector('#logout');
  // 退出不走 send()：那玩意会立刻重新拉一次仓库，白跑一趟还先把页面画出来

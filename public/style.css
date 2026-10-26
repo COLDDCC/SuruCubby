@@ -980,3 +980,183 @@ td.actions button + button {
     margin: 2px 0 2px 4px;
   }
 }
+
+/* ───────── 日本仓 / 直邮 ───────── */
+.seg {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.seg button {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  font-weight: 500;
+}
+.seg button.active {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-color: var(--brand);
+}
+.seg-count {
+  display: inline-block;
+  min-width: 1.6em;
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.jp-cols {
+  display: block;
+}
+.jp-col .col-title {
+  display: none;
+}
+.jp-col:not(.is-current) {
+  display: none;
+}
+.jp-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+.jp-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+.jp-item input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+.jp-item.is-missing {
+  opacity: 0.6;
+}
+.jp-cover img,
+.jp-cover .noimg {
+  width: 52px;
+  height: 74px;
+  object-fit: contain;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--muted);
+}
+.jp-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.jp-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ship-row {
+  margin-top: 10px;
+  flex-wrap: nowrap;
+}
+.ship-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ship-row button {
+  flex: 0 0 auto;
+}
+.parcel-grid {
+  display: grid;
+  gap: 0 14px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  align-items: start;
+}
+.addr {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 8px;
+  word-break: break-all;
+}
+.parcel-items {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+.parcel-items li {
+  margin: 2px 0;
+}
+.route-bar {
+  margin: 8px 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* 电脑宽屏：三栏一起看，不用切 */
+@media (min-width: 1200px) {
+  .shell:has(.jp-cols) {
+    max-width: 1680px;
+  }
+  .shell:has(.jp-cols) .wrap {
+    max-width: none;
+  }
+  .jp-cols {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+  .jp-col:not(.is-current) {
+    display: block;
+  }
+  .jp-col .col-title {
+    display: block;
+    margin: 4px 0 10px;
+    color: var(--muted);
+  }
+  .card .seg {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .parcel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .seg button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+}
+/* 窄屏上长按钮（带单号的那种）允许折行，不撑破卡片 */
+@media (max-width: 760px) {
+  button,
+  .btn {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .tabbar a,
+  .tabbar button,
+  .seg button {
+    white-space: nowrap;
+  }
+}

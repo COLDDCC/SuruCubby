@@ -35,11 +35,9 @@ function renderMenus() {
   const items = session.loggedIn ? menuFor(session.role) : [];
   const link = (n) => `<a href="${n.href}">${n.label}</a>`;
   nav.innerHTML = items.map(link).join('');
-  // 菜单不多（日本仓账号只有两三项）就全放底栏，不用「更多」
-  const primary = items.length <= 5 ? items : items.filter((n) => n.primary).slice(0, 4);
-  const rest = items.filter((n) => !primary.includes(n));
-  tabbar.innerHTML =
-    primary.map(link).join('') + (rest.length || items.length > 5 ? '<button type="button" id="more-open">更多</button>' : '');
+  // 菜单不多（日本仓账号只有两项）就全放底栏；「更多」一直在，退出登录在里面
+  const primary = items.length <= 4 ? items : items.filter((n) => n.primary).slice(0, 4);
+  tabbar.innerHTML = primary.map(link).join('') + '<button type="button" id="more-open">更多</button>';
   document.getElementById('more-links').innerHTML = items.map(link).join('');
   tabbar.hidden = !session.loggedIn;
   document.body.classList.toggle('has-tabbar', session.loggedIn);
@@ -81,6 +79,8 @@ const routes = [
   { pattern: /^\/shipments$/, module: () => import('/admin/views/shipments.js') },
   { pattern: /^\/payments$/, module: () => import('/admin/views/payments.js') },
   { pattern: /^\/settings$/, module: () => import('/admin/views/settings.js') },
+  { pattern: /^\/jp$/, module: () => import('/admin/views/jp.js') },
+  { pattern: /^\/direct$/, module: () => import('/admin/views/direct.js') },
 ];
 
 function currentPath() {
