@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 在一台全新的 Ubuntu 22.04 / 24.04（或 Debian 12）VPS 上一键安装 SuruCubby。
 #
-#   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/main/deploy/setup.sh -o setup.sh
+#   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/HEAD/deploy/setup.sh -o setup.sh
 #   sudo DOMAIN=cang.example.com bash setup.sh
 #
 # 做的事：装 Node 24、Caddy → 建系统用户 → 拉代码 → 生成密钥 → 装 systemd 服务 → 配 HTTPS → 每日备份。
@@ -10,7 +10,7 @@ set -euo pipefail
 
 DOMAIN="${DOMAIN:?请用 DOMAIN=你的域名 sudo bash setup.sh}"
 REPO="${REPO:-https://github.com/COLDDCC/SuruCubby.git}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-}"   # 不填就用仓库的默认分支
 APP=/opt/surucubby
 DATA=/var/lib/surucubby
 
@@ -41,7 +41,7 @@ chmod 750 "$DATA"
 
 echo "==> 拉代码"
 if [[ ! -d "$APP/.git" ]]; then
-  git clone --branch "$BRANCH" "$REPO" "$APP"
+  git clone ${BRANCH:+--branch "$BRANCH"} "$REPO" "$APP"
 fi
 chown -R surucubby:surucubby "$APP"
 cd "$APP"

@@ -38,7 +38,7 @@ Cloudflare Workers 免费版给大陆用户走海外节点，`*.workers.dev` 被
 3. 在 VPS 上一条命令装好（Node 24、Caddy 自动 HTTPS、systemd、每天凌晨 4 点备份）：
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/main/deploy/setup.sh -o setup.sh
+   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/HEAD/deploy/setup.sh -o setup.sh
    sudo DOMAIN=cang.你的域名 bash setup.sh
    ```
 
