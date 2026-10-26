@@ -1,0 +1,12 @@
+# 把 cang.example.com 换成你的域名。
+# Cloudflare 的 DNS 里给这个域名加一条 A 记录指向 VPS 的 IP，代理状态选「DNS only（灰色云朵）」。
+# Caddy 会自动申请、续期 HTTPS 证书。
+cang.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

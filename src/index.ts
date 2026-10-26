@@ -19,6 +19,12 @@ import { KEY_PATTERN, isHttpUrl, proxyImage } from './lib/images.ts';
 import { mutationGuard } from './lib/mutations.ts';
 import { requestAdminRoutes, requestCustomerRoutes } from './routes/admin/requests.ts';
 const app = new Hono<{ Bindings: Env }>();
+
+/** Workers 上用边缘缓存，Node 上用入口传进来的磁盘缓存。 */
+function imageCache(env: Env): ImageCache {
+  if (env.IMAGE_CACHE) return env.IMAGE_CACHE;
+  return (globalThis as unknown as { caches: { default: ImageCache } }).caches.default;
+}
 app.use('/api/*', mutationGuard);
 
 app.onError((err, c) => {
@@ -38,7 +44,7 @@ app.get('/img/i/:id', async (c) => {
   const id = Number.parseInt(c.req.param('id'), 10);
   if (!Number.isInteger(id) || id <= 0) return c.text('找不到图片', 404);
 
-  const cache = caches.default;
+  const cache = imageCache(c.env);
   const cacheKey = new Request(new URL(c.req.url).toString(), { method: 'GET' });
   const hit = await cache.match(cacheKey);
   if (hit) return hit;

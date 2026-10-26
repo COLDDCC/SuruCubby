@@ -1,0 +1,23 @@
+[Unit]
+Description=SuruCubby 电子仓库
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=surucubby
+Group=surucubby
+WorkingDirectory=/opt/surucubby
+EnvironmentFile=/etc/surucubby.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning src/server.ts
+Restart=always
+RestartSec=3
+# 只允许写数据目录，其余只读
+ProtectSystem=strict
+ReadWritePaths=/var/lib/surucubby
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

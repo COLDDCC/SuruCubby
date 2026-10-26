@@ -1,17 +1,20 @@
 {
   "name": "surucubby",
   "version": "1.0.0",
-  "description": "骏河屋拼团「个人仓库」：Excel 导入、客户专属页、称重分摊、收款与寄出管理",
+  "description": "代购电子仓库：Excel 导入、日本仓分拣、直邮与拼团、称重分摊、收款与寄出管理",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:local": "wrangler d1 migrations apply surucubby --local",
-    "db:remote": "wrangler d1 migrations apply surucubby --remote",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs test/xlsx.test.mjs test/public.test.mjs",
-    "test:e2e": "node scripts/sandbox.mjs --state .wrangler/e2e --port 8791 -- node --test test/e2e.test.mjs",
-    "seed": "node scripts/sandbox.mjs --state .wrangler/demo --port 8790 --keep -- node scripts/seed-demo.mjs",
-    "preview": "node scripts/build-preview.mjs"
+    "test:e2e": "node scripts/sandbox.mjs --state .sandbox/e2e --port 8791 -- node --test test/e2e.test.mjs",
+    "seed": "node scripts/sandbox.mjs --state .sandbox/demo --port 8790 --keep -- node scripts/seed-demo.mjs",
+    "preview": "node scripts/build-preview.mjs",
+    "vendor": "node scripts/fetch-vendor.mjs",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:db:local": "wrangler d1 migrations apply surucubby --local",
+    "worker:db:remote": "wrangler d1 migrations apply surucubby --remote"
   },
   "repository": {
     "type": "git",
@@ -29,9 +32,13 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260920.1",
+    "@types/node": "^24.0.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.135.0"
   },
   "private": true,
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "node": ">=22.16"
+  }
 }
