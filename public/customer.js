@@ -38,6 +38,8 @@ async function api(path, options) {
 
 function renderVerify(message, kind = 'err') {
   document.body.classList.remove('has-shipbar');
+  app.classList.remove('wide');
+  lastData = null;
   app.innerHTML = `
     <div class="card">
       <h1>我的仓库</h1>
@@ -88,6 +90,8 @@ function renderVerify(message, kind = 'err') {
 /** 还在用统一的初始密码时先进这一屏：不改密码就下不了单。 */
 function renderMustChange(data) {
   document.body.classList.remove('has-shipbar');
+  app.classList.remove('wide');
+  lastData = null;
   app.innerHTML = `
     <div class="card">
       <h1>先改一下密码</h1>
@@ -310,14 +314,27 @@ function shipBar(data) {
   if (!open.length || !(data.addresses || []).length) return '';
   return `
     <div class="shipbar">
-      <div class="shipbar-inner">
+      <div class="shipbar-inner${WIDE.matches ? ' wide' : ''}">
         <div class="total" id="shipping-total">勾上要寄的商品</div>
         <button id="request-shipping" disabled>提交发货申请</button>
       </div>
     </div>`;
 }
 
+/**
+ * 宽屏（电脑）两栏：左边是东西，右边常驻发货面板，勾完不用往下翻；
+ * 手机一栏，「可发货」和「申请发货」紧挨着。跨过断点（转屏、拉窗口）时按当前数据重画一次。
+ */
+const WIDE = window.matchMedia('(min-width: 1100px)');
+let lastData = null;
+WIDE.addEventListener('change', () => {
+  if (lastData) render(lastData);
+});
+
 function render(data) {
+  lastData = data;
+  const wide = WIDE.matches;
+  app.classList.toggle('wide', wide);
   // 增删地址会整页重画，勾过的商品和滚到的位置得留住
   keep.scrollY = window.scrollY;
   keep.selected = new Set(
@@ -500,14 +517,14 @@ function render(data) {
       }</p>
     </div>
     ${pwNotice}
-    ${stockHtml}
-    ${shipPanel(data)}
-    ${requestsHtml}
-    ${groupsHtml}
-    ${intlHtml}
-    ${shipHtml}
-    ${closedHtml}
-    ${timelineHtml}
+    ${
+      wide
+        ? `<div class="cols">
+            <div class="main">${stockHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}</div>
+            <aside class="side">${shipPanel(data)}${requestsHtml}</aside>
+          </div>`
+        : `${stockHtml}${shipPanel(data)}${requestsHtml}${groupsHtml}${intlHtml}${shipHtml}${closedHtml}${timelineHtml}`
+    }
     <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>
     ${barHtml}`;
   bindWarehouse(data);
