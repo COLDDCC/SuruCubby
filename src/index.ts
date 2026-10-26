@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from './lib/env.ts';
 import { HttpError } from './lib/http.ts';
-import { adminGuard } from './lib/session.ts';
+import { adminGuard, staffGuard } from './lib/session.ts';
+import { auditLog } from './lib/audit.ts';
+import { staffRoutes } from './routes/admin/staff.ts';
 import { authRoutes } from './routes/admin/auth.ts';
 import { dashboardRoutes } from './routes/admin/dashboard.ts';
 import { importRoutes } from './routes/admin/import.ts';
@@ -99,6 +101,11 @@ app.route('/api/admin', authRoutes);
 
 // 其余管理接口一律校验会话
 app.use('/api/admin/*', adminGuard);
+app.use('/api/admin/*', auditLog);
+// 日本仓那几页：管理员和日本仓账号都能进
+app.use('/api/staff/*', staffGuard);
+app.use('/api/staff/*', auditLog);
+app.route('/api/admin/staff', staffRoutes);
 app.route('/api/admin/dashboard', dashboardRoutes);
 app.route('/api/admin/import', importRoutes);
 app.route('/api/admin/batches', batchRoutes);

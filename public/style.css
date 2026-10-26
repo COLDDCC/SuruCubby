@@ -934,3 +934,49 @@ button.block {
     height: 96px;
   }
 }
+
+/* 表单两列：宽屏并排，手机一列 */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 4px 16px;
+  align-items: start;
+}
+.form-grid input,
+.form-grid select {
+  width: 100%;
+}
+.form-grid-full {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* 宽表格在窄屏横向滑动，不撑破页面 */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+td.actions {
+  white-space: nowrap;
+  text-align: right;
+}
+td.actions button + button {
+  margin-left: 4px;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.wrap-any {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+@media (max-width: 480px) {
+  td.actions {
+    white-space: normal;
+  }
+  td.actions button {
+    margin: 2px 0 2px 4px;
+  }
+}
