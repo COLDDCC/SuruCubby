@@ -1,6 +1,65 @@
-# SuruCubby · 群友电子仓库
+# SuruCubby · 代购电子仓库
 
-当前流程：日本订单 Excel → 客户仓库 → 拆包/合包并填写回国单号 → 称重（逐件或整摞）、确认运费 → 绿色「可发货」 → 客户选商品和地址申请发货 → 群主核对扫码转账 → 填写国内快递单号寄出。
+三方一起用：**代购（管理员）** 导入订单、确认收款；**日本仓** 按表签收、分拣、打包；**客户** 随时看到自己买了什么、到了哪一步、单号是多少。不接在线支付，一律扫码转账、管理员点「确认收款」。
+
+两条发货路线，导入表里「发货方式」一列写好（空着算拼团）：
+
+- **拼团**：日本订单 Excel → 日本仓签收 → 装回国箱、填回国单号 → 国内称重分摊 → 绿色「可发货」 → 客户申请发货 → 确认收款 → 国内快递寄出。
+- **直邮**：日本订单 Excel → 日本仓签收 → 按客户打包、称重（运费 = 重量 × 直邮单价）→ 客户扫码付款、管理员确认 → 日本仓填国际单号寄出 → 客户页看到单号和这一包里有哪几本。
+
+两条路都一样：**没确认收款就不能寄出**。
+
+## 账号和角色（新）
+
+| 角色 | 谁 | 看得到 / 能做 |
+| --- | --- | --- |
+| 管理员 | 代购本人；国内分发的人也开管理员 | 全部 |
+| 日本仓 | 自己或信得过的朋友 | 只有「日本仓」「直邮」两页：签收、分拣、封箱发出、打包称重、寄出。看不到货款、收款记录、客户 QQ 和真名 |
+| 客户 | 群友 | 只读自己的；存地址、申请发货、选直邮地址 |
+
+- 后台登录是「账号 + 密码」。环境变量 `ADMIN_PASSWORD` 一直可以用账号 `admin` 登录，作为兜底；其余账号在「设置 → 员工账号」里开。
+- 员工改密码、被停用，当场掉线。日本仓账号调任何管理员接口都是 403（后端拦，不只是藏按钮）。
+- 所有成功的写操作记进「设置 → 操作记录」：谁、什么时候、做了什么。密码字段打码。
+
+## 日本仓和直邮怎么用（新）
+
+1. **导入**：表里多两列（都可选）——「发货方式」写 直邮 / 拼团（EMS、直发也认；看不懂的标黄拦下），「收货地址」写直邮地址。直邮的件不进回国箱。导入后在批次页勾选也能改，只要还没装箱打包。
+2. **日本仓 → 待签收**：日本的快递到了，按日本订单整单签收，或只勾到了的件。
+3. **日本仓 → 回国箱**：拼团的件签收齐了，填回国单号「封箱发出」，客户页变「回国中」并显示单号。箱里有没签收的件会拦下。
+4. **日本仓 → 待打包直邮**：按客户列出，标明地址有没有着落（导入表里写了 > 客户在自己页面上选了 > 客户只存了一个地址就用它）。勾上件、可顺手填重量，打成一包。
+5. **直邮包裹页**：称重 → 客户页出现运费 → 客户扫码付款 → 管理员点「确认收款」（待办首页也有这一栏）→ 日本仓填国际单号寄出 → 客户页显示单号、包里每一件。称重时把单价存档，之后改「设置」里的直邮单价不影响已称好的包裹。付了款就封账，要改先在收款记录里撤销那笔钱。
+
+## 部署到 VPS（香港 / 东京，中日都能稳定访问）
+
+Cloudflare Workers 免费版给大陆用户走海外节点，`*.workers.dev` 被墙，所以正式部署改成一台小 VPS：同一份代码用 Node 跑（`src/server.ts`），数据库是本地 SQLite 文件，不需要 ICP 备案。
+
+1. 买一台香港或东京、标明大陆优化线路（CN2 GIA / 精品网）的 VPS，1 核 1 GB 就够，Ubuntu 22.04/24.04。先按小时计费，请国内不同省份、不同运营商的群友打开测一下速度再包月。
+2. Cloudflare 的 DNS 里给域名（比如 `cang.你的域名`）加一条 **A 记录指向 VPS 的 IP**，代理状态选 **DNS only（灰色云朵）**。Cloudflare 买的域名只能用 Cloudflare 的 DNS，但灰色云朵下流量直连你的服务器，不走 Cloudflare 的海外节点。
+3. 在 VPS 上一条命令装好（Node 24、Caddy 自动 HTTPS、systemd、每天凌晨 4 点备份）：
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/main/deploy/setup.sh -o setup.sh
+   sudo DOMAIN=cang.你的域名 bash setup.sh
+   ```
+
+   过程中会让你设后台引导密码（账号 `admin`）。装完打开 `https://cang.你的域名/admin/`。
+4. 以后更新：`sudo bash /opt/surucubby/deploy/update.sh`（拉代码、装依赖、先备份再重启，迁移自动打）。
+5. 备份在 `/var/lib/surucubby/backups/`，留 30 天；`/etc/surucubby.env` 里填 `BACKUP_REMOTE`（rclone 远端，比如 Cloudflare R2）就再传一份异地。恢复：`sudo bash /opt/surucubby/deploy/restore.sh <备份文件.db.gz>`。
+
+页面不加载任何境外资源：SheetJS 由 `npm run vendor` 下到本机（安装 / 更新脚本自动跑），封面图经自己服务器代理并缓存到磁盘。
+
+> 仍然可以部署到 Cloudflare Workers（`npm run worker:deploy` 等，见下文旧版说明），作为备用。
+
+## 本地开发
+
+```bash
+npm install            # 注意用 install，不要用 ci（这次加了 @types/node，lock 文件需要本地更新一次）
+cp .dev.vars.example .env   # 填 ADMIN_PASSWORD 和 SESSION_SECRET
+npm run dev            # http://127.0.0.1:8787，数据在 ./data/，迁移启动时自动打
+npm run seed           # 另起 8790 + 演示数据（含一单直邮、日本仓账号 tokyo / tokyo-demo）
+```
+
+需要 Node 22.16 以上（用的是 Node 自带的 `node:sqlite`），推荐 Node 24。
 
 ## 本次更新与使用规则
 
@@ -19,13 +78,13 @@
 
 ## 更新已有部署
 
-先备份数据库，执行 `npm run db:remote` 应用 `0002_workflow.sql`，再 `npm run deploy`。新安装也必须先建库并应用全部迁移。此仓库的 D1 ID 仍是占位符，未自动部署到生产环境。
+VPS：`sudo bash /opt/surucubby/deploy/update.sh`，迁移在启动时自动打。Workers（备用）：先备份，`npm run worker:db:remote` 再 `npm run worker:deploy`。
 
 旧版按客户整摞称重生成的账目保留查看；若需要客户逐件申请发货，先在未收款、未寄出的条件下撤销旧分摊，再逐件填重量重新确认，不能直接猜每件重量。
 
 ## 验证
 
-`npm run typecheck`、`npm test`；`npm run test:e2e`（自己起隔离实例，不用另开终端）。默认本地密码 test-admin-pw，仅测试使用。
+`npm run typecheck`、`npm test`；`npm run test:e2e`（自己起隔离的 Node 实例，不用另开终端；包括员工角色 `test/e2e-staff.test.mjs` 和直邮全流程 `test/e2e-direct.test.mjs`）。默认本地密码 test-admin-pw，仅测试使用。
 
 ---
 
@@ -37,40 +96,29 @@
 
 | 部分       | 选择                                                    |
 | ---------- | ------------------------------------------------------- |
-| 运行环境   | Cloudflare Workers + 静态资源                           |
+| 运行环境   | Node（VPS，`src/server.ts`）；Cloudflare Workers 备用   |
 | 后端       | Hono                                                    |
-| 数据库     | Cloudflare D1（SQLite）                                 |
+| 数据库     | SQLite：Node 上 `node:sqlite`，Workers 上 D1           |
 | Excel 解析 | 浏览器端 SheetJS，解析成 JSON 再提交，Worker 不碰二进制 |
 | 前端       | 原生 HTML/ES Module，手机优先，无构建步骤               |
 
 硬性约定：**金额一律用整数「分」存**，日元用整数「円」存；时间存 UTC，页面按北京时间显示。
 
-## 本地跑起来
-
-```bash
-npm install
-cp .dev.vars.example .dev.vars     # 填上 ADMIN_PASSWORD 和 SESSION_SECRET
-npm run db:local                   # 建本地库表
-npm run dev                        # http://127.0.0.1:8787
-```
-
-打开 <http://127.0.0.1:8787/admin/>，用 `.dev.vars` 里的密码登录。
-
-## 部署到 Cloudflare
+## 部署到 Cloudflare（备用）
 
 ```bash
 npm install
 npx wrangler login                          # 浏览器里授权一次 Cloudflare 账号
 
 npx wrangler d1 create surucubby            # 把返回的 database_id 填进 wrangler.toml
-npm run db:remote                           # 在线上库建表
-npm run deploy                              # 先部署，Worker 才存在
+npm run worker:db:remote                    # 在线上库建表
+npm run worker:deploy                       # 先部署，Worker 才存在
 
 npx wrangler secret put ADMIN_PASSWORD      # 后台密码
 npx wrangler secret put SESSION_SECRET      # Cookie 签名密钥，随便一串长随机字符串
 ```
 
-密码和密钥设好就立刻生效，不用再 deploy 一次。以后改代码只要 `npm run deploy`。
+密码和密钥设好就立刻生效，不用再 deploy 一次。以后改代码只要 `npm run worker:deploy`。
 
 部署完**务必绑定自己的域名**（Workers 控制台 → 该 Worker → Settings → Domains & Routes）。
 `*.workers.dev` 在国内经常打不开。
@@ -226,12 +274,17 @@ diff   = F − Σ fee_i                 -- 尾差，累加进 rounding_logs，�
 
 ```
 src/
-  index.ts              Worker 入口与路由挂载
-  lib/                  纯逻辑：金额换算、Excel 映射、分摊、状态、签名 Cookie、客户视图
-  routes/admin/         后台接口（登录、导入、批次、包裹、称重、客户、寄出、收款、设置）
+  index.ts              Hono 应用与路由挂载（Workers 入口）
+  server.ts             Node / VPS 入口：HTTP 服务、自动打迁移
+  node/                 Node 底座：node:sqlite 的 D1 兼容层、静态资源、磁盘图片缓存
+  types/platform.d.ts   用到的那一小块 Cloudflare 接口类型
+  lib/                  纯逻辑：金额、Excel 映射、分摊、状态、签名 Cookie、员工、操作日志、发货路线
+  routes/admin/         管理员接口（登录、员工、导入、批次、包裹、称重、客户、寄出、收款、设置）
+  routes/staff/         管理员 + 日本仓都能用的接口：jp.ts（签收 / 分拣 / 封箱）、direct.ts（直邮）
   routes/customer.ts    客户页接口（QQ + 密码登录、限流、只读数据、改密码）
-public/                 静态页面：/admin/ 单页后台、/customer.html 客户页
-migrations/             D1 建表脚本
+public/                 静态页面：/admin/ 单页后台（含日本仓、直邮）、/customer.html 客户页
+migrations/             建表脚本（Node 和 D1 共用）
+deploy/                 VPS 安装、更新、备份、恢复脚本，Caddy / systemd 配置
 test/                   单元测试 + 端到端验收脚本
 ```
 
@@ -279,6 +332,8 @@ npm i --no-save xlsx && node --test test/xlsx.test.mjs
 ## 还没做 / 待确认
 
 方案第 1 节里明确不做的：客户注册登录、在线支付、自动通知、多代购、条码扫描。
+
+这次（日本仓 / 直邮）留着没定的：直邮运费要不要按 100 g / 500 g 进位（现在按实际克数，向上取整到分）；直邮签收现在由管理员标，客户自己点签收还没做；状态日志的每一行还没记操作人（操作人记在操作记录里）。
 
 方案第 13 节的待确认项，目前的处理方式：
 
