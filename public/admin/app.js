@@ -13,7 +13,8 @@ const sheet = document.getElementById('more-sheet');
  */
 const NAV = [
   { href: '#/', label: '待办', roles: ['admin'], primary: true },
-  { href: '#/jp', label: '日本仓', roles: ['admin', 'jp'], primary: true },
+  // also：不在菜单上、但属于这一项的页面（分拣页、分拣结果），点亮菜单和权限都按它算
+  { href: '#/jp', label: '日本仓', roles: ['admin', 'jp'], primary: true, also: ['/sort', '/sort-result'] },
   { href: '#/import', label: '导入', roles: ['admin'] },
   { href: '#/batches', label: '批次', roles: ['admin'] },
   { href: '#/packages', label: '包裹', roles: ['admin'], primary: true },
@@ -80,6 +81,8 @@ const routes = [
   { pattern: /^\/payments$/, module: () => import('/admin/views/payments.js') },
   { pattern: /^\/settings$/, module: () => import('/admin/views/settings.js') },
   { pattern: /^\/jp$/, module: () => import('/admin/views/jp.js') },
+  { pattern: /^\/sort\/(\d+)$/, module: () => import('/admin/views/sort.js') },
+  { pattern: /^\/sort-result\/(\d+)$/, module: () => import('/admin/views/sortResult.js') },
   { pattern: /^\/direct$/, module: () => import('/admin/views/direct.js') },
 ];
 
@@ -103,12 +106,17 @@ function highlightItem() {
   el.scrollIntoView({ block: 'center' });
 }
 
+function navMatches(n, path) {
+  const target = n.href.replace(/^#/, '');
+  if (target === '/') return path === '/';
+  return [target, ...(n.also ?? [])].some((t) => path === t || path.startsWith(t + '/'));
+}
+
 function markNav() {
   const path = currentPath();
   document.querySelectorAll('#nav a, #tabbar a, #more-links a').forEach((a) => {
-    const target = a.getAttribute('href').replace(/^#/, '');
-    const active = target === '/' ? path === '/' : path === target || path.startsWith(target + '/');
-    a.classList.toggle('active', active);
+    const n = NAV.find((x) => x.href === a.getAttribute('href'));
+    a.classList.toggle('active', !!n && navMatches(n, path));
   });
   // 当前页不在底栏上（收在「更多」里）时，把「更多」点亮，让人知道自己在哪
   const more = document.getElementById('more-open');
@@ -167,10 +175,7 @@ export async function route() {
   let path = currentPath();
   // 日本仓账号没有「待办」，首页直接是日本仓
   if (session.role === 'jp' && path === '/') path = '/jp';
-  const allowed = menuFor(session.role).some((n) => {
-    const target = n.href.replace(/^#/, '');
-    return target === '/' ? path === '/' : path === target || path.startsWith(target + '/');
-  });
+  const allowed = menuFor(session.role).some((n) => navMatches(n, path));
   const match = routes.find((r) => r.pattern.test(path));
   if (!match || (session.role !== 'admin' && !allowed)) {
     view.innerHTML = '<div class="card"><p>页面不存在，或者这个账号看不了这一页。</p></div>';

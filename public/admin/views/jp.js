@@ -1,15 +1,16 @@
 import { api } from '/admin/api.js';
-import { bindActions, codeTag, confirmBox, escapeHtml, ROUTE_LABELS, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, ROUTE_LABELS, toast } from '/admin/ui.js';
+import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
  * 日本仓：三件事分三栏——
- *   待签收     日本的快递到了，按日本订单逐件或整单签收；
- *   回国箱     拼团的件装箱，齐了填回国单号发出；
- *   待打包直邮 按客户把直邮的件装成一包（可顺手填重量），之后去「直邮」页收款寄出。
+ *   待分拣     日本的快递到了：按日本运单号（一个快递箱）进分拣页，铺在地上照卡片分堆，发送一次落定；
+ *   回国箱     分拣时没填回国单号的箱子，在这里填单号发出；
+ *   待打包直邮 分拣时客户还没地址的直邮件，等客户填了地址在这里打包。
  * 手机上一次看一栏（顶上切换），电脑上三栏一起列。
  */
 const TABS = [
-  { key: 'inbound', label: '待签收' },
+  { key: 'inbound', label: '待分拣' },
   { key: 'boxes', label: '回国箱' },
   { key: 'direct', label: '待打包直邮' },
 ];
@@ -23,6 +24,7 @@ function cover(item) {
 
 function itemRow(item, { pick = false, checked = false, route = true } = {}) {
   return `<label class="jp-item${item.missing ? ' is-missing' : ''}" data-focus-item="${item.id}">
+    <button type="button" class="small plain jp-info" data-detail="${item.id}">详情</button>
     ${pick ? `<input type="checkbox" data-pick="${item.id}" ${checked ? 'checked' : ''}>` : ''}
     <span class="jp-cover">${cover(item)}</span>
     <span class="jp-text">
@@ -34,25 +36,51 @@ function itemRow(item, { pick = false, checked = false, route = true } = {}) {
   </label>`;
 }
 
-function inboundHtml(list) {
-  if (!list.length) return '<div class="card"><p class="empty">没有待签收的件，日本那边的货都到了。</p></div>';
-  return list
-    .map(
-      (b) => `<div class="card" data-batch="${b.id}">
-        <div class="row" style="justify-content:space-between;align-items:flex-start">
-          <div>
-            <h3 style="margin:0">${escapeHtml(b.name)}</h3>
-            <p class="small muted" style="margin:4px 0 0">日本订单 <b>${escapeHtml(b.orderNo || '—')}</b> · 日本单号
-              ${b.japanTrackingNo ? `<b>${escapeHtml(b.japanTrackingNo)}</b> <button class="small plain" data-copy="${escapeHtml(b.japanTrackingNo)}">复制</button>` : '—'}</p>
-          </div>
-          <button data-action="receiveAll" data-batch="${b.id}">整单签收（${b.items.length} 件）</button>
-        </div>
-        <div class="jp-list">${b.items.map((i) => itemRow(i, { pick: true })).join('')}</div>
-        <p style="margin:8px 0 0"><button class="small plain" data-action="receivePicked" data-batch="${b.id}">只签收勾上的</button>
-          <span class="small muted">没到的别勾，告诉管理员标缺货。</span></p>
+function queueHtml(queue) {
+  const batches = queue.batches;
+  const recent = queue.sessions.length
+    ? `<div class="card"><h3 style="margin-top:0">最近分拣</h3>${queue.sessions
+        .slice(0, 8)
+        .map(
+          (s) => `<a class="recent-row" href="#/sort-result/${s.id}"><span>${beijingTime(s.createdAt)} · ${escapeHtml(s.createdBy)}</span>
+            <span class="small muted">${s.jpTrackingNo ? `运单 ${escapeHtml(s.jpTrackingNo)} · ` : ''}${s.itemCount} 件 · ${s.boxCount} 箱 · ${s.parcelCount} 包直邮${s.missingCount ? ` · 缺 ${s.missingCount}` : ''}</span></a>`,
+        )
+        .join('')}</div>`
+    : '';
+  if (!batches.length) return `<div class="card"><p class="empty">没有要分拣的货，日本那边的都分完了。</p></div>${recent}`;
+  return (
+    batches
+      .map(
+        (b) => `<div class="card">
+        <h3 style="margin:0">${escapeHtml(b.name)}</h3>
+        <p class="small muted" style="margin:4px 0 8px">日本订单 <b>${escapeHtml(b.orderNo || '—')}</b> · 下单 ${escapeHtml(b.orderedAt || '—')} · 还有 ${b.total} 件没分${
+          b.missing ? ` · <span class="unpaid">${b.missing} 件上次没找到</span>` : ''
+        }</p>
+        ${b.boxes
+          .map(
+            (x) => `<a class="queue-row" href="#/sort/${b.batchId}?tn=${encodeURIComponent(x.trackingNo)}">
+              <span><span class="small muted">日本运单</span> <b class="mono">${escapeHtml(x.trackingNo)}</b></span>
+              <span class="small">${x.count} 件${x.found ? ` · 已点 ${x.found}` : ''}${b.untracked ? ` <span class="muted">+ 没写运单号的 ${b.untracked}</span>` : ''}</span>
+              <span class="btn small">分拣这一箱 →</span></a>`,
+          )
+          .join('')}
+        ${
+          b.untracked && !b.boxes.length
+            ? `<a class="queue-row" href="#/sort/${b.batchId}">
+                <span>表里没写日本运单号${b.japanTrackingNo ? `（订单上的单号 <b class="mono">${escapeHtml(b.japanTrackingNo)}</b>）` : ''}</span>
+                <span class="small">${b.untracked} 件${b.untrackedFound ? ` · 已点 ${b.untrackedFound}` : ''}</span>
+                <span class="btn small">开箱分拣 →</span></a>`
+            : ''
+        }
+        ${
+          b.untracked && b.boxes.length
+            ? `<p class="small muted" style="margin:6px 0 0">没写运单号的 ${b.untracked} 件会出现在每一箱的分拣页里，哪箱里找到就算哪箱。</p>`
+            : ''
+        }
       </div>`,
-    )
-    .join('');
+      )
+      .join('') + recent
+  );
 }
 
 function boxesHtml(list) {
@@ -108,9 +136,9 @@ function directHtml(list) {
 }
 
 export async function render(view) {
-  const data = await api.get('/api/staff/jp/overview');
+  const [data, queue] = await Promise.all([api.get('/api/staff/jp/overview'), api.get('/api/staff/sort/queue')]);
   const counts = {
-    inbound: data.inbound.reduce((n, b) => n + b.items.length, 0),
+    inbound: queue.batches.reduce((n, b) => n + b.total, 0),
     boxes: data.boxes.length,
     direct: data.direct.reduce((n, g) => n + g.items.length, 0),
   };
@@ -130,7 +158,7 @@ export async function render(view) {
       </div>
     </div>
     <div class="jp-cols">
-      <section class="jp-col" data-col="inbound"><h3 class="col-title">待签收</h3>${inboundHtml(data.inbound)}</section>
+      <section class="jp-col" data-col="inbound"><h3 class="col-title">待分拣</h3>${queueHtml(queue)}</section>
       <section class="jp-col" data-col="boxes"><h3 class="col-title">回国箱</h3>${boxesHtml(data.boxes)}</section>
       <section class="jp-col" data-col="direct"><h3 class="col-title">待打包直邮</h3>${directHtml(data.direct)}</section>
     </div>`;
@@ -159,24 +187,11 @@ export async function render(view) {
     };
   });
 
+  bindItemDetails(view);
+
   const picked = (root) => [...root.querySelectorAll('[data-pick]:checked')].map((el) => Number(el.dataset.pick));
 
   bindActions(view, {
-    async receiveAll({ batch }) {
-      const card = view.querySelector(`[data-batch="${batch}"]`);
-      const ids = [...card.querySelectorAll('[data-pick]')].map((el) => Number(el.dataset.pick));
-      if (!(await confirmBox(`这一单 ${ids.length} 件全部签收？`, { okText: '全部签收' }))) return;
-      const r = await api.post('/api/staff/jp/receive', { itemIds: ids });
-      toast(`签收了 ${r.received} 件`);
-      await render(view);
-    },
-    async receivePicked({ batch }) {
-      const ids = picked(view.querySelector(`[data-batch="${batch}"]`));
-      if (!ids.length) return toast('先勾上到了的件', true);
-      const r = await api.post('/api/staff/jp/receive', { itemIds: ids });
-      toast(`签收了 ${r.received} 件`);
-      await render(view);
-    },
     async shipBox({ box }) {
       const trackingNo = view.querySelector(`[data-box-tracking="${box}"]`).value.trim();
       if (!trackingNo) return toast('先填回国单号', true);

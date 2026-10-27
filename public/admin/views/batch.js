@@ -12,6 +12,7 @@ import {
   promptBox,
   ROUTE_LABELS,
 } from '/admin/ui.js';
+import { bindItemDetails } from '/admin/itemDetail.js';
 
 /** 还在日本这一侧、没装箱没打包的件才能改发货方式（和后端 changeRoute 同一个口径）。 */
 function routeEditable(i) {
@@ -61,7 +62,8 @@ export async function render(view, [id]) {
               <td><input type="checkbox" data-pick="${i.id}" data-owner="${g.customerId}" ${routeEditable(i) ? '' : 'disabled title="已装箱、打包或发出，不能再改发货方式"'}></td>
               <td class="cell-thumb">${thumb(i)}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
-                <div>${codeTag(i)} <span class="small muted">第 ${i.rowNo ?? '?'} 行 · 实际价格 ${yen(i.actualPriceJpy)}</span></div></td>
+                <div>${codeTag(i)} <span class="small muted">第 ${i.rowNo ?? '?'} 行 · 实际价格 ${yen(i.actualPriceJpy)}</span>
+                  <button class="small plain" data-detail="${i.id}">详情</button></div></td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td>${routeTag(i)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
@@ -116,6 +118,7 @@ export async function render(view, [id]) {
     };
   });
 
+  bindItemDetails(view);
   bindActions(view, {
     route: async ({ route }) => {
       const ids = [...view.querySelectorAll('[data-pick]:checked')].map((el) => Number(el.dataset.pick));

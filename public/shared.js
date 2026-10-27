@@ -150,3 +150,100 @@ export function codeTag(item) {
   if (!code) return `<a class="code" href="${url}" target="_blank" rel="noreferrer">商品页</a>`;
   return `<a class="code" href="${url}" target="_blank" rel="noreferrer" title="${url}">${escapeHtml(code)}</a>`;
 }
+
+/**
+ * 一件东西的完整信息（后台、日本仓、客户页共用一份排版）。
+ * 单号后面都带「复制」按钮：data-copy，由页面自己绑定（copyText）。
+ */
+export function itemDetailHtml(d) {
+  const copy = (v) => (v ? ` <button class="small plain" data-copy="${escapeHtml(v)}">复制</button>` : '');
+  const row = (label, value) =>
+    `<div class="dl-row"><span class="dl-k">${label}</span><span class="dl-v">${value}</span></div>`;
+  const none = '<span class="muted">—</span>';
+  const tn = (v) => (v ? `<b class="mono">${escapeHtml(v)}</b>${copy(v)}` : '<span class="muted">还没有</span>');
+  const routeText = d.route === 'direct' ? '日本直邮' : '拼团';
+
+  const shipping = [];
+  if (d.route === 'direct') {
+    shipping.push(
+      row(
+        '直邮单号',
+        d.direct
+          ? `${d.direct.carrier ? `${escapeHtml(d.direct.carrier)} ` : ''}${tn(d.direct.trackingNo)}
+             <div class="small muted">直邮包裹 #${d.direct.parcelId} · ${escapeHtml(d.direct.statusLabel || '')}${
+               d.direct.feeFen !== undefined && d.direct.feeFen !== null ? ` · 运费 ${money(d.direct.feeFen)}` : ''
+             }</div>`
+          : '<span class="muted">还没打包</span>',
+      ),
+    );
+  } else {
+    shipping.push(
+      row(
+        '回国单号',
+        d.returnBox
+          ? `${tn(d.returnBox.trackingNo)}<div class="small muted">${escapeHtml(d.returnBox.name || '')}</div>`
+          : '<span class="muted">还没装箱</span>',
+      ),
+    );
+    shipping.push(row('国内单号', d.domestic ? tn(d.domestic.trackingNo) : '<span class="muted">还没从国内寄出</span>'));
+  }
+
+  const p = d.prices;
+  const prices = p
+    ? row(
+        '价格',
+        `实际价 ${yen(p.actualPriceJpy)}${p.listPriceJpy ? ` · 平时价 ${yen(p.listPriceJpy)}` : ''} · 应付 <b>${yen(p.goodsFeeJpy)}</b>
+         <span class="badge ${p.goodsPaid ? 'ok' : 'danger'}">${p.goodsPaid ? '货款已付' : '货款未付'}</span>`,
+      )
+    : '';
+
+  return `
+    <div class="detail">
+      <div class="detail-head">
+        <div class="detail-cover">${thumb(d)}</div>
+        <div>
+          <div class="detail-title">${
+            d.product?.url
+              ? `<a href="${escapeHtml(d.product.url)}" target="_blank" rel="noreferrer">${escapeHtml(d.title)}</a>`
+              : escapeHtml(d.title)
+          }</div>
+          <div class="small" style="margin-top:4px">
+            <span class="badge">${escapeHtml(d.statusLabel || '')}</span>
+            <span class="badge ${d.route === 'direct' ? 'warn' : ''}">${routeText}</span>
+            ${d.missing ? '<span class="badge danger">缺件</span>' : ''}
+          </div>
+          ${d.exceptionNote ? `<div class="small" style="color:var(--warn);margin-top:4px">${escapeHtml(d.exceptionNote)}</div>` : ''}
+        </div>
+      </div>
+      <div class="dl">
+        ${row('归属', `<span class="cn-chip">${escapeHtml(d.owner.cn)}</span>${
+          d.owner.nickname && d.owner.nickname !== d.owner.cn ? ` <span class="muted">（${escapeHtml(d.owner.nickname)}）</span>` : ''
+        } · QQ <b class="mono">${escapeHtml(d.owner.qq)}</b>${copy(d.owner.qq)}`)}
+        ${row('下单时间', escapeHtml(d.orderedAt || '—'))}
+        ${row('日本订单号', d.batch.orderNo ? `<b class="mono">${escapeHtml(d.batch.orderNo)}</b>${copy(d.batch.orderNo)}` : none)}
+        ${row('日本运单号', tn(d.jpTrackingNo))}
+        ${shipping.join('')}
+        ${row(
+          '商品页',
+          d.product?.url
+            ? `${escapeHtml(d.product.shop || '商品页')}${d.product.code ? ` · 货号 <b class="mono">${escapeHtml(d.product.code)}</b>` : ''}
+               · <a href="${escapeHtml(d.product.url)}" target="_blank" rel="noreferrer">打开 ↗</a>`
+            : none,
+        )}
+        ${prices}
+        ${row('批次', escapeHtml(d.batch.name || ''))}
+      </div>
+      ${
+        d.timeline?.length
+          ? `<details class="small" ${d.timeline.length <= 6 ? 'open' : ''}><summary>经过（${d.timeline.length} 步）</summary>
+              <ol class="timeline">${d.timeline
+                .map(
+                  (t) => `<li><span class="muted">${beijingTime(t.at)}</span> ${escapeHtml(t.toLabel)}${
+                    t.byName ? ` <span class="muted">· ${escapeHtml(t.byName)}</span>` : ''
+                  }</li>`,
+                )
+                .join('')}</ol></details>`
+          : ''
+      }
+    </div>`;
+}

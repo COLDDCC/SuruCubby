@@ -1,6 +1,7 @@
 import { api } from '/admin/api.js';
 import { currentSession } from '/admin/app.js';
 import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, money, promptBox, toast } from '/admin/ui.js';
+import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
  * 直邮包裹：打包中 → 待付款 → 已付款待寄出 → 已寄出 → 已签收。
@@ -43,8 +44,8 @@ function parcelCard(p, isAdmin, priceFenPerKg) {
   }
   if (p.status === 'paid') {
     actions.push(`<div class="row ship-row">
-      <input data-carrier="${p.id}" placeholder="承运商" value="EMS" style="max-width:120px">
-      <input data-tracking="${p.id}" placeholder="国际单号">
+      <input data-carrier="${p.id}" placeholder="承运商" value="${escapeHtml(p.carrier || 'EMS')}" style="max-width:120px">
+      <input data-tracking="${p.id}" placeholder="国际单号" value="${escapeHtml(p.trackingNo || '')}">
       <button data-action="ship" data-id="${p.id}">寄出</button>
     </div>`);
   }
@@ -74,9 +75,14 @@ function parcelCard(p, isAdmin, priceFenPerKg) {
       <span class="small muted">${p.addressSource === 'import' ? '寄到（导入表）' : '寄到（客户选的）'}</span>
       <div>${escapeHtml(addr)} <button class="small plain" data-copy="${escapeHtml(addr)}">复制地址</button></div>
     </div>
+    ${
+      p.trackingNo && !['shipped', 'delivered'].includes(p.status)
+        ? `<p class="small" style="margin:8px 0 0">${escapeHtml(p.carrier || 'EMS')} 单号 <b class="mono">${escapeHtml(p.trackingNo)}</b>（分拣时填的，寄出时不用再填）</p>`
+        : ''
+    }
     <ul class="parcel-items">${p.items
       .map(
-        (i) => `<li data-focus-item="${i.id}"><span>${escapeHtml(i.title)}</span> ${codeTag(i)}
+        (i) => `<li data-focus-item="${i.id}"><a href="#" data-detail="${i.id}">${escapeHtml(i.title)}</a> ${codeTag(i)}
           ${
             p.status === 'packing' || p.status === 'awaiting_payment'
               ? `<button class="small plain" data-action="remove" data-id="${p.id}" data-item="${i.id}" title="拿出这一件">拿出</button>`
@@ -128,6 +134,7 @@ export async function render(view) {
     };
   });
 
+  bindItemDetails(view);
   bindActions(view, {
     async weigh({ id }) {
       const weightG = Number(view.querySelector(`[data-weight="${id}"]`).value.trim());

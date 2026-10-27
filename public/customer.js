@@ -1,4 +1,4 @@
-import { beijingTime, codeTag, copyText, escapeHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, codeTag, copyText, escapeHtml, itemDetailHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
@@ -188,6 +188,7 @@ function itemCard(item) {
         </div>
         ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
         ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
+        <div style="margin-top:4px"><button class="small plain" data-item-detail="${item.id}">详情：下单时间、单号</button></div>
         ${item.intlFeeFen === null || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
         ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
         ${noFee}
@@ -650,6 +651,25 @@ async function boot() {
 
 boot();
 
+/** 一件东西的完整信息：下单时间、日本订单号 / 运单号、回国 / 国内 / 直邮单号、商品页。 */
+async function openDetail(id) {
+  const r = await api(`/api/w/${encodeURIComponent(token)}/items/${id}`);
+  if (!r.ok) throw Error(r.data.error || '打不开，稍后再试');
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `<div class="modal">${itemDetailHtml(r.data)}
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="plain" data-close>关闭</button></div></div>`;
+  const close = () => back.remove();
+  back.onclick = (e) => {
+    if (e.target === back) close();
+  };
+  back.querySelector('[data-close]').onclick = close;
+  back.querySelectorAll('[data-copy]').forEach((b) => {
+    b.onclick = async () => toast((await copyText(b.dataset.copy)) ? '已复制' : '复制不了，长按手动复制');
+  });
+  document.body.appendChild(back);
+}
+
 function bindWarehouse(data){
  const endpoint=`/api/w/${encodeURIComponent(token)}`;
  const send=async(path,method,body)=>{const r=await api(endpoint+path,{method,headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw Error(r.data.error||'保存失败');await boot();};
@@ -658,6 +678,7 @@ function bindWarehouse(data){
  app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
  app.querySelectorAll('input[name="direct-address"]').forEach(el=>el.onchange=handle(()=>send('/direct-address','POST',{addressId:Number(el.value)})));
+ app.querySelectorAll('[data-item-detail]').forEach(el=>el.onclick=handle(()=>openDetail(Number(el.dataset.itemDetail))));
  const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
  const logout=app.querySelector('#logout');
  // 退出不走 send()：那玩意会立刻重新拉一次仓库，白跑一趟还先把页面画出来

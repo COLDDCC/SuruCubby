@@ -137,33 +137,61 @@ const shipment = await call('POST', '/api/admin/shipments', {
 });
 await call('PATCH', `/api/admin/shipments/${shipment.id}`, { trackingNo: 'SF1234567890' });
 
-// 第二单：日本直邮 + 拼团混在一张表里，演示日本仓签收、分拣、直邮打包
+// 第二单：日本直邮 + 拼团混在一张表里，骏河屋分两个快递箱到（表里写了日本运单号）
+const pic = (k, i) => `https://images.suruga-ya.jp/database/pics/${k}/DEMO${2001 + i}.jpg`;
+const url = (i) => `https://www.suruga-ya.jp/product/detail/DEMO${2001 + i}`;
+const SECOND = [
+  ['GSC figma 初音未来 V4X', 'figure', 5200, '团子', '直邮', null, '4908-1234-5678'],
+  ['MegaHouse G.E.M. 鬼灭之刃 炭治郎', 'figure', 3900, '团子', '直邮', null, '4908-1234-5678'],
+  ['ONE PIECE 全彩版 1-12', 'book', 4400, '芋圆', '直邮', '广东省深圳市南山区科技园某栋 1201 芋圆 13800001234', '4908-1234-5678'],
+  ['一番赏 间谍过家家 阿尼亚', 'prize', 1300, '小K', '拼团', null, '4908-1234-5678'],
+  ['figma 进击的巨人 利威尔', 'figure', 4100, '阿狸', '', null, '4908-1234-5678'],
+  ['咒术回战 0 剧场版 设定集', 'book', 2600, '阿狸', '拼团', null, '4908-1234-5678'],
+  ['Nendoroid 孤独摇滚 喜多郁代', 'figure', 3300, '小K', '拼团', null, '4908-1234-5678'],
+  ['电锯人 1-16 卷', 'book', 3800, '团子', '拼团', null, '4908-1234-5678'],
+  ['偶像大师 闪耀色彩 色纸', 'prize', 900, '芋圆', '拼团', null, '4908-8765-4321'],
+  ['蓝色监狱 一番赏 潔世一', 'prize', 1500, '小K', '拼团', null, '4908-8765-4321'],
+  ['葬送的芙莉莲 画集', 'book', 3000, '阿狸', '直邮', null, '4908-8765-4321'],
+];
 const second = await call('POST', '/api/admin/import/commit', {
   fileName: '第13团.xlsx',
   fileHash: 'demo-13',
   batchName: '10月20日 第13团',
   orderNo: 'SURUGA-20261020',
-  japanTrackingNo: '4908-1234-5678',
+  orderedAt: '2026-10-20',
   sheet: {
-    headers: ['名称', '图片', '商品链接', '实际价格', 'cn', '发货方式', '收货地址'],
-    rows: [
-      ['GSC figma 初音未来 V4X', `https://images.suruga-ya.jp/database/pics/figure/DEMO2001.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2001', 5200, '团子', '直邮', null],
-      ['MegaHouse G.E.M. 鬼灭之刃 炭治郎', `https://images.suruga-ya.jp/database/pics/figure/DEMO2002.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2002', 3900, '团子', '直邮', null],
-      ['ONE PIECE 全彩版 1-12', `https://images.suruga-ya.jp/database/pics/book/DEMO2003.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2003', 4400, '芋圆', '直邮', '广东省深圳市南山区科技园某栋 1201 芋圆 13800001234'],
-      ['一番赏 间谍过家家 阿尼亚', `https://images.suruga-ya.jp/database/pics/prize/DEMO2004.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2004', 1300, '小K', '拼团', null],
-      ['figma 进击的巨人 利威尔', `https://images.suruga-ya.jp/database/pics/figure/DEMO2005.jpg`, 'https://www.suruga-ya.jp/product/detail/DEMO2005', 4100, '阿狸', '', null],
-    ],
+    headers: ['名称', '图片', '商品链接', '实际价格', 'cn', '发货方式', '收货地址', '日本运单号'],
+    rows: SECOND.map(([t, k, price, cn, route, addr, tn], i) => [t, pic(k, i), url(i), price, cn, route, addr, tn]),
   },
   assignments: [],
 });
-console.log(`第二单：${second.itemCount} 件，其中直邮 ${second.directCount} 件`);
-const secondItems = (await call('GET', `/api/admin/batches/${second.batchId}`)).items;
+console.log(`第二单：${second.itemCount} 件，其中直邮 ${second.directCount} 件，分两个日本快递箱`);
 await call('POST', '/api/admin/staff', { username: 'tokyo', displayName: '东京仓小王', role: 'jp', password: 'tokyo-demo' });
-// 签收其中四件，留一件演示「待签收」
-await call('POST', '/api/staff/jp/receive', { itemIds: secondItems.filter((i) => !i.title.startsWith('figma 进击')).map((i) => i.id) });
-const yuyuan = secondItems.find((i) => i.title.startsWith('ONE PIECE'));
-const parcel = await call('POST', '/api/staff/direct/parcels', { customerId: yuyuan.customerId, itemIds: [yuyuan.id], weightG: 1850 });
-console.log(`芋圆的直邮包裹 #${parcel.id}：运费 ${parcel.feeFen / 100} 元，等付款`);
+// 团子自己登录、改了密码、存了一个地址（直邮自动用它）
+const tz = await call('POST', '/api/w/login', { qq: '234567891', password: '123456' });
+await call('POST', `/api/w/${tz.token}/password`, { oldPassword: '123456', newPassword: 'tuanzi2026' });
+await call('POST', '/api/w/login', { qq: '234567891', password: 'tuanzi2026' });
+await call('POST', `/api/w/${tz.token}/addresses`, { recipient: '团子', phone: '13900002222', detail: '上海市浦东新区某路 88 弄 6 号 502' });
+console.log('团子的密码已改成 tuanzi2026（演示客户页的直邮包裹）');
+// 第一箱已经分好、发出去了：演示分拣结果；第二箱留着演示分拣页
+const box1 = await call('GET', `/api/staff/sort/${second.batchId}?tn=490812345678`);
+await call('POST', '/api/staff/sort/mark', { itemIds: box1.items.filter((i) => i.title !== 'figma 进击的巨人 利威尔').map((i) => i.id), found: true });
+const byTitle = Object.fromEntries(box1.items.map((i) => [i.title, i]));
+const sorted = await call('POST', `/api/staff/sort/${second.batchId}/commit`, {
+  trackingNo: '490812345678',
+  boxes: [{ trackingNo: 'SF1500098765' }, { trackingNo: 'SF1500098766' }],
+  assign: {
+    [byTitle['一番赏 间谍过家家 阿尼亚'].id]: 1,
+    [byTitle['Nendoroid 孤独摇滚 喜多郁代'].id]: 1,
+    [byTitle['咒术回战 0 剧场版 设定集'].id]: 2,
+    [byTitle['电锯人 1-16 卷'].id]: 2,
+  },
+  direct: [
+    { customerId: byTitle['ONE PIECE 全彩版 1-12'].customerId, trackingNo: 'EB123456789JP', weightG: 1850 },
+    { customerId: byTitle['GSC figma 初音未来 V4X'].customerId, trackingNo: 'EB223456789JP', weightG: 2400 },
+  ],
+});
+console.log(`第一箱分拣完：结果页 ${BASE}/admin/#/sort-result/${sorted.sessionId}`);
 console.log('日本仓演示账号：tokyo / tokyo-demo');
 
 console.log('\n演示客户登录（统一入口 /login，或点下面的专属链接）：');

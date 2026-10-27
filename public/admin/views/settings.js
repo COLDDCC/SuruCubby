@@ -68,7 +68,7 @@ export async function render(view) {
 
   view.innerHTML = `
     <div class="card">
-      <h2>运费设置</h2>
+      <h2>运费和分拣设置</h2>
       <div class="form-grid">
         <div>
           <label for="fee">国内寄出每次收费（元）</label>
@@ -89,8 +89,13 @@ export async function render(view) {
           <p class="small muted">当前：${money(data.directPriceFenPerKg)} / kg。直邮包裹称重时按这个价算运费并存档，之后改价不影响已称好的包裹。</p>
         </div>`
         }
+        <div>
+          <label for="max-boxes">一次分拣最多开几箱（拼团）</label>
+          <input id="max-boxes" inputmode="numeric" value="${data.maxBoxesPerSort ?? 9}">
+          <p class="small muted">分拣页「再开一箱」最多到这个数。现在一般 9 箱以内，要更多就改大（最多 50）。</p>
+        </div>
       </div>
-      <p><button id="save">保存运费设置</button></p>
+      <p><button id="save">保存设置</button></p>
     </div>
 
     <div class="card">
@@ -130,6 +135,7 @@ export async function render(view) {
       };
       const direct = document.getElementById('direct-price');
       if (direct) body.directPriceYuanPerKg = direct.value.trim();
+      body.maxBoxesPerSort = document.getElementById('max-boxes').value.trim();
       const r = await api.post('/api/admin/settings', body);
       toast(`已保存：国内 ${money(r.domesticFeeFen)} / 次，拼团 ${money(r.intlPriceFenPerKg)} / kg`);
       await render(view);

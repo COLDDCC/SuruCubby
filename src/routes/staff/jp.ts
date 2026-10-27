@@ -86,7 +86,7 @@ jpRoutes.get('/overview', async (c) => {
               SUM(i.status = 'ordered') AS waiting
          FROM packages p JOIN items i ON i.package_id = p.id
         WHERE p.allocated_at IS NULL AND p.status IN ('ordered', 'jp_warehouse')
-          AND i.status IN ('ordered', 'jp_warehouse')
+          AND i.status IN ('ordered', 'jp_warehouse') AND i.sorted_at IS NOT NULL
         GROUP BY p.id ORDER BY p.id`,
     )
     .all<{ id: number; name: string; trackingNo: string | null; status: string; received: number; waiting: number }>();
@@ -96,7 +96,7 @@ jpRoutes.get('/overview', async (c) => {
         await db
           .prepare(
             `SELECT ${ITEM_COLUMNS} FROM items i JOIN customers c ON c.id = i.customer_id
-              WHERE i.package_id IN (${placeholders(boxIds.length)}) AND i.status IN ('ordered', 'jp_warehouse')
+              WHERE i.package_id IN (${placeholders(boxIds.length)}) AND i.status IN ('ordered', 'jp_warehouse') AND i.sorted_at IS NOT NULL
               ORDER BY c.nickname, i.id`,
           )
           .bind(...boxIds)
