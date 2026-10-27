@@ -215,6 +215,7 @@ export function itemDetailHtml(d) {
           ${d.exceptionNote ? `<div class="small" style="color:var(--warn);margin-top:4px">${escapeHtml(d.exceptionNote)}</div>` : ''}
         </div>
       </div>
+      <div class="detail-journey">${journeyHtml(journeyFromDetail(d))}</div>
       <div class="dl">
         ${row('归属', `<span class="cn-chip">${escapeHtml(d.owner.cn)}</span>${
           d.owner.nickname && d.owner.nickname !== d.owner.cn ? ` <span class="muted">（${escapeHtml(d.owner.nickname)}）</span>` : ''
@@ -246,4 +247,105 @@ export function itemDetailHtml(d) {
           : ''
       }
     </div>`;
+}
+
+/**
+ * 一件东西走到哪一步了、现在在哪个包裹里。客户页每件商品、物品详情都用这一份。
+ * 传进来的字段（缺的就当没有）：
+ *   route, status, missing, sortedAt, jpTrackingNo,
+ *   packageName, returnTrackingNo,                     拼团的回国箱
+ *   shipmentTrackingNo,                                国内寄出
+ *   directParcelId, parcelStatus, parcelTrackingNo, parcelCarrier   直邮包裹
+ */
+const JOURNEY_STEPS = {
+  group: ['下单', '日本仓', '回国中', '国内仓', '已寄出', '签收'],
+  direct: ['下单', '日本仓', '待付款', '待寄出', '已寄出', '签收'],
+};
+
+export function journey(i) {
+  const route = i.route === 'direct' ? 'direct' : 'group';
+  const steps = JOURNEY_STEPS[route];
+  const tn = (label, no) => (no ? `${label} <b class="mono">${escapeHtml(no)}</b>` : '');
+  const join = (...parts) => parts.filter(Boolean).join(' · ');
+  if (i.status === 'cancelled' || i.status === 'refunded') {
+    return { steps, current: -1, tone: 'dead', where: i.status === 'refunded' ? '已退款' : '缺货取消，钱会退给你' };
+  }
+  let current = 0;
+  let where = '';
+  const parcel = i.directParcelId ? `直邮包裹 #${i.directParcelId}` : '';
+  const ems = tn(i.parcelCarrier || 'EMS', i.parcelTrackingNo);
+  switch (i.status) {
+    case 'ordered':
+      current = 0;
+      where = join('还在日本，等店家发货到日本仓', tn('日本运单', i.jpTrackingNo));
+      break;
+    case 'jp_warehouse':
+      current = 1;
+      if (route === 'direct') {
+        where = parcel ? join(`已装进${parcel}，等称重算运费`, ems) : i.sortedAt ? '已到日本仓、分拣好了，等打包（要有收货地址）' : '已到日本仓，等分拣';
+      } else {
+        where = i.sortedAt && i.packageName ? `已分进「${escapeHtml(i.packageName)}」，等这一箱发出` : '已到日本仓，等分拣';
+      }
+      break;
+    case 'direct_unpaid':
+      current = 2;
+      where = join(`在${parcel || '直邮包裹'}里，运费待付`, ems);
+      break;
+    case 'direct_ready':
+      current = 3;
+      where = join(`在${parcel || '直邮包裹'}里，运费已付，等日本仓寄出`, ems);
+      break;
+    case 'intl_transit':
+      current = 2;
+      where = join(i.packageName ? `在「${escapeHtml(i.packageName)}」里回国中` : '回国中', tn('回国单号', i.returnTrackingNo));
+      break;
+    case 'cn_arrived':
+      current = 3;
+      where = join(i.packageName ? `「${escapeHtml(i.packageName)}」已到国内，等称重算运费` : '已到国内，等称重算运费', tn('回国单号', i.returnTrackingNo));
+      break;
+    case 'cn_stock':
+      current = 3;
+      where = '在国内仓，可以申请发货了';
+      break;
+    case 'shipped':
+      current = 4;
+      where = route === 'direct' ? join(`${parcel || '直邮包裹'}已从日本寄出`, ems) : join('已从国内寄出', tn('快递单号', i.shipmentTrackingNo));
+      break;
+    case 'delivered':
+      current = 5;
+      where = route === 'direct' ? join('已签收', ems) : join('已签收', tn('快递单号', i.shipmentTrackingNo));
+      break;
+    default:
+      where = escapeHtml(statusLabel(i.status));
+  }
+  if (i.missing) where = join(where, '<span class="unpaid">这一件没到齐，群主在跟</span>');
+  return { steps, current, tone: current === 5 ? 'done' : 'live', where };
+}
+
+/** 进度条 + 「现在在哪」一行。 */
+export function journeyHtml(i) {
+  const j = journey(i);
+  if (j.current < 0) return `<div class="where dead">${j.where}</div>`;
+  return `<ol class="journey" aria-label="进度：${escapeHtml(j.steps[j.current])}">${j.steps
+    .map((s, k) => `<li class="${k < j.current ? 'done' : k === j.current ? 'now' : ''}"><span>${s}</span></li>`)
+    .join('')}</ol>
+    <div class="where">${j.where}</div>`;
+}
+
+/** 把物品详情接口的结构摊平成 journey() 要的字段。 */
+export function journeyFromDetail(d) {
+  return {
+    route: d.route,
+    status: d.status,
+    missing: d.missing,
+    sortedAt: d.sortedAt,
+    jpTrackingNo: d.jpTrackingNo,
+    packageName: d.returnBox?.name,
+    returnTrackingNo: d.returnBox?.trackingNo,
+    shipmentTrackingNo: d.domestic?.trackingNo,
+    directParcelId: d.direct?.parcelId,
+    parcelStatus: d.direct?.status,
+    parcelTrackingNo: d.direct?.trackingNo,
+    parcelCarrier: d.direct?.carrier,
+  };
 }

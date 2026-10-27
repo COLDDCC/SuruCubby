@@ -135,6 +135,12 @@ test('客户页：拼团看到回国单号，直邮看到 EMS 单号和包里每
   assert.equal(va.directParcels[0].trackingNo, 'EB111222333JP');
   assert.equal(va.directParcels[0].status, 'awaiting_payment');
   assert.deepEqual(va.directParcels[0].items.map((i) => i.title).sort(), ['甲的手办', '甲的画集']);
+  // 每一件自己带着「在哪个包裹、单号多少」，客户页的进度条和「我的东西在哪」靠它
+  const fig = va.items.find((i) => i.title === '甲的手办');
+  assert.deepEqual([fig.route, fig.parcelTrackingNo, fig.parcelStatus, !!fig.sortedAt], ['direct', 'EB111222333JP', 'awaiting_payment', true]);
+  assert.equal(fig.orderedAt, '2026-10-18');
+  assert.equal(badge.packageName.endsWith('第1箱'), true);
+  assert.equal(badge.jpTrackingNo, '490811110001');
   ctx.ca = a;
 });
 

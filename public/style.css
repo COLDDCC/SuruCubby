@@ -1526,3 +1526,126 @@ body.has-tabbar .sort-bar {
     flex: 1 1 100%;
   }
 }
+
+/* ───────── 进度条：这件东西走到哪一步了 ───────── */
+.journey {
+  list-style: none;
+  display: flex;
+  margin: 8px 0 4px;
+  padding: 0;
+  counter-reset: none;
+}
+.journey li {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding-top: 16px;
+  line-height: 1.2;
+}
+/* 圆点 */
+.journey li::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--line);
+  box-sizing: border-box;
+  z-index: 1;
+}
+/* 连线 */
+.journey li::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+}
+.journey li:first-child::after {
+  display: none;
+}
+.journey li.done::before,
+.journey li.now::before {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.journey li.done::after,
+.journey li.now::after {
+  background: var(--ok);
+}
+.journey li.now::before {
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  top: 0;
+  box-shadow: 0 0 0 3px var(--ok-bg);
+}
+.journey li.now {
+  color: var(--text);
+  font-weight: 700;
+}
+.journey span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 1px;
+}
+.where {
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.where.dead {
+  color: var(--muted);
+}
+.detail-journey {
+  margin-top: 10px;
+  padding: 8px 10px 10px;
+  background: var(--bg);
+  border-radius: 10px;
+}
+/* 我的东西在哪：按包裹看 */
+.loc-row {
+  display: block;
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+.loc-row:first-of-type {
+  border-top: 0;
+}
+.loc-row summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  color: var(--text);
+}
+.loc-row summary::-webkit-details-marker {
+  display: none;
+}
+.loc-row summary::after {
+  content: '展开';
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--brand-ink);
+}
+.loc-row[open] summary::after {
+  content: '收起';
+}
+.loc-row ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}

@@ -1,4 +1,4 @@
-import { beijingTime, codeTag, copyText, escapeHtml, itemDetailHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, codeTag, copyText, escapeHtml, itemDetailHtml, journey, journeyHtml, money, statusLabel, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
@@ -142,6 +142,62 @@ function shippableOf(item) {
   return item.status === 'cn_stock' && !item.missing && item.intlFeeFen !== null;
 }
 
+/** 这件东西眼下最该查的那个单号：直邮看 EMS，国内寄出看快递单号，回国路上看回国单号。 */
+function currentTracking(item) {
+  if (item.route === 'direct') return item.parcelTrackingNo || null;
+  if (item.status === 'shipped' || item.status === 'delivered') return item.shipmentTrackingNo || null;
+  if (['intl_transit', 'cn_arrived'].includes(item.status)) return item.returnTrackingNo || null;
+  return null;
+}
+
+/**
+ * 「我的东西在哪」：按包裹分好——还在日本的、每个回国箱、每个直邮包裹、每次国内寄出，
+ * 一行一个，写着现在走到哪、单号，点开看里面是哪几件。
+ */
+function locationsHtml(items) {
+  const live = items.filter((i) => i.status !== 'cancelled' && i.status !== 'refunded');
+  if (!live.length) return '';
+  const spots = new Map();
+  const put = (key, base, item) => {
+    const spot = spots.get(key) ?? { ...base, items: [] };
+    spot.items.push(item);
+    spots.set(key, spot);
+  };
+  for (const i of live) {
+    if (i.route === 'direct' && i.directParcelId) {
+      put(`d${i.directParcelId}`, { title: `直邮包裹 #${i.directParcelId}`, no: i.parcelTrackingNo, noLabel: i.parcelCarrier || 'EMS' }, i);
+    } else if (i.status === 'ordered' || (i.status === 'jp_warehouse' && !i.sortedAt) || (i.route === 'direct' && !i.directParcelId)) {
+      put('jp', { title: '还在日本', no: null }, i);
+    } else if ((i.status === 'shipped' || i.status === 'delivered') && i.shipmentId) {
+      put(`s${i.shipmentId}`, { title: '国内快递', no: i.shipmentTrackingNo, noLabel: '快递单号' }, i);
+    } else if (i.packageId) {
+      put(`p${i.packageId}`, { title: i.packageName || '回国箱', no: i.returnTrackingNo, noLabel: '回国单号' }, i);
+    } else {
+      put('other', { title: '其他', no: null }, i);
+    }
+  }
+  const rows = [...spots.values()]
+    .map((spot) => ({ ...spot, j: journey(spot.items[0]), min: Math.min(...spot.items.map((x) => journey(x).current)) }))
+    .sort((a, b) => (a.min === 5) - (b.min === 5) || b.min - a.min);
+  return `<div class="card">
+    <h2>我的东西在哪<span class="muted small"> · ${live.length} 件，${rows.length} 处</span></h2>
+    ${rows
+      .map((r) => {
+        const step = r.j.steps[r.j.current] ?? '';
+        return `<details class="loc-row">
+          <summary><b>${escapeHtml(r.title)}</b>
+            <span class="badge ${r.min === 5 ? 'ok' : ''}">${escapeHtml(step)}</span>
+            <span class="small muted">${r.items.length} 件</span>
+            ${r.no ? `<span class="small">${escapeHtml(r.noLabel)} <b class="mono">${escapeHtml(r.no)}</b></span>` : ''}</summary>
+          <div class="where small" style="margin-top:4px">${r.j.where}</div>
+          ${r.no ? `<p style="margin:6px 0 0"><button class="small plain" data-copy="${escapeHtml(r.no)}">复制单号</button></p>` : ''}
+          <ul>${r.items.map((i) => `<li><a href="#" data-item-detail="${i.id}">${escapeHtml(i.title)}</a> <span class="muted">${escapeHtml(statusLabel(i.status))}</span></li>`).join('')}</ul>
+        </details>`;
+      })
+      .join('')}
+  </div>`;
+}
+
 function itemCard(item) {
   // 汇总卡按后端口径把取消/退款的件剔掉了，件上就不该再显示「未付」，不然上下两个数对不上
   const dead = item.status === 'cancelled' || item.status === 'refunded';
@@ -183,12 +239,15 @@ function itemCard(item) {
           实际价格 ${yen(item.actualPriceJpy)} ·
           应付 <span class="money">${yen(item.goodsFeeJpy)}</span>
         </div>
-        <div class="small row" style="gap:6px;margin-top:4px">
-          <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}${missing}
-        </div>
-        ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
+        ${journeyHtml(item)}
+        <div class="small row" style="gap:6px;margin-top:4px">${paid}${missing}
+          ${(() => {
+            const no = currentTracking(item);
+            return no ? `<button class="small plain" data-copy="${escapeHtml(no)}">复制单号</button>` : '';
+          })()}
+          <button class="small plain" data-item-detail="${item.id}">详情</button></div>
         ${item.orderNo ? `<div class="small muted">日本订单：${escapeHtml(item.orderNo)}</div>` : ''}
-        <div style="margin-top:4px"><button class="small plain" data-item-detail="${item.id}">详情：下单时间、单号</button></div>
+
         ${item.intlFeeFen === null || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
         ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
         ${noFee}
@@ -608,6 +667,7 @@ function render(data) {
       }</p>
     </div>
     ${pwNotice}
+    ${locationsHtml(items)}
     ${
       wide
         ? `<div class="cols">
@@ -678,7 +738,7 @@ function bindWarehouse(data){
  app.querySelectorAll('[data-delete-address]').forEach(el=>el.onclick=handle(()=>send(`/addresses/${el.dataset.deleteAddress}`,'DELETE')));
  app.querySelectorAll('[data-cancel-request]').forEach(el=>el.onclick=handle(()=>send(`/requests/${el.dataset.cancelRequest}`,'DELETE')));
  app.querySelectorAll('input[name="direct-address"]').forEach(el=>el.onchange=handle(()=>send('/direct-address','POST',{addressId:Number(el.value)})));
- app.querySelectorAll('[data-item-detail]').forEach(el=>el.onclick=handle(()=>openDetail(Number(el.dataset.itemDetail))));
+ app.querySelectorAll('[data-item-detail]').forEach(el=>{const open=handle(()=>openDetail(Number(el.dataset.itemDetail)));el.onclick=e=>{e.preventDefault();open(e);};});
  const changePw=app.querySelector('#change-pw');if(changePw)changePw.onclick=()=>renderMustChange(data);
  const logout=app.querySelector('#logout');
  // 退出不走 send()：那玩意会立刻重新拉一次仓库，白跑一趟还先把页面画出来

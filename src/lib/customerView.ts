@@ -31,10 +31,16 @@ export async function buildCustomerView(env: Env, customerId: number) {
               i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen, i.intl_paid AS intlPaid, p.tracking_no AS returnTrackingNo,
               b.order_no AS orderNo,b.japan_tracking_no AS japanTrackingNo,
               i.route, i.direct_parcel_id AS directParcelId, (i.import_address IS NOT NULL) AS hasImportAddress,
+              i.sorted_at AS sortedAt, COALESCE(i.jp_tracking_no, b.japan_tracking_no) AS jpTrackingNo,
+              COALESCE(i.ordered_at, b.ordered_at, substr(b.created_at, 1, 10)) AS orderedAt,
+              p.status AS packageStatus, s.tracking_no AS shipmentTrackingNo, s.shipped_at AS shipmentShippedAt,
+              d.status AS parcelStatus, d.tracking_no AS parcelTrackingNo, d.carrier AS parcelCarrier,
               (SELECT request_id FROM request_items ri WHERE ri.item_id=i.id) AS requestId
          FROM items i
          JOIN batches b ON b.id = i.batch_id
          LEFT JOIN packages p ON p.id = i.package_id
+         LEFT JOIN shipments s ON s.id = i.shipment_id
+         LEFT JOIN direct_parcels d ON d.id = i.direct_parcel_id
         WHERE i.customer_id = ?
         ORDER BY i.id DESC`,
     )
