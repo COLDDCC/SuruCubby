@@ -54,6 +54,19 @@ export async function render(view) {
         .join('')
     : empty('没有未付的国内运费');
 
+  const direct = (data.directUnpaid || []).length
+    ? data.directUnpaid
+        .map((r) =>
+          row(
+            customerLink(r),
+            `直邮包裹 #${r.parcelId} · ${r.itemCount} 件 · ${Number(r.weightG || 0).toLocaleString()} g`,
+            `<span class="unpaid money">${money(r.feeFen)}</span>`,
+            `<button class="small" data-action="payDirect" data-parcel="${r.parcelId}" data-fee="${r.feeFen}">已收款</button>`,
+          ),
+        )
+        .join('')
+    : empty('没有待收的直邮运费');
+
   const refunds = data.pendingRefunds.length
     ? data.pendingRefunds
         .map((r) =>
@@ -84,8 +97,9 @@ export async function render(view) {
     <div class="card"><h2>① 货款未付</h2>${goods}</div>
     <div class="card"><h2>② 国际运费未付</h2>${intl}</div>
     <div class="card"><h2>③ 国内运费未付</h2>${domestic}</div>
-    <div class="card"><h2>④ 待退款</h2>${refunds}</div>
-    <div class="card"><h2>⑤ 可发货<span class="muted small"> · 包裹分摊后立刻进入这里，按天数倒序</span></h2>${stock}</div>`;
+    <div class="card"><h2>④ 直邮运费未付<span class="muted small"> · 收款后日本仓才能寄出</span></h2>${direct}</div>
+    <div class="card"><h2>⑤ 待退款</h2>${refunds}</div>
+    <div class="card"><h2>⑥ 可发货<span class="muted small"> · 包裹分摊后立刻进入这里，按天数倒序</span></h2>${stock}</div>`;
 
   bindActions(view, {
     payGoods: async ({ customer, batch }) => {
@@ -116,6 +130,12 @@ export async function render(view) {
         shipmentId: Number(shipment),
       });
       toast('已记账');
+      render(view);
+    },
+    payDirect: async ({ parcel, fee }) => {
+      if (!(await confirmBox(`确认已经收到 ${money(Number(fee))} 直邮运费？`))) return;
+      await api.post(`/api/admin/direct/${parcel}/pay`);
+      toast('已记账，日本仓可以寄出了');
       render(view);
     },
     refunded: async ({ item }) => {

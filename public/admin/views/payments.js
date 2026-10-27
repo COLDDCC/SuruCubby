@@ -1,7 +1,7 @@
 import { api } from '/admin/api.js';
 import { beijingTime, bindActions, confirmBox, empty, escapeHtml, money, toast, yen } from '/admin/ui.js';
 
-const KIND_LABELS = { goods: '货款', intl: '国际运费', item_intl: '单件国际运费', domestic: '国内运费' };
+const KIND_LABELS = { goods: '货款', intl: '国际运费', item_intl: '单件国际运费', domestic: '国内运费', direct: '直邮运费' };
 
 export async function render(view) {
   const data = await api.get('/api/admin/payments');

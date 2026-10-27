@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
+import { directPriceFenPerKg, domesticFeeFen, intlPriceFenPerKg, maxBoxesPerSort, setSetting } from '../../lib/db.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
 import { toFen } from '../../lib/money.ts';
 
@@ -10,6 +10,8 @@ settingsRoutes.get('/', async (c) =>
   c.json({
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    directPriceFenPerKg: await directPriceFenPerKg(c.env),
+    maxBoxesPerSort: await maxBoxesPerSort(c.env),
   }),
 );
 
@@ -52,11 +54,16 @@ settingsRoutes.post('/', async (c) => {
     domesticFeeFen?: unknown;
     intlPriceYuanPerKg?: unknown;
     intlPriceFenPerKg?: unknown;
+    directPriceYuanPerKg?: unknown;
+    directPriceFenPerKg?: unknown;
+    maxBoxesPerSort?: unknown;
   }>(c);
 
-  const out: { domesticFeeFen: number; intlPriceFenPerKg: number } = {
+  const out: { domesticFeeFen: number; intlPriceFenPerKg: number; directPriceFenPerKg: number; maxBoxesPerSort: number } = {
+    maxBoxesPerSort: await maxBoxesPerSort(c.env),
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    directPriceFenPerKg: await directPriceFenPerKg(c.env),
   };
 
   const hasDomestic =
@@ -90,6 +97,30 @@ settingsRoutes.post('/', async (c) => {
     out.intlPriceFenPerKg = fen;
   }
 
-  if (!hasDomestic && !hasIntl) throw badRequest('没有要保存的内容');
+  const hasDirect =
+    (body.directPriceFenPerKg !== undefined && body.directPriceFenPerKg !== null) ||
+    body.directPriceYuanPerKg !== undefined;
+  if (hasDirect) {
+    const fen = capFen(
+      body.directPriceFenPerKg !== undefined && body.directPriceFenPerKg !== null
+        ? requireFen(body.directPriceFenPerKg, '直邮单价')
+        : yuanToFenValue(body.directPriceYuanPerKg, '直邮单价'),
+      '直邮单价',
+      MAX_INTL_PRICE_FEN,
+    );
+    requirePositiveFen(fen, '直邮单价');
+    await setSetting(c.env, 'direct_price_fen_per_kg', String(fen));
+    out.directPriceFenPerKg = fen;
+  }
+
+  const hasBoxes = body.maxBoxesPerSort !== undefined && body.maxBoxesPerSort !== null && body.maxBoxesPerSort !== '';
+  if (hasBoxes) {
+    const n = typeof body.maxBoxesPerSort === 'string' ? Number(body.maxBoxesPerSort) : body.maxBoxesPerSort;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 50) throw badRequest('一次分拣最多几箱：填 1 到 50 的整数');
+    await setSetting(c.env, 'max_boxes_per_sort', String(n));
+    out.maxBoxesPerSort = n;
+  }
+
+  if (!hasDomestic && !hasIntl && !hasDirect && !hasBoxes) throw badRequest('没有要保存的内容');
   return c.json(out);
 });

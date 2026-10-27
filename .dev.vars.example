@@ -1,2 +1,9 @@
+# 复制成 .env（Node / VPS）或 .dev.vars（Cloudflare Workers）后填好
 ADMIN_PASSWORD="改成你自己的后台密码"
 SESSION_SECRET="改成一串长随机字符串"
+# 以下只在 Node / VPS 上用
+# PORT=8787
+# HOST=127.0.0.1
+# DATA_DIR=./data
+# TRUST_PROXY=1
+# IMAGE_CACHE_MB=2048

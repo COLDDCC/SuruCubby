@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import type { Env } from './lib/env.ts';
 import { HttpError } from './lib/http.ts';
-import { adminGuard } from './lib/session.ts';
+import { adminGuard, staffGuard } from './lib/session.ts';
+import { auditLog } from './lib/audit.ts';
+import { staffRoutes } from './routes/admin/staff.ts';
+import { jpRoutes } from './routes/staff/jp.ts';
+import { directAdminRoutes, directStaffRoutes } from './routes/staff/direct.ts';
+import { sortRoutes } from './routes/staff/sort.ts';
+import { staffItemRoutes } from './routes/staff/items.ts';
 import { authRoutes } from './routes/admin/auth.ts';
 import { dashboardRoutes } from './routes/admin/dashboard.ts';
 import { importRoutes } from './routes/admin/import.ts';
@@ -19,6 +25,12 @@ import { KEY_PATTERN, isHttpUrl, proxyImage } from './lib/images.ts';
 import { mutationGuard } from './lib/mutations.ts';
 import { requestAdminRoutes, requestCustomerRoutes } from './routes/admin/requests.ts';
 const app = new Hono<{ Bindings: Env }>();
+
+/** Workers 上用边缘缓存，Node 上用入口传进来的磁盘缓存。 */
+function imageCache(env: Env): ImageCache {
+  if (env.IMAGE_CACHE) return env.IMAGE_CACHE;
+  return (globalThis as unknown as { caches: { default: ImageCache } }).caches.default;
+}
 app.use('/api/*', mutationGuard);
 
 app.onError((err, c) => {
@@ -38,7 +50,7 @@ app.get('/img/i/:id', async (c) => {
   const id = Number.parseInt(c.req.param('id'), 10);
   if (!Number.isInteger(id) || id <= 0) return c.text('找不到图片', 404);
 
-  const cache = caches.default;
+  const cache = imageCache(c.env);
   const cacheKey = new Request(new URL(c.req.url).toString(), { method: 'GET' });
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
@@ -93,6 +105,16 @@ app.route('/api/admin', authRoutes);
 
 // 其余管理接口一律校验会话
 app.use('/api/admin/*', adminGuard);
+app.use('/api/admin/*', auditLog);
+// 日本仓那几页：管理员和日本仓账号都能进
+app.use('/api/staff/*', staffGuard);
+app.use('/api/staff/*', auditLog);
+app.route('/api/admin/staff', staffRoutes);
+app.route('/api/staff/jp', jpRoutes);
+app.route('/api/staff/direct', directStaffRoutes);
+app.route('/api/staff/sort', sortRoutes);
+app.route('/api/staff/items', staffItemRoutes);
+app.route('/api/admin/direct', directAdminRoutes);
 app.route('/api/admin/dashboard', dashboardRoutes);
 app.route('/api/admin/import', importRoutes);
 app.route('/api/admin/batches', batchRoutes);

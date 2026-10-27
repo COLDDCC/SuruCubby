@@ -2,26 +2,22 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>拼团后台</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0ea5e9">
+<title>仓库后台</title>
 <link rel="icon" href="/favicon.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-<header class="topbar">
-  <span class="brand">拼团后台</span>
-  <nav id="nav">
-    <a href="#/">待办</a>
-    <a href="#/import">导入</a>
-    <a href="#/batches">批次</a>
-    <a href="#/packages">包裹</a>
-    <a href="#/customers">客户</a>
-    <a href="#/requests">发货申请</a>
-    <a href="#/shipments">寄出</a>
-    <a href="#/payments">收款</a>
-    <a href="#/settings">设置</a>
-  </nav>
-  <button id="logout" class="plain small">退出</button>
+<body class="admin">
+<header class="topbar" id="topbar">
+  <span class="brand">仓库后台</span>
+  <!-- 桌面端：横排菜单；手机端换成底部标签栏，见 app.js -->
+  <nav id="nav" class="nav-desktop"></nav>
+  <span class="topbar-tools">
+    <span id="who" class="small muted who"></span>
+    <button id="search-toggle" class="plain small search-toggle" hidden aria-controls="rail" aria-expanded="false">找货</button>
+    <button id="logout" class="plain small logout-desktop" hidden>退出</button>
+  </span>
 </header>
 <div class="shell">
   <main class="wrap" id="view"><p class="muted">加载中…</p></main>
@@ -31,6 +27,14 @@
     <p class="small muted" id="rail-tip">货号尾号、名称片段、客户名都认</p>
     <div id="rail-results"></div>
   </aside>
+</div>
+<nav id="tabbar" class="tabbar" hidden></nav>
+<div id="more-sheet" class="sheet-back" hidden>
+  <div class="sheet" role="dialog" aria-label="全部菜单">
+    <div class="sheet-head"><strong>全部菜单</strong><button class="plain small" data-close-sheet>关闭</button></div>
+    <div id="more-links" class="sheet-links"></div>
+    <div class="sheet-foot"><span id="who-sheet" class="small muted"></span><button id="logout-sheet" class="plain small">退出登录</button></div>
+  </div>
 </div>
 <script type="module" src="/admin/app.js"></script>
 </body>

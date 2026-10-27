@@ -1,11 +1,20 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { badRequest, bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, intList, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { changeRoute } from '../../lib/routing.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { isItemStatus } from '../../lib/status.ts';
 import { surugaCode } from '../../lib/images.ts';
 
 export const itemRoutes = new Hono<{ Bindings: Env }>();
+
+/** 改发货方式（拼团 ↔ 直邮）：可以一次改一批；已装箱 / 已打包 / 已发出的件整批拦下，说明原因。 */
+itemRoutes.post('/route', async (c) => {
+  const body = await readJson<{ itemIds?: unknown; route?: unknown }>(c);
+  const itemIds = [...new Set(intList(body.itemIds, '物品 ID'))];
+  if (body.route !== 'group' && body.route !== 'direct') throw badRequest('发货方式只能是拼团或直邮');
+  return c.json({ ok: true, ...(await changeRoute(c.env.DB, itemIds, body.route)) });
+});
 
 /**
  * 后台货号搜索：一般只输入编号的尾巴几个字（例如 8913 命中 ZHOTI678913），
@@ -66,10 +75,18 @@ itemRoutes.patch('/:id', async (c) => {
 
   const db = c.env.DB;
   const item = await db
-    .prepare('SELECT id, status, goods_paid AS goodsPaid FROM items WHERE id = ?')
+    .prepare('SELECT id, status, goods_paid AS goodsPaid, direct_parcel_id AS parcelId FROM items WHERE id = ?')
     .bind(id)
-    .first<{ id: number; status: string; goodsPaid: number }>();
+    .first<{ id: number; status: string; goodsPaid: number; parcelId: number | null }>();
   if (!item) throw notFound('物品不存在');
+  if (body.status !== undefined && body.status !== item.status) {
+    if (body.status === 'direct_unpaid' || body.status === 'direct_ready') {
+      throw badRequest('直邮的状态由日本仓打包、确认收款推进，不能手动设');
+    }
+    if (item.parcelId && !(body.status === 'delivered' && item.status === 'shipped')) {
+      throw badRequest(`这件已经装进直邮包裹 #${item.parcelId}，要改先在直邮页把它移出包裹`);
+    }
+  }
 
   if (body.goodsPaid !== undefined) throw badRequest('请在收款页面记账或撤销收款');
   // 「已签收」是寄出之后的正常一步；可发货、已寄出仍然只能走称重/寄出流程

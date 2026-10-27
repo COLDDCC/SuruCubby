@@ -182,7 +182,7 @@ packageRoutes.post('/:id/batches', async (c) => {
         db
           .prepare(
             `UPDATE items SET package_id = ?, weigh_group_id=NULL, weight_g=NULL, intl_fee_fen=NULL, updated_at = ?
-              WHERE batch_id = ? AND (package_id IS NULL OR status IN ('ordered','jp_warehouse','intl_transit','cn_arrived'))`,
+              WHERE batch_id = ? AND route = 'group' AND (package_id IS NULL OR status IN ('ordered','jp_warehouse','intl_transit','cn_arrived'))`,
           )
           .bind(id, nowIso(), batchId),
       );
@@ -203,11 +203,14 @@ packageRoutes.post('/:id/items', async (c) => {
   // 页面上的按钮可能拿着早已删掉 / 合并走的 ID：这些件一件都不会动，
   // 但接口要是照传入条数报「挪好了 3 件」，群主就会以为货已经过来了。
   const found = await db
-    .prepare(`SELECT id, package_id AS packageId FROM items WHERE id IN (${placeholders(itemIds.length)})`)
+    .prepare(`SELECT id, package_id AS packageId, route FROM items WHERE id IN (${placeholders(itemIds.length)})`)
     .bind(...itemIds)
-    .all<{ id: number; packageId: number | null }>();
+    .all<{ id: number; packageId: number | null; route: string }>();
   if (found.results.length !== itemIds.length) {
     throw badRequest(`有 ${itemIds.length - found.results.length} 件已经不在系统里了，刷新页面再挪`);
+  }
+  if (action === 'add' && found.results.some((r) => r.route === 'direct')) {
+    throw badRequest('有直邮的件，直邮不进回国箱；要拼团就先在批次页把它改成拼团');
   }
   if (action === 'remove') {
     const elsewhere = found.results.filter((r) => r.packageId !== id);

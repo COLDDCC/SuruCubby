@@ -1,11 +1,12 @@
 import type { Env } from './env.ts';
+import { loadParcels } from '../routes/staff/direct.ts';
 
 /** 客户仓库视图：客户专属页和后台「客户详情」共用同一份数据。 */
 export async function buildCustomerView(env: Env, customerId: number) {
   const db = env.DB;
 
   const customer = await db
-    .prepare('SELECT id, qq, nickname, note, token, self_return AS selfReturn, created_at AS createdAt FROM customers WHERE id = ?')
+    .prepare('SELECT id, qq, nickname, note, token, self_return AS selfReturn, direct_address_id AS directAddressId, created_at AS createdAt FROM customers WHERE id = ?')
     .bind(customerId)
     .first<{
       id: number;
@@ -14,6 +15,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
       note: string | null;
       token: string;
       selfReturn: number;
+      directAddressId: number | null;
       createdAt: string;
     }>();
   if (!customer) return null;
@@ -28,10 +30,17 @@ export async function buildCustomerView(env: Env, customerId: number) {
               i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt,
               i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen, i.intl_paid AS intlPaid, p.tracking_no AS returnTrackingNo,
               b.order_no AS orderNo,b.japan_tracking_no AS japanTrackingNo,
+              i.route, i.direct_parcel_id AS directParcelId, (i.import_address IS NOT NULL) AS hasImportAddress,
+              i.sorted_at AS sortedAt, COALESCE(i.jp_tracking_no, b.japan_tracking_no) AS jpTrackingNo,
+              COALESCE(i.ordered_at, b.ordered_at, substr(b.created_at, 1, 10)) AS orderedAt,
+              p.status AS packageStatus, s.tracking_no AS shipmentTrackingNo, s.shipped_at AS shipmentShippedAt,
+              d.status AS parcelStatus, d.tracking_no AS parcelTrackingNo, d.carrier AS parcelCarrier,
               (SELECT request_id FROM request_items ri WHERE ri.item_id=i.id) AS requestId
          FROM items i
          JOIN batches b ON b.id = i.batch_id
          LEFT JOIN packages p ON p.id = i.package_id
+         LEFT JOIN shipments s ON s.id = i.shipment_id
+         LEFT JOIN direct_parcels d ON d.id = i.direct_parcel_id
         WHERE i.customer_id = ?
         ORDER BY i.id DESC`,
     )
@@ -115,6 +124,12 @@ export async function buildCustomerView(env: Env, customerId: number) {
     .reduce((sum, s) => sum + s.feeFen, 0);
   const stockCount = itemRows.filter((i) => i.status === 'cn_stock').length;
 
+  // 直邮包裹：客户要看到每一包的单号、里面有哪几本；称好重量没付的运费也算进待付
+  const directParcels = await loadParcels(db, 'WHERE d.customer_id = ?', [customerId]);
+  const directUnpaidFen = directParcels
+    .filter((p) => p.status === 'awaiting_payment')
+    .reduce((sum, p) => sum + (p.feeFen ?? 0), 0);
+
   // 每一摞包含哪些物品
   const groupItems = new Map<number, Array<{ id: number; title: string }>>();
   for (const item of items.results as Array<{ id: number; title: string; weighGroupId: number | null }>) {
@@ -136,13 +151,37 @@ export async function buildCustomerView(env: Env, customerId: number) {
   return {
     domesticFeeFen: Number((await db.prepare("SELECT value FROM settings WHERE key='domestic_fee_fen'").first<{value:string}>())?.value ?? 1000),
     addresses: addresses.results, requests: requests.results,
-    customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, selfReturn: !!customer.selfReturn, createdAt: customer.createdAt },
+    customer: {
+      id: customer.id,
+      qq: customer.qq,
+      nickname: customer.nickname,
+      selfReturn: !!customer.selfReturn,
+      directAddressId: customer.directAddressId,
+      createdAt: customer.createdAt,
+    },
+    directParcels: directParcels.map((p) => ({
+      id: p.id,
+      status: p.status,
+      statusLabel: p.statusLabel,
+      address: p.address,
+      weightG: p.weightG,
+      feeFen: p.feeFen,
+      rateFenPerKg: p.rateFenPerKg,
+      carrier: p.carrier,
+      trackingNo: p.trackingNo,
+      createdAt: p.createdAt,
+      paidAt: p.paidAt,
+      shippedAt: p.shippedAt,
+      deliveredAt: p.deliveredAt,
+      items: p.items.map((i) => ({ id: i.id, title: i.title, productUrl: i.productUrl, imageUrl: i.imageUrl })),
+    })),
     summary: {
       goodsUnpaidJpy,
       intlUnpaidFen,
       domesticUnpaidFen,
+      directUnpaidFen,
       // 货款是日元、运费是人民币，汇率随时在变，两者不能加成一个数
-      freightUnpaidFen: intlUnpaidFen + domesticUnpaidFen,
+      freightUnpaidFen: intlUnpaidFen + domesticUnpaidFen + directUnpaidFen,
       stockCount,
       itemCount: itemRows.length,
     },

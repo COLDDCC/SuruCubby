@@ -2,6 +2,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Env } from './env.ts';
 import { signPayload, verifyPayload } from './crypto.ts';
+import { BOOTSTRAP_USERNAME, isStaffRole, type Staff } from './staff.ts';
 
 export const ADMIN_COOKIE = 'sc_admin';
 const ADMIN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -17,9 +18,25 @@ function isSecure(c: Context): boolean {
   return new URL(c.req.url).protocol === 'https:';
 }
 
-export async function issueAdminSession(c: Context<{ Bindings: Env }>): Promise<void> {
-  const value = await signPayload(sessionSecret(c.env)+'\0'+c.env.ADMIN_PASSWORD, {
-    role: 'admin',
+/**
+ * 员工登录态的签名密钥：
+ *   - 引导管理员（ADMIN_PASSWORD）绑着环境变量里的密码，改了环境变量旧登录全部作废；
+ *   - 员工账号绑着他自己的密码哈希，改密码、被停用（守卫里查库）当场踢下线。
+ */
+function staffSecret(env: Env, id: number, passwordHash: string): string {
+  return id === 0
+    ? `${sessionSecret(env)}\0${env.ADMIN_PASSWORD ?? ''}`
+    : `${sessionSecret(env)}\0staff\0${id}\0${passwordHash}`;
+}
+
+export async function issueAdminSession(
+  c: Context<{ Bindings: Env }>,
+  staff: Staff = { id: 0, role: 'admin', name: BOOTSTRAP_USERNAME },
+  passwordHash = '',
+): Promise<void> {
+  const value = await signPayload(staffSecret(c.env, staff.id, passwordHash), {
+    role: staff.role,
+    sid: staff.id,
     exp: Date.now() + ADMIN_TTL_MS,
   });
   setCookie(c, ADMIN_COOKIE, value, {
@@ -35,16 +52,59 @@ export function clearAdminSession(c: Context<{ Bindings: Env }>): void {
   deleteCookie(c, ADMIN_COOKIE, { path: '/' });
 }
 
-export async function hasAdminSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
-  const payload = await verifyPayload<{ role?: string }>(
-    sessionSecret(c.env)+'\0'+c.env.ADMIN_PASSWORD,
-    getCookie(c, ADMIN_COOKIE),
-  );
-  return payload?.role === 'admin';
+/** 不验签先看一眼 payload 里是哪个员工，好去查他的密钥；真伪由后面的 verifyPayload 决定。 */
+function peekStaffId(value: string | undefined): number | null {
+  if (!value) return null;
+  const body = value.slice(0, Math.max(0, value.lastIndexOf('.')));
+  try {
+    const json = atob(body.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (body.length % 4)) % 4));
+    const sid = (JSON.parse(new TextDecoder().decode(Uint8Array.from(json, (ch) => ch.charCodeAt(0)))) as { sid?: unknown }).sid;
+    // 旧版 Cookie 没有 sid，就是引导管理员
+    return sid === undefined ? 0 : typeof sid === 'number' && Number.isSafeInteger(sid) && sid >= 0 ? sid : null;
+  } catch {
+    return null;
+  }
 }
 
+/** 当前登录的员工；没登录、签名不对、账号被停用都返回 null。 */
+export async function currentStaff(c: Context<{ Bindings: Env }>): Promise<Staff | null> {
+  const value = getCookie(c, ADMIN_COOKIE);
+  const sid = peekStaffId(value);
+  if (sid === null) return null;
+  if (sid === 0) {
+    if (!c.env.ADMIN_PASSWORD) return null;
+    const payload = await verifyPayload<{ role?: string }>(staffSecret(c.env, 0, ''), value);
+    return payload?.role === 'admin' ? { id: 0, role: 'admin', name: BOOTSTRAP_USERNAME } : null;
+  }
+  const row = await c.env.DB.prepare(
+    'SELECT id, role, display_name AS name, password_hash AS passwordHash, disabled FROM staff_users WHERE id = ?',
+  )
+    .bind(sid)
+    .first<{ id: number; role: string; name: string; passwordHash: string; disabled: number }>();
+  if (!row || row.disabled || !isStaffRole(row.role)) return null;
+  const payload = await verifyPayload<{ sid?: number }>(staffSecret(c.env, row.id, row.passwordHash), value);
+  if (!payload || payload.sid !== row.id) return null;
+  return { id: row.id, role: row.role, name: row.name };
+}
+
+export async function hasAdminSession(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  return (await currentStaff(c))?.role === 'admin';
+}
+
+/** 管理员接口：只有管理员能进。日本仓账号访问一律 403。 */
 export const adminGuard: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
-  if (!(await hasAdminSession(c))) return c.json({ error: '请先登录' }, 401);
+  const staff = await currentStaff(c);
+  if (!staff) return c.json({ error: '请先登录' }, 401);
+  if (staff.role !== 'admin') return c.json({ error: '这个账号没有权限做这件事' }, 403);
+  (c as unknown as { set(k: string, v: unknown): void }).set('staff', staff);
+  await next();
+};
+
+/** 员工接口（日本仓那几页）：管理员和日本仓都能进。 */
+export const staffGuard: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
+  const staff = await currentStaff(c);
+  if (!staff) return c.json({ error: '请先登录' }, 401);
+  (c as unknown as { set(k: string, v: unknown): void }).set('staff', staff);
   await next();
 };
 

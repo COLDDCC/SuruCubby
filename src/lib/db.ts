@@ -40,6 +40,18 @@ export async function intlPriceFenPerKg(env: Env): Promise<number> {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 10000;
 }
 
+/** 日本直邮单价（分 / kg），默认 120 元 /kg；称重时按这个价算并存档。 */
+export async function directPriceFenPerKg(env: Env): Promise<number> {
+  const raw = await getSetting(env, 'direct_price_fen_per_kg', '12000');
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 12000;
+}
+
+/** 直邮运费：⌈重量克 × 单价分 ÷ 1000⌉，整数分，不出现小数。 */
+export function directFeeFen(weightG: number, rateFenPerKg: number): number {
+  return Math.ceil((weightG * rateFenPerKg) / 1000);
+}
+
 /**
  * 这位客户标了「不拼邮」（自己带回国 / 另找转运）：
  * 认领、称重、国际运费分摊、发货申请、国内寄出这条链一步都不该再算他，货款照旧。
@@ -52,15 +64,23 @@ export async function isSelfReturn(db: D1Database, customerId: number): Promise<
   return !!row?.n;
 }
 
-/** 生成一条状态变更日志的 SQL 语句。 */
+/** 生成一条状态变更日志的 SQL 语句；byName 是操作人（日本仓、分拣、寄出时填）。 */
 export function statusLogStmt(
   db: D1Database,
   itemId: number,
   fromStatus: string | null,
   toStatus: string,
   at: string,
+  byName: string | null = null,
 ): D1PreparedStatement {
   return db
-    .prepare('INSERT INTO status_logs (item_id, from_status, to_status, at) VALUES (?, ?, ?, ?)')
-    .bind(itemId, fromStatus, toStatus, at);
+    .prepare('INSERT INTO status_logs (item_id, from_status, to_status, at, by_name) VALUES (?, ?, ?, ?, ?)')
+    .bind(itemId, fromStatus, toStatus, at, byName);
+}
+
+/** 一次分拣最多开几箱（设置里可改，默认 9）。 */
+export async function maxBoxesPerSort(env: Env): Promise<number> {
+  const raw = await getSetting(env, 'max_boxes_per_sort', '9');
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 50 ? parsed : 9;
 }

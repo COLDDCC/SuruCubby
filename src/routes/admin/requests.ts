@@ -5,6 +5,7 @@ import { badRequest, notFound, readJson, requireInt, requireString } from '../..
 import { nextId, nowIso, domesticFeeFen, statusLogStmt, isSelfReturn } from '../../lib/db.ts';
 import { clearCustomerSession, customerSession } from '../../lib/session.ts';
 import { usingInitialPassword } from '../../lib/password.ts';
+import { buildItemDetail } from '../../lib/itemDetail.ts';
 export const requestAdminRoutes=new Hono<{Bindings:Env}>();
 type CustomerMe={id:number;passwordHash:string|null};
 type CustomerCtx=Context<{Bindings:Env;Variables:{customer:CustomerMe}}>;
@@ -25,6 +26,22 @@ requestCustomerRoutes.post('/:token/addresses',async c=>{
  const count=await c.env.DB.prepare('SELECT COUNT(*) AS n FROM addresses WHERE customer_id=?').bind(cid).first<{n:number}>();
  if((count?.n??0)>=3) throw badRequest('最多保存3个地址');
  const id=await nextId(c.env.DB,'addresses'); await c.env.DB.prepare('INSERT INTO addresses VALUES(?,?,?,?,?)').bind(id,cid,recipient,phone,detail).run();return c.json({id});
+});
+/** 自己的一件东西的完整信息（下单时间、各段单号、商品页）。只能看自己的。 */
+requestCustomerRoutes.get('/:token/items/:id',async c=>{
+ const detail=await buildItemDetail(c.env.DB,requireInt(c.req.param('id'),'物品 ID'),{money:true,customerId:identity(c)});
+ if(!detail) throw notFound('没有这件东西');
+ return c.json(detail);
+});
+/** 直邮寄到哪个地址：从自己存的地址里选一个；传 null 表示取消选择。已经打好包的不受影响（包裹里存的是当时的地址）。 */
+requestCustomerRoutes.post('/:token/direct-address',async c=>{
+ const cid=identity(c); const b=await readJson<{addressId?:unknown}>(c);
+ if(b.addressId===null||b.addressId===undefined){await c.env.DB.prepare('UPDATE customers SET direct_address_id=NULL WHERE id=?').bind(cid).run();return c.json({ok:true,addressId:null});}
+ const id=requireInt(b.addressId,'地址 ID');
+ const own=await c.env.DB.prepare('SELECT id FROM addresses WHERE id=? AND customer_id=?').bind(id,cid).first();
+ if(!own) throw notFound('地址不存在');
+ await c.env.DB.prepare('UPDATE customers SET direct_address_id=? WHERE id=?').bind(id,cid).run();
+ return c.json({ok:true,addressId:id});
 });
 requestCustomerRoutes.delete('/:token/addresses/:id',async c=>{
  await c.env.DB.prepare('DELETE FROM addresses WHERE id=? AND customer_id=?').bind(requireInt(c.req.param('id'),'地址 ID'),identity(c)).run();return c.json({ok:true});

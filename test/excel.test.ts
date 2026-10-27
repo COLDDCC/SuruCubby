@@ -273,3 +273,62 @@ test("指认成「不使用」的列不再被表头猜走", () => {
   assert.equal(r.rows.length, 1);
   assert.equal(r.rows[0].goodsFeeJpy, 1000);
 });
+
+test("发货方式：直邮 / 拼团 / 空着 = 拼团，看不懂的拦下", () => {
+  const result = parseSheet({
+    headers: ["名称", "实际价格", "cn", "发货方式", "收货地址"],
+    rows: [
+      ["A", 100, "阿狸", "直邮", "上海市 某路 1 号 张三 13800000000"],
+      ["B", 100, "阿狸", "拼团", "这个地址不该留"],
+      ["C", 100, "小明", "", null],
+      ["D", 100, "小明", "EMS", null],
+      ["E", 100, "小红", "随便", null],
+    ],
+  });
+  assert.deepEqual(
+    result.rows.map((r) => [r.title, r.route, r.directAddress]),
+    [
+      ["A", "direct", "上海市 某路 1 号 张三 13800000000"],
+      ["B", "group", null],
+      ["C", "group", null],
+      ["D", "direct", null],
+    ],
+  );
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0].reason, /发货方式/);
+});
+
+test("「收货地址」列认成直邮地址，不会被当成商品链接", () => {
+  const map = mapHeaders(["名称", "cn", "实际价格", "收货地址", "商品链接"]);
+  assert.equal(map.index.directAddress, 3);
+  assert.equal(map.index.productUrl, 4);
+});
+
+test("没有发货方式这一列的旧表照常导入，全部是拼团", () => {
+  const result = parseSheet({ headers: ["名称", "实际价格", "cn"], rows: [["A", 1, "x"], ["B", 2, "y"]] });
+  assert.ok(result.rows.every((r) => r.route === "group" && r.directAddress === null));
+});
+
+test("日本运单号、下单时间两列：横线空格去掉，Excel 日期序列号和文本日期都认", async () => {
+  const { parseDateCell, normalizeTrackingNo } = await import("../src/lib/excel.ts");
+  assert.equal(parseDateCell(46315), "2026-10-20");
+  assert.equal(parseDateCell("2026/10/20"), "2026-10-20");
+  assert.equal(parseDateCell("2026年1月5日 13:00"), "2026-01-05");
+  assert.equal(parseDateCell("随便"), null);
+  assert.equal(normalizeTrackingNo("4908-1234 5678"), "490812345678");
+  assert.equal(normalizeTrackingNo(490812345678), "490812345678");
+  const result = parseSheet({
+    headers: ["名称", "实际价格", "cn", "日本运单号", "下单时间", "商品链接"],
+    rows: [
+      ["A", 1, "x", "4908-1111-2222", 46315, "https://www.suruga-ya.jp/product/detail/1"],
+      ["B", 1, "y", null, null, null],
+    ],
+  });
+  assert.deepEqual(
+    result.rows.map((r) => [r.jpTrackingNo, r.orderedAt, r.productUrl]),
+    [
+      ["490811112222", "2026-10-20", "https://www.suruga-ya.jp/product/detail/1"],
+      [null, null, null],
+    ],
+  );
+});

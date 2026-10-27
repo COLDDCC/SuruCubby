@@ -4,3 +4,7 @@ node_modules/
 dist/
 *.log
 preview-build/
+.sandbox/
+data/
+.env
+.data-memory/

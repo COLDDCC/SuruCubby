@@ -10,7 +10,19 @@ import {
   yen,
   toast,
   promptBox,
+  ROUTE_LABELS,
 } from '/admin/ui.js';
+import { bindItemDetails } from '/admin/itemDetail.js';
+
+/** 还在日本这一侧、没装箱没打包的件才能改发货方式（和后端 changeRoute 同一个口径）。 */
+function routeEditable(i) {
+  return ['ordered', 'jp_warehouse'].includes(i.status) && !i.weighGroupId && !i.directParcelId && !i.shipmentId;
+}
+
+function routeTag(i) {
+  const label = ROUTE_LABELS[i.route] ?? i.route;
+  return `<span class="badge ${i.route === 'direct' ? 'warn' : ''}" title="${i.route === 'direct' && i.importAddress ? `直邮地址：${escapeHtml(i.importAddress)}` : ''}">${label}</span>`;
+}
 
 export async function render(view, [id]) {
   const data = await api.get(`/api/admin/batches/${id}`);
@@ -43,16 +55,17 @@ export async function render(view, [id]) {
           </div>
         </div>
         <div class="scroll-x" style="margin-top:8px"><table>
-          <thead><tr><th>图</th><th>行</th><th>名称</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
+          <thead><tr><th><input type="checkbox" data-pick-all="${g.customerId}" aria-label="全选"></th><th>图</th><th>名称</th><th class="right">应付</th><th>发货</th><th>状态</th><th>货款</th></tr></thead>
           <tbody>${g.items
             .map(
               (i) => `<tr data-focus-item="${i.id}">
+              <td><input type="checkbox" data-pick="${i.id}" data-owner="${g.customerId}" ${routeEditable(i) ? '' : 'disabled title="已装箱、打包或发出，不能再改发货方式"'}></td>
               <td class="cell-thumb">${thumb(i)}</td>
-              <td class="small muted">${i.rowNo ?? ''}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
-                <div>${codeTag(i)}</div></td>
-              <td class="right small">${yen(i.actualPriceJpy)}</td>
+                <div>${codeTag(i)} <span class="small muted">第 ${i.rowNo ?? '?'} 行 · 实际价格 ${yen(i.actualPriceJpy)}</span>
+                  <button class="small plain" data-detail="${i.id}">详情</button></div></td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
+              <td>${routeTag(i)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>
             </tr>`,
@@ -83,6 +96,12 @@ export async function render(view, [id]) {
       }
       <p class="small"><button class="small plain" data-action="fetchImages">固化封面图</button>
         <span class="small muted">缺图的去商品页抓 og:image；绑了 R2 就把图存进自己的桶，一次 20 件</span></p>
+      <div class="row route-bar">
+        <span class="small muted">勾选的件改成：</span>
+        <button class="small" data-action="route" data-route="direct">直邮</button>
+        <button class="small plain" data-action="route" data-route="group">拼团</button>
+        <span class="small muted">只有已下单 / 已到日本仓、还没装箱打包的件能改；改回拼团会自动放回这一批的回国箱。</span>
+      </div>
       <p class="small">关联包裹：${
         data.packages.length
           ? data.packages.map((p) => `<a href="#/packages/${p.id}">${escapeHtml(p.name)}</a>`).join('、')
@@ -91,7 +110,26 @@ export async function render(view, [id]) {
     </div>
     ${groups}`;
 
+  view.querySelectorAll('[data-pick-all]').forEach((all) => {
+    all.onchange = () => {
+      view
+        .querySelectorAll(`[data-pick][data-owner="${all.dataset.pickAll}"]:not(:disabled)`)
+        .forEach((el) => (el.checked = all.checked));
+    };
+  });
+
+  bindItemDetails(view);
   bindActions(view, {
+    route: async ({ route }) => {
+      const ids = [...view.querySelectorAll('[data-pick]:checked')].map((el) => Number(el.dataset.pick));
+      if (!ids.length) {
+        toast('先勾上要改的件', true);
+        return;
+      }
+      const r = await api.post('/api/admin/items/route', { itemIds: ids, route });
+      toast(r.changed ? `已把 ${r.changed} 件改成${ROUTE_LABELS[route]}` : `这几件本来就是${ROUTE_LABELS[route]}`);
+      await render(view, [id]);
+    },
     orderTracking: async () => {
       const orderNo = await promptBox('日本订单号', data.batch.orderNo || '');
       if (orderNo === null) return;

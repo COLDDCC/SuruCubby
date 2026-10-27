@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow } from '../../lib/excel.ts';
+import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow, normalizeTrackingNo, parseDateCell } from '../../lib/excel.ts';
 import { badRequest, optionalString, readJson, requireString } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
@@ -113,6 +113,12 @@ importRoutes.post('/preview', async (c) => {
       amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
       customers: groups.length,
       unmatched: matched.filter((m) => !m.match.customer).length,
+      direct: parsed.rows.filter((r) => r.route === 'direct').length,
+      // 表里写了日本运单号的：这一单分几个快递箱、每箱几件
+      jpTrackingNos: [...new Set(parsed.rows.map((r) => r.jpTrackingNo).filter((t): t is string => !!t))].map((t) => ({
+        trackingNo: t,
+        count: parsed.rows.filter((r) => r.jpTrackingNo === t).length,
+      })),
     },
     groups: matched.map(({ group, match }) => ({
       ...group,
@@ -263,7 +269,8 @@ importRoutes.post('/commit', async (c) => {
   const batchId = await nextId(db, 'batches');
   const packageId = await nextId(db, 'packages');
   const packageName = optionalString(body.packageName) ?? batchName;
-  const orderedAt = optionalString(body.orderedAt);
+  // 下单日期：导入页填的为准（默认当天，东京时间）；表里有「下单时间」列的件另记在件上
+  const orderedAt = parseDateCell(optionalString(body.orderedAt)) ?? new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
   statements.push(
     db
@@ -280,8 +287,9 @@ importRoutes.post('/commit', async (c) => {
   let itemId = await nextId(db, 'items');
   const insertItem = db.prepare(
     `INSERT INTO items (id, batch_id, customer_id, package_id, row_no, title, image_url, product_url,
-                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?)`,
+                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at,
+                        route, import_address, cn_label, jp_tracking_no, ordered_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertLog = db.prepare('INSERT INTO status_logs (item_id, from_status, to_status, at) VALUES (?, NULL, ?, ?)');
 
@@ -294,7 +302,8 @@ importRoutes.post('/commit', async (c) => {
         itemId,
         batchId,
         customerId,
-        packageId,
+        // 直邮的件不进回国箱：日本仓直接按客户打包寄出
+        row.route === 'direct' ? null : packageId,
         row.rowNo,
         row.title,
         row.imageUrl,
@@ -304,6 +313,11 @@ importRoutes.post('/commit', async (c) => {
         row.goodsFeeJpy,
         now,
         now,
+        row.route,
+        row.directAddress,
+        row.cn,
+        row.jpTrackingNo,
+        row.orderedAt,
       ),
       insertLog.bind(itemId, 'ordered', now),
     );
@@ -314,7 +328,7 @@ importRoutes.post('/commit', async (c) => {
   statements.push(
     db
       .prepare('UPDATE batches SET order_no=?,japan_tracking_no=? WHERE id=?')
-      .bind(optionalString(body.orderNo), optionalString(body.japanTrackingNo), batchId),
+      .bind(optionalString(body.orderNo), normalizeTrackingNo(optionalString(body.japanTrackingNo)), batchId),
   );
   await db.batch(statements);
 
@@ -322,6 +336,7 @@ importRoutes.post('/commit', async (c) => {
     batchId,
     packageId,
     itemCount: parsed.rows.length,
+    directCount: parsed.rows.filter((r) => r.route === 'direct').length,
     amountJpy: parsed.rows.reduce((sum, r) => sum + r.goodsFeeJpy, 0),
     customerCount: rowsByCustomer.size,
     createdCustomers,

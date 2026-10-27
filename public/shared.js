@@ -3,6 +3,8 @@
 export const STATUS_LABELS = {
   ordered: '已下单',
   jp_warehouse: '已到日本仓',
+  direct_unpaid: '直邮待付款',
+  direct_ready: '直邮待寄出',
   intl_transit: '回国中',
   cn_arrived: '回国中',
   cn_stock: '可发货',
@@ -11,6 +13,8 @@ export const STATUS_LABELS = {
   cancelled: '缺货取消',
   refunded: '已退款',
 };
+
+export const ROUTE_LABELS = { group: '拼团', direct: '直邮' };
 
 export const PACKAGE_BULK_STATUSES = ['ordered', 'jp_warehouse', 'intl_transit'];
 
@@ -145,4 +149,203 @@ export function codeTag(item) {
   const url = escapeHtml(item.productUrl);
   if (!code) return `<a class="code" href="${url}" target="_blank" rel="noreferrer">商品页</a>`;
   return `<a class="code" href="${url}" target="_blank" rel="noreferrer" title="${url}">${escapeHtml(code)}</a>`;
+}
+
+/**
+ * 一件东西的完整信息（后台、日本仓、客户页共用一份排版）。
+ * 单号后面都带「复制」按钮：data-copy，由页面自己绑定（copyText）。
+ */
+export function itemDetailHtml(d) {
+  const copy = (v) => (v ? ` <button class="small plain" data-copy="${escapeHtml(v)}">复制</button>` : '');
+  const row = (label, value) =>
+    `<div class="dl-row"><span class="dl-k">${label}</span><span class="dl-v">${value}</span></div>`;
+  const none = '<span class="muted">—</span>';
+  const tn = (v) => (v ? `<b class="mono">${escapeHtml(v)}</b>${copy(v)}` : '<span class="muted">还没有</span>');
+  const routeText = d.route === 'direct' ? '日本直邮' : '拼团';
+
+  const shipping = [];
+  if (d.route === 'direct') {
+    shipping.push(
+      row(
+        '直邮单号',
+        d.direct
+          ? `${d.direct.carrier ? `${escapeHtml(d.direct.carrier)} ` : ''}${tn(d.direct.trackingNo)}
+             <div class="small muted">直邮包裹 #${d.direct.parcelId} · ${escapeHtml(d.direct.statusLabel || '')}${
+               d.direct.feeFen !== undefined && d.direct.feeFen !== null ? ` · 运费 ${money(d.direct.feeFen)}` : ''
+             }</div>`
+          : '<span class="muted">还没打包</span>',
+      ),
+    );
+  } else {
+    shipping.push(
+      row(
+        '回国单号',
+        d.returnBox
+          ? `${tn(d.returnBox.trackingNo)}<div class="small muted">${escapeHtml(d.returnBox.name || '')}</div>`
+          : '<span class="muted">还没装箱</span>',
+      ),
+    );
+    shipping.push(row('国内单号', d.domestic ? tn(d.domestic.trackingNo) : '<span class="muted">还没从国内寄出</span>'));
+  }
+
+  const p = d.prices;
+  const prices = p
+    ? row(
+        '价格',
+        `实际价 ${yen(p.actualPriceJpy)}${p.listPriceJpy ? ` · 平时价 ${yen(p.listPriceJpy)}` : ''} · 应付 <b>${yen(p.goodsFeeJpy)}</b>
+         <span class="badge ${p.goodsPaid ? 'ok' : 'danger'}">${p.goodsPaid ? '货款已付' : '货款未付'}</span>`,
+      )
+    : '';
+
+  return `
+    <div class="detail">
+      <div class="detail-head">
+        <div class="detail-cover">${thumb(d)}</div>
+        <div>
+          <div class="detail-title">${
+            d.product?.url
+              ? `<a href="${escapeHtml(d.product.url)}" target="_blank" rel="noreferrer">${escapeHtml(d.title)}</a>`
+              : escapeHtml(d.title)
+          }</div>
+          <div class="small" style="margin-top:4px">
+            <span class="badge">${escapeHtml(d.statusLabel || '')}</span>
+            <span class="badge ${d.route === 'direct' ? 'warn' : ''}">${routeText}</span>
+            ${d.missing ? '<span class="badge danger">缺件</span>' : ''}
+          </div>
+          ${d.exceptionNote ? `<div class="small" style="color:var(--warn);margin-top:4px">${escapeHtml(d.exceptionNote)}</div>` : ''}
+        </div>
+      </div>
+      <div class="detail-journey">${journeyHtml(journeyFromDetail(d))}</div>
+      <div class="dl">
+        ${row('归属', `<span class="cn-chip">${escapeHtml(d.owner.cn)}</span>${
+          d.owner.nickname && d.owner.nickname !== d.owner.cn ? ` <span class="muted">（${escapeHtml(d.owner.nickname)}）</span>` : ''
+        } · QQ <b class="mono">${escapeHtml(d.owner.qq)}</b>${copy(d.owner.qq)}`)}
+        ${row('下单时间', escapeHtml(d.orderedAt || '—'))}
+        ${row('日本订单号', d.batch.orderNo ? `<b class="mono">${escapeHtml(d.batch.orderNo)}</b>${copy(d.batch.orderNo)}` : none)}
+        ${row('日本运单号', tn(d.jpTrackingNo))}
+        ${shipping.join('')}
+        ${row(
+          '商品页',
+          d.product?.url
+            ? `${escapeHtml(d.product.shop || '商品页')}${d.product.code ? ` · 货号 <b class="mono">${escapeHtml(d.product.code)}</b>` : ''}
+               · <a href="${escapeHtml(d.product.url)}" target="_blank" rel="noreferrer">打开 ↗</a>`
+            : none,
+        )}
+        ${prices}
+        ${row('批次', escapeHtml(d.batch.name || ''))}
+      </div>
+      ${
+        d.timeline?.length
+          ? `<details class="small" ${d.timeline.length <= 6 ? 'open' : ''}><summary>经过（${d.timeline.length} 步）</summary>
+              <ol class="timeline">${d.timeline
+                .map(
+                  (t) => `<li><span class="muted">${beijingTime(t.at)}</span> ${escapeHtml(t.toLabel)}${
+                    t.byName ? ` <span class="muted">· ${escapeHtml(t.byName)}</span>` : ''
+                  }</li>`,
+                )
+                .join('')}</ol></details>`
+          : ''
+      }
+    </div>`;
+}
+
+/**
+ * 一件东西走到哪一步了、现在在哪个包裹里。客户页每件商品、物品详情都用这一份。
+ * 传进来的字段（缺的就当没有）：
+ *   route, status, missing, sortedAt, jpTrackingNo,
+ *   packageName, returnTrackingNo,                     拼团的回国箱
+ *   shipmentTrackingNo,                                国内寄出
+ *   directParcelId, parcelStatus, parcelTrackingNo, parcelCarrier   直邮包裹
+ */
+const JOURNEY_STEPS = {
+  group: ['下单', '日本仓', '回国中', '国内仓', '已寄出', '签收'],
+  direct: ['下单', '日本仓', '待付款', '待寄出', '已寄出', '签收'],
+};
+
+export function journey(i) {
+  const route = i.route === 'direct' ? 'direct' : 'group';
+  const steps = JOURNEY_STEPS[route];
+  const tn = (label, no) => (no ? `${label} <b class="mono">${escapeHtml(no)}</b>` : '');
+  const join = (...parts) => parts.filter(Boolean).join(' · ');
+  if (i.status === 'cancelled' || i.status === 'refunded') {
+    return { steps, current: -1, tone: 'dead', where: i.status === 'refunded' ? '已退款' : '缺货取消，钱会退给你' };
+  }
+  let current = 0;
+  let where = '';
+  const parcel = i.directParcelId ? `直邮包裹 #${i.directParcelId}` : '';
+  const ems = tn(i.parcelCarrier || 'EMS', i.parcelTrackingNo);
+  switch (i.status) {
+    case 'ordered':
+      current = 0;
+      where = join('还在日本，等店家发货到日本仓', tn('日本运单', i.jpTrackingNo));
+      break;
+    case 'jp_warehouse':
+      current = 1;
+      if (route === 'direct') {
+        where = parcel ? join(`已装进${parcel}，等称重算运费`, ems) : i.sortedAt ? '已到日本仓、分拣好了，等打包（要有收货地址）' : '已到日本仓，等分拣';
+      } else {
+        where = i.sortedAt && i.packageName ? `已分进「${escapeHtml(i.packageName)}」，等这一箱发出` : '已到日本仓，等分拣';
+      }
+      break;
+    case 'direct_unpaid':
+      current = 2;
+      where = join(`在${parcel || '直邮包裹'}里，运费待付`, ems);
+      break;
+    case 'direct_ready':
+      current = 3;
+      where = join(`在${parcel || '直邮包裹'}里，运费已付，等日本仓寄出`, ems);
+      break;
+    case 'intl_transit':
+      current = 2;
+      where = join(i.packageName ? `在「${escapeHtml(i.packageName)}」里回国中` : '回国中', tn('回国单号', i.returnTrackingNo));
+      break;
+    case 'cn_arrived':
+      current = 3;
+      where = join(i.packageName ? `「${escapeHtml(i.packageName)}」已到国内，等称重算运费` : '已到国内，等称重算运费', tn('回国单号', i.returnTrackingNo));
+      break;
+    case 'cn_stock':
+      current = 3;
+      where = '在国内仓，可以申请发货了';
+      break;
+    case 'shipped':
+      current = 4;
+      where = route === 'direct' ? join(`${parcel || '直邮包裹'}已从日本寄出`, ems) : join('已从国内寄出', tn('快递单号', i.shipmentTrackingNo));
+      break;
+    case 'delivered':
+      current = 5;
+      where = route === 'direct' ? join('已签收', ems) : join('已签收', tn('快递单号', i.shipmentTrackingNo));
+      break;
+    default:
+      where = escapeHtml(statusLabel(i.status));
+  }
+  if (i.missing) where = join(where, '<span class="unpaid">这一件没到齐，群主在跟</span>');
+  return { steps, current, tone: current === 5 ? 'done' : 'live', where };
+}
+
+/** 进度条 + 「现在在哪」一行。 */
+export function journeyHtml(i) {
+  const j = journey(i);
+  if (j.current < 0) return `<div class="where dead">${j.where}</div>`;
+  return `<ol class="journey" aria-label="进度：${escapeHtml(j.steps[j.current])}">${j.steps
+    .map((s, k) => `<li class="${k < j.current ? 'done' : k === j.current ? 'now' : ''}"><span>${s}</span></li>`)
+    .join('')}</ol>
+    <div class="where">${j.where}</div>`;
+}
+
+/** 把物品详情接口的结构摊平成 journey() 要的字段。 */
+export function journeyFromDetail(d) {
+  return {
+    route: d.route,
+    status: d.status,
+    missing: d.missing,
+    sortedAt: d.sortedAt,
+    jpTrackingNo: d.jpTrackingNo,
+    packageName: d.returnBox?.name,
+    returnTrackingNo: d.returnBox?.trackingNo,
+    shipmentTrackingNo: d.domestic?.trackingNo,
+    directParcelId: d.direct?.parcelId,
+    parcelStatus: d.direct?.status,
+    parcelTrackingNo: d.direct?.trackingNo,
+    parcelCarrier: d.direct?.carrier,
+  };
 }
