@@ -6,6 +6,7 @@ import { staffOf } from './staff.ts';
 /** 请求体里这些键一律不落库。 */
 const SECRET_KEY = /password|secret|token/i;
 const MAX_DETAIL = 2000;
+const QUIET_PATHS = new Set(['/api/staff/sort/mark']);
 
 function redact(value: unknown, depth = 0): unknown {
   if (depth > 4) return '…';
@@ -28,6 +29,8 @@ function redact(value: unknown, depth = 0): unknown {
  */
 export const auditLog: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) return next();
+  // 分拣时点卡片「找到了」一点一次，记进日志只会把真正要查的操作淹掉；落定的「发送」照记
+  if (QUIET_PATHS.has(new URL(c.req.url).pathname)) return next();
   let detail: string | null = null;
   try {
     const text = await c.req.raw.clone().text();

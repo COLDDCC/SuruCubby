@@ -113,7 +113,7 @@ function weightOf(value: unknown): number {
  * 这一包寄到哪：导入表里写了地址就用表里的；没写就用客户在自己页面上选的直邮地址；
  * 客户只存了一个地址就自动用它；都没有就打不了包。
  */
-async function resolveAddress(
+export async function resolveAddress(
   db: D1Database,
   customerId: number,
   importAddresses: string[],
@@ -217,7 +217,7 @@ directStaffRoutes.post('/parcels', async (c) => {
         .prepare('UPDATE items SET direct_parcel_id = ?, status = ?, updated_at = ? WHERE id = ?')
         .bind(id, weightG === null ? 'jp_warehouse' : 'direct_unpaid', at, r.id),
     );
-    if (weightG !== null) statements.push(statusLogStmt(db, r.id, 'jp_warehouse', 'direct_unpaid', at));
+    if (weightG !== null) statements.push(statusLogStmt(db, r.id, 'jp_warehouse', 'direct_unpaid', at, staffOf(c).name));
   }
   await db.batch(statements);
   return c.json({ ok: true, id, status, feeFen: fee });
@@ -245,7 +245,7 @@ directStaffRoutes.post('/parcels/:id/weigh', async (c) => {
       .filter((i) => i.status !== 'direct_unpaid')
       .flatMap((i) => [
         db.prepare("UPDATE items SET status = 'direct_unpaid', updated_at = ? WHERE id = ?").bind(at, i.id),
-        statusLogStmt(db, i.id, i.status, 'direct_unpaid', at),
+        statusLogStmt(db, i.id, i.status, 'direct_unpaid', at, staffOf(c).name),
       ]),
   ]);
   return c.json({ ok: true, weightG, rateFenPerKg: rate, feeFen: fee });
@@ -264,7 +264,7 @@ directStaffRoutes.post('/parcels/:id/cancel', async (c) => {
   await db.batch([
     ...items.flatMap((i) => [
       db.prepare("UPDATE items SET direct_parcel_id = NULL, status = 'jp_warehouse', updated_at = ? WHERE id = ?").bind(at, i.id),
-      ...(i.status !== 'jp_warehouse' ? [statusLogStmt(db, i.id, i.status, 'jp_warehouse', at)] : []),
+      ...(i.status !== 'jp_warehouse' ? [statusLogStmt(db, i.id, i.status, 'jp_warehouse', at, staffOf(c).name)] : []),
     ]),
     db.prepare('DELETE FROM direct_parcels WHERE id = ?').bind(id),
   ]);
@@ -287,7 +287,7 @@ directStaffRoutes.post('/parcels/:id/remove', async (c) => {
   await db.batch([
     ...picked.flatMap((i) => [
       db.prepare("UPDATE items SET direct_parcel_id = NULL, status = 'jp_warehouse', updated_at = ? WHERE id = ?").bind(at, i.id),
-      ...(i.status !== 'jp_warehouse' ? [statusLogStmt(db, i.id, i.status, 'jp_warehouse', at)] : []),
+      ...(i.status !== 'jp_warehouse' ? [statusLogStmt(db, i.id, i.status, 'jp_warehouse', at, staffOf(c).name)] : []),
     ]),
     ...(left
       ? [
@@ -296,7 +296,7 @@ directStaffRoutes.post('/parcels/:id/remove', async (c) => {
             .filter((i) => !itemIds.includes(i.id) && i.status !== 'jp_warehouse')
             .flatMap((i) => [
               db.prepare("UPDATE items SET status = 'jp_warehouse', updated_at = ? WHERE id = ?").bind(at, i.id),
-              statusLogStmt(db, i.id, i.status, 'jp_warehouse', at),
+              statusLogStmt(db, i.id, i.status, 'jp_warehouse', at, staffOf(c).name),
             ]),
         ]
       : [db.prepare('DELETE FROM direct_parcels WHERE id = ?').bind(id)]),
@@ -308,10 +308,13 @@ directStaffRoutes.post('/parcels/:id/remove', async (c) => {
 directStaffRoutes.post('/parcels/:id/ship', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   const body = await readJson<{ trackingNo?: unknown; carrier?: unknown }>(c);
-  const trackingNo = bound(requireString(body.trackingNo, '国际单号'), '国际单号', 60) as string;
-  const carrier = bound(optionalString(body.carrier), '承运商', 30);
   const db = c.env.DB;
   const parcel = await getParcel(db, id);
+  // 分拣时已经填过 EMS 单号的，寄出时不用再填一遍
+  const typed = bound(optionalString(body.trackingNo), '国际单号', 60);
+  const trackingNo = typed ?? parcel.trackingNo;
+  if (!trackingNo) throw badRequest('国际单号 不能为空');
+  const carrier = bound(optionalString(body.carrier), '承运商', 30) ?? parcel.carrier;
   if (parcel.status === 'packing' || parcel.status === 'awaiting_payment') {
     throw badRequest('这一包还没确认收款，不能寄出。等客户付款、管理员确认收款后再寄');
   }
@@ -324,20 +327,19 @@ directStaffRoutes.post('/parcels/:id/ship', async (c) => {
       .bind(trackingNo, carrier, staffOf(c).name, at, id),
     ...items.flatMap((i) => [
       db.prepare("UPDATE items SET status = 'shipped', updated_at = ? WHERE id = ?").bind(at, i.id),
-      statusLogStmt(db, i.id, i.status, 'shipped', at),
+      statusLogStmt(db, i.id, i.status, 'shipped', at, staffOf(c).name),
     ]),
   ]);
   return c.json({ ok: true });
 });
 
-/** 寄出后改单号 / 承运商（填错了），发货时间不动。 */
+/** 填 / 改单号和承运商（分拣时没填、或者填错了），任何状态都能改，发货时间不动。 */
 directStaffRoutes.post('/parcels/:id/tracking', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   const body = await readJson<{ trackingNo?: unknown; carrier?: unknown }>(c);
   const trackingNo = bound(requireString(body.trackingNo, '国际单号'), '国际单号', 60) as string;
   const carrier = bound(optionalString(body.carrier), '承运商', 30);
-  const parcel = await getParcel(c.env.DB, id);
-  if (!['shipped', 'delivered'].includes(parcel.status)) throw badRequest('还没寄出，寄出时再填单号');
+  await getParcel(c.env.DB, id);
   await c.env.DB.prepare('UPDATE direct_parcels SET tracking_no = ?, carrier = ? WHERE id = ?').bind(trackingNo, carrier, id).run();
   return c.json({ ok: true });
 });
@@ -364,7 +366,7 @@ directAdminRoutes.post('/:id/pay', async (c) => {
     db.prepare("UPDATE direct_parcels SET status = 'paid', paid_at = ? WHERE id = ?").bind(at, id),
     ...items.flatMap((i) => [
       db.prepare("UPDATE items SET status = 'direct_ready', updated_at = ? WHERE id = ?").bind(at, i.id),
-      statusLogStmt(db, i.id, i.status, 'direct_ready', at),
+      statusLogStmt(db, i.id, i.status, 'direct_ready', at, staffOf(c).name),
     ]),
   ]);
   return c.json({ ok: true, paymentId });
@@ -382,7 +384,7 @@ directAdminRoutes.post('/:id/delivered', async (c) => {
     db.prepare("UPDATE direct_parcels SET status = 'delivered', delivered_at = ? WHERE id = ?").bind(at, id),
     ...items.flatMap((i) => [
       db.prepare("UPDATE items SET status = 'delivered', updated_at = ? WHERE id = ?").bind(at, i.id),
-      statusLogStmt(db, i.id, i.status, 'delivered', at),
+      statusLogStmt(db, i.id, i.status, 'delivered', at, staffOf(c).name),
     ]),
   ]);
   return c.json({ ok: true });

@@ -64,15 +64,23 @@ export async function isSelfReturn(db: D1Database, customerId: number): Promise<
   return !!row?.n;
 }
 
-/** 生成一条状态变更日志的 SQL 语句。 */
+/** 生成一条状态变更日志的 SQL 语句；byName 是操作人（日本仓、分拣、寄出时填）。 */
 export function statusLogStmt(
   db: D1Database,
   itemId: number,
   fromStatus: string | null,
   toStatus: string,
   at: string,
+  byName: string | null = null,
 ): D1PreparedStatement {
   return db
-    .prepare('INSERT INTO status_logs (item_id, from_status, to_status, at) VALUES (?, ?, ?, ?)')
-    .bind(itemId, fromStatus, toStatus, at);
+    .prepare('INSERT INTO status_logs (item_id, from_status, to_status, at, by_name) VALUES (?, ?, ?, ?, ?)')
+    .bind(itemId, fromStatus, toStatus, at, byName);
+}
+
+/** 一次分拣最多开几箱（设置里可改，默认 9）。 */
+export async function maxBoxesPerSort(env: Env): Promise<number> {
+  const raw = await getSetting(env, 'max_boxes_per_sort', '9');
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 50 ? parsed : 9;
 }

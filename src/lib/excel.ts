@@ -30,7 +30,9 @@ export type FieldKey =
   | "quantity"
   | "cn"
   | "route"
-  | "directAddress";
+  | "directAddress"
+  | "jpTrackingNo"
+  | "orderedAt";
 
 export interface ParsedRow {
   rowNo: number;
@@ -46,6 +48,10 @@ export interface ParsedRow {
   route: "group" | "direct";
   /** 直邮地址（只有直邮行才留） */
   directAddress: string | null;
+  /** 这一件在哪个日本快递箱（日本运单号），表里没写就是 null，分拣时再记 */
+  jpTrackingNo: string | null;
+  /** 下单日期 YYYY-MM-DD，表里没写就是 null（用导入时填的订单日期） */
+  orderedAt: string | null;
 }
 
 export interface SkippedRow {
@@ -143,6 +149,28 @@ const COLUMNS: ColumnSpec[] = [
     required: false,
     // 排在「商品链接」前面：它的别名里有「地址」两个字，不能让「收货地址」被当成商品链接
     aliases: ["直邮地址", "收货地址", "收件地址", "寄送地址", "邮寄地址", "收件人地址"],
+  },
+  {
+    field: "jpTrackingNo",
+    label: "日本运单号",
+    required: false,
+    aliases: [
+      "日本运单号",
+      "日本单号",
+      "日本物流单号",
+      "日本快递单号",
+      "运单号",
+      "追踪号",
+      "伝票番号",
+      "問い合わせ番号",
+      "お問い合わせ番号",
+    ],
+  },
+  {
+    field: "orderedAt",
+    label: "下单时间",
+    required: false,
+    aliases: ["下单时间", "下单日期", "订单日期", "购买日期", "购买时间", "注文日", "注文日時"],
   },
   {
     field: "productUrl",
@@ -281,6 +309,33 @@ export function extractUrlFromText(raw: unknown): string | null {
     if (match && /^https?:\/\//i.test(match[1])) return match[1];
   }
   return null;
+}
+
+/**
+ * 表里的日期 → YYYY-MM-DD。SheetJS 按原值读，日期单元格是 Excel 序列号（45000 上下）；
+ * 文本的「2026/10/20」「2026-10-20 13:00」「2026年10月20日」也认。看不懂返回 null（不拦导入，用订单日期兜底）。
+ */
+export function parseDateCell(raw: Cell): string | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (typeof raw === "number") {
+    if (raw < 20000 || raw > 80000) return null;
+    const ms = Math.round((raw - 25569) * 86400 * 1000);
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+  const value = String(raw).trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const m = /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/.exec(value);
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 2000 || y > 2100) return null;
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** 运单号：去掉空格和横线（日本邮便的单号常写成 4908-1234-5678），太长的不认。 */
+export function normalizeTrackingNo(raw: Cell): string | null {
+  if (raw === null || raw === undefined) return null;
+  const value = String(raw).replace(/[\s\-－ー]/g, "").trim();
+  if (value === "" || value.length > 40) return null;
+  return value;
 }
 
 const DIRECT_WORDS = /直邮|直发|直寄|直送|单独寄|单独发|ems|epacket|e包裹|小包|航空|sal/i;
@@ -472,6 +527,8 @@ export function parseSheet(
           (unit < goodsFeeJpy % quantity ? 1 : 0),
         route,
         directAddress,
+        jpTrackingNo: normalizeTrackingNo(get("jpTrackingNo")),
+        orderedAt: parseDateCell(get("orderedAt")),
       });
     }
   });

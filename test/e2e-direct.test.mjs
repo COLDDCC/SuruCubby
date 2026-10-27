@@ -64,7 +64,7 @@ test('日本仓账号：看得到待签收，看不到 QQ 和钱', async () => {
   const o = await ctx.jp.get('/api/staff/jp/overview');
   const mine = o.inbound.find((b) => b.id === ctx.batchId);
   assert.ok(mine, '这一单要在待签收里');
-  assert.equal(mine.japanTrackingNo, 'JP-TRACK-9');
+  assert.equal(mine.japanTrackingNo, 'JPTRACK9', '运单号去掉横线存');
   assert.equal(mine.items.length, 4);
   const raw = JSON.stringify(o);
   assert.ok(!raw.includes(QX) && !raw.includes(QY), '日本仓数据里不能有 QQ');

@@ -40,12 +40,15 @@ export async function render(view) {
       <h2>导入 Excel</h2>
       <p class="small muted">一张表 = 一个日本订单。必需：名称、cn。货款一律按日元记，不折人民币：有「实际价格」就按它算，也可以把某一列指认成「应付日元金额」。国际/国内运费仍然是人民币。</p>
       <input type="file" id="file" accept=".xlsx,.xls,.csv">
-      <label for="batchName">批次名</label>
-      <input id="batchName" style="width:100%" placeholder="例如 9月20日 第12团">
-      <label>日本订单号</label><input id="orderNo">
-      <label>日本物流单号（可后补）</label><input id="japanTrackingNo">
-      <label for="orderedAt">下单日期（可不填）</label>
-      <input id="orderedAt" type="date">
+      <div class="form-grid" style="margin-top:8px">
+        <div><label for="batchName">批次名</label>
+          <input id="batchName" placeholder="例如 9月20日 第12团"></div>
+        <div><label for="orderedAt">下单日期</label>
+          <input id="orderedAt" type="date" value="${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}"></div>
+        <div><label for="orderNo">日本订单号</label><input id="orderNo" placeholder="骏河屋的注文番号"></div>
+        <div><label for="japanTrackingNo">日本运单号（可后补）</label><input id="japanTrackingNo" placeholder="分几箱到的，每件在表里写「日本运单号」列更准"></div>
+      </div>
+      <p class="small muted">表里可选的列：「发货方式」（直邮 / 拼团）、「收货地址」（直邮地址）、「日本运单号」（这一件在哪个快递箱）、「下单时间」（不写就用上面的下单日期）。</p>
       <p id="status" class="small muted"></p>
     </div>
     <div id="preview"></div>`;
@@ -167,6 +170,12 @@ function renderPreview(view) {
       <p class="small">共 ${p.totals.rows} 行 · ${p.totals.customers} 位客户 · 货款合计 <span class="money">${yen(
         p.totals.amountJpy,
       )}</span>${unmatched.length ? ` · <span class="unpaid">${unmatched.length} 个名字要先处理</span>` : ''}</p>
+      ${
+        (p.totals.jpTrackingNos || []).length
+          ? `<p class="small">日本运单号：${p.totals.jpTrackingNos.map((t) => `<code>${escapeHtml(t.trackingNo)}</code> ${t.count} 件`).join(' · ')}
+              ${p.totals.jpTrackingNos.reduce((n, t) => n + t.count, 0) < p.totals.rows ? `<span class="muted">（其余 ${p.totals.rows - p.totals.jpTrackingNos.reduce((n, t) => n + t.count, 0)} 件没写，分拣时再记）</span>` : ''}</p>`
+          : ''
+      }
       <p class="small">发货方式：拼团 <b>${p.totals.rows - (p.totals.direct || 0)}</b> 件 · 直邮 <b>${p.totals.direct || 0}</b> 件
         <span class="muted">（表里「发货方式」写直邮 / 拼团，空着算拼团；直邮的件不进回国箱，「收货地址」列会存成直邮地址。导入后也能在批次页改。）</span></p>
       ${

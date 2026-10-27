@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { directPriceFenPerKg, domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
+import { directPriceFenPerKg, domesticFeeFen, intlPriceFenPerKg, maxBoxesPerSort, setSetting } from '../../lib/db.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
 import { toFen } from '../../lib/money.ts';
 
@@ -11,6 +11,7 @@ settingsRoutes.get('/', async (c) =>
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
     directPriceFenPerKg: await directPriceFenPerKg(c.env),
+    maxBoxesPerSort: await maxBoxesPerSort(c.env),
   }),
 );
 
@@ -55,9 +56,11 @@ settingsRoutes.post('/', async (c) => {
     intlPriceFenPerKg?: unknown;
     directPriceYuanPerKg?: unknown;
     directPriceFenPerKg?: unknown;
+    maxBoxesPerSort?: unknown;
   }>(c);
 
-  const out: { domesticFeeFen: number; intlPriceFenPerKg: number; directPriceFenPerKg: number } = {
+  const out: { domesticFeeFen: number; intlPriceFenPerKg: number; directPriceFenPerKg: number; maxBoxesPerSort: number } = {
+    maxBoxesPerSort: await maxBoxesPerSort(c.env),
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
     directPriceFenPerKg: await directPriceFenPerKg(c.env),
@@ -110,6 +113,14 @@ settingsRoutes.post('/', async (c) => {
     out.directPriceFenPerKg = fen;
   }
 
-  if (!hasDomestic && !hasIntl && !hasDirect) throw badRequest('没有要保存的内容');
+  const hasBoxes = body.maxBoxesPerSort !== undefined && body.maxBoxesPerSort !== null && body.maxBoxesPerSort !== '';
+  if (hasBoxes) {
+    const n = typeof body.maxBoxesPerSort === 'string' ? Number(body.maxBoxesPerSort) : body.maxBoxesPerSort;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 50) throw badRequest('一次分拣最多几箱：填 1 到 50 的整数');
+    await setSetting(c.env, 'max_boxes_per_sort', String(n));
+    out.maxBoxesPerSort = n;
+  }
+
+  if (!hasDomestic && !hasIntl && !hasDirect && !hasBoxes) throw badRequest('没有要保存的内容');
   return c.json(out);
 });

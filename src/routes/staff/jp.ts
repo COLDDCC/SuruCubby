@@ -9,6 +9,7 @@ import type { Env } from '../../lib/env.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { badRequest, bound, intList, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { placeholders } from '../../lib/http.ts';
+import { staffOf } from '../../lib/staff.ts';
 
 export const jpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -179,7 +180,7 @@ jpRoutes.post('/receive', async (c) => {
   const at = nowIso();
   const statements: D1PreparedStatement[] = todo.flatMap((r) => [
     db.prepare("UPDATE items SET status = 'jp_warehouse', updated_at = ? WHERE id = ? AND status = 'ordered'").bind(at, r.id),
-    statusLogStmt(db, r.id, 'ordered', 'jp_warehouse', at),
+    statusLogStmt(db, r.id, 'ordered', 'jp_warehouse', at, staffOf(c).name),
   ]);
   const boxes = [...new Set(todo.map((r) => r.packageId).filter((id): id is number => id !== null))];
   statements.push(...syncBoxStatus(db, boxes));
@@ -206,7 +207,7 @@ jpRoutes.post('/unreceive', async (c) => {
   const at = nowIso();
   const statements: D1PreparedStatement[] = rows.results.flatMap((r) => [
     db.prepare("UPDATE items SET status = 'ordered', updated_at = ? WHERE id = ?").bind(at, r.id),
-    statusLogStmt(db, r.id, 'jp_warehouse', 'ordered', at),
+    statusLogStmt(db, r.id, 'jp_warehouse', 'ordered', at, staffOf(c).name),
   ]);
   for (const id of new Set(rows.results.map((r) => r.packageId).filter((x): x is number => x !== null))) {
     statements.push(
@@ -248,7 +249,7 @@ jpRoutes.post('/boxes/:id/ship', async (c) => {
     db.prepare("UPDATE packages SET status = 'intl_transit', tracking_no = ? WHERE id = ?").bind(trackingNo, id),
     ...items.results.flatMap((i) => [
       db.prepare("UPDATE items SET status = 'intl_transit', updated_at = ? WHERE id = ?").bind(at, i.id),
-      statusLogStmt(db, i.id, i.status, 'intl_transit', at),
+      statusLogStmt(db, i.id, i.status, 'intl_transit', at, staffOf(c).name),
     ]),
   ]);
   return c.json({ ok: true, count: items.results.length });
