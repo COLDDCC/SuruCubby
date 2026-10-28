@@ -15,6 +15,7 @@ import { directFeeFen, directPriceFenPerKg, maxBoxesPerSort, nowIso, statusLogSt
 import { normalizeTrackingNo } from '../../lib/excel.ts';
 import { HttpError, badRequest, bound, intList, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
 import { staffOf } from '../../lib/staff.ts';
+import { arriveStmts, loadShipments } from '../../lib/jpShipments.ts';
 import { resolveAddress } from './direct.ts';
 
 export const sortRoutes = new Hono<{ Bindings: Env }>();
@@ -142,7 +143,12 @@ sortRoutes.get('/queue', async (c) => {
     b.total += r.n;
     batches.set(r.batchId, b);
   }
-  return c.json({ batches: [...batches.values()], sessions: sessions.results });
+  // 每单登记过的日本快递：哪个到了、哪个还没到
+  const shipments = await loadShipments(db, [...batches.keys()]);
+  return c.json({
+    batches: [...batches.values()].map((b) => ({ ...b, jpShipments: shipments.get(b.batchId) ?? [] })),
+    sessions: sessions.results,
+  });
 });
 
 /** 一次分拣的结果：给结果页和「分拣记录」用。 */
@@ -317,6 +323,9 @@ sortRoutes.post('/:batchId/commit', async (c) => {
   const at = nowIso();
   const statements: D1PreparedStatement[] = [];
   const sessionId = ((await db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM sort_sessions').first<{ n: number }>())?.n ?? 1) as number;
+
+  // 这个日本快递算到了
+  if (tn) statements.push(...arriveStmts(db, batchId, tn, staff.name, at));
 
   // 所有点到的件：签收 + 记运单号 + 已分拣（缺件标记清掉）
   for (const item of found) {

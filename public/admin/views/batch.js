@@ -84,6 +84,19 @@ export async function render(view, [id]) {
       <p class="small" style="margin:0"><a href="#/batches">← 全部订单</a></p>
       <h2>${escapeHtml(data.batch.name)}</h2>
       <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
+      ${
+        (data.jpShipments || []).length
+          ? `<div class="jp-ships">${data.jpShipments
+              .map(
+                (s) => `<div class="jp-ship ${s.arrivedAt ? 'is-arrived' : 'is-waiting'}">
+                  <span><b class="mono">${escapeHtml(s.trackingNo)}</b>${s.itemCount ? ` <span class="small muted">表里 ${s.itemCount} 件</span>` : ''}</span>
+                  <span class="small">${s.arrivedAt ? `<span class="paid">日本仓已到</span> <span class="muted">${escapeHtml(s.arrivedBy || '')} ${beijingTime(s.arrivedAt)}</span>` : '<span class="unpaid">还没到</span>'}</span>
+                  ${!s.arrivedAt && !s.itemCount ? `<button class="small plain" data-action="dropShipment" data-tn="${escapeHtml(s.trackingNo)}">删掉</button>` : ''}
+                </div>`,
+              )
+              .join('')}</div>`
+          : ''
+      }
       <p class="small muted">
         导入于 ${beijingTime(data.batch.createdAt)} ·
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·
@@ -131,10 +144,15 @@ export async function render(view, [id]) {
       toast(r.changed ? `已把 ${r.changed} 件改成${ROUTE_LABELS[route]}` : `这几件本来就是${ROUTE_LABELS[route]}`);
       await render(view, [id]);
     },
+    dropShipment: async ({ tn }) => {
+      if (!(await confirmBox(`删掉登记的日本运单号 ${tn}？`, { okText: '删掉', danger: true }))) return;
+      await api.del(`/api/admin/batches/${id}/shipments/${encodeURIComponent(tn)}`);
+      await render(view, [id]);
+    },
     orderTracking: async () => {
       const orderNo = await promptBox('日本订单号', data.batch.orderNo || '');
       if (orderNo === null) return;
-      const japanTrackingNo = await promptBox('日本物流单号', data.batch.japanTrackingNo || '');
+      const japanTrackingNo = await promptBox('日本物流单号（分几个快递到的，用逗号或顿号隔开一次填完）', data.batch.japanTrackingNo || '');
       if (japanTrackingNo === null) return;
       await api.patch(`/api/admin/batches/${id}`, { orderNo, japanTrackingNo });
       await render(view, [id]);

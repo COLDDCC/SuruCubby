@@ -46,7 +46,7 @@ export async function render(view) {
         <div><label for="orderedAt">下单日期</label>
           <input id="orderedAt" type="date" value="${new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10)}"></div>
         <div><label for="orderNo">日本订单号</label><input id="orderNo" placeholder="骏河屋的注文番号"></div>
-        <div><label for="japanTrackingNo">日本运单号（可后补）</label><input id="japanTrackingNo" placeholder="分几箱到的，每件在表里写「日本运单号」列更准"></div>
+        <div><label for="japanTrackingNo">日本运单号（可后补）</label><input id="japanTrackingNo" placeholder="分几个快递到的用逗号隔开；每件在表里写「日本运单号」列更准"></div>
       </div>
       <p class="small muted">表里可选的列：「发货方式」（直邮 / 拼团）、「收货地址」（直邮地址）、「日本运单号」（这一件在哪个快递箱）、「下单时间」（不写就用上面的下单日期）。</p>
       <p id="status" class="small muted"></p>

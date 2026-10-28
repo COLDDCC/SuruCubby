@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, ROUTE_LABELS, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, promptBox, ROUTE_LABELS, toast } from '/admin/ui.js';
 import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
@@ -46,6 +46,37 @@ function itemRow(item, { pick = false, checked = false, route = true, fix = fals
   </label>`;
 }
 
+/**
+ * 一单分几个快递到：每个日本运单号一行，到没到一眼看清；先到的可以先点「到了」签收，晚点再分拣。
+ */
+function shipmentsHtml(b) {
+  const list = b.jpShipments || [];
+  const arrived = list.filter((s) => s.arrivedAt).length;
+  const rows = list
+    .map(
+      (s) => `<div class="jp-ship ${s.arrivedAt ? 'is-arrived' : 'is-waiting'}">
+        <span><b class="mono">${escapeHtml(s.trackingNo)}</b>
+          ${s.itemCount ? `<span class="small muted">表里 ${s.itemCount} 件</span>` : ''}</span>
+        <span class="small">${
+          s.arrivedAt
+            ? `<span class="paid">已到</span> <span class="muted">${escapeHtml(s.arrivedBy || '')} ${beijingTime(s.arrivedAt)}</span>`
+            : '<span class="unpaid">还没到</span>'
+        }</span>
+        ${
+          s.arrivedAt
+            ? `<button type="button" class="small plain" data-action="unarrive" data-batch="${b.batchId}" data-tn="${escapeHtml(s.trackingNo)}">点错了</button>`
+            : `<button type="button" class="small" data-action="arrive" data-batch="${b.batchId}" data-tn="${escapeHtml(s.trackingNo)}">到了</button>`
+        }
+      </div>`,
+    )
+    .join('');
+  return `<div class="jp-ships">
+    <div class="small muted">${list.length ? `日本快递 ${list.length} 个 · 到了 ${arrived} 个${list.length > arrived ? ` · <b class="unpaid">还差 ${list.length - arrived} 个</b>` : ''}` : '这一单还没登记日本快递单号'}
+      <button type="button" class="small plain" data-action="addShipment" data-batch="${b.batchId}">补登单号</button></div>
+    ${rows}
+  </div>`;
+}
+
 function queueHtml(queue) {
   const batches = queue.batches;
   const recent = queue.sessions.length
@@ -66,6 +97,7 @@ function queueHtml(queue) {
         <p class="small muted" style="margin:4px 0 8px">日本订单 <b>${escapeHtml(b.orderNo || '—')}</b> · 下单 ${escapeHtml(b.orderedAt || '—')} · 还有 ${b.total} 件没分${
           b.missing ? ` · <span class="unpaid">${b.missing} 件上次没找到</span>` : ''
         }</p>
+        ${shipmentsHtml(b)}
         ${b.boxes
           .map(
             (x) => `<a class="queue-row" href="#/sort/${b.batchId}?tn=${encodeURIComponent(x.trackingNo)}">
@@ -202,6 +234,24 @@ export async function render(view) {
   const picked = (root) => [...root.querySelectorAll('[data-pick]:checked')].map((el) => Number(el.dataset.pick));
 
   bindActions(view, {
+    async arrive({ batch, tn }) {
+      const r = await api.post('/api/staff/jp/shipments/arrive', { batchId: Number(batch), trackingNo: tn });
+      toast(r.received ? `签收了，表里写着这个单号的 ${r.received} 件变成「已到日本仓」` : '记上了：这个快递已到');
+      await render(view);
+    },
+    async unarrive({ batch, tn }) {
+      if (!(await confirmBox(`撤销「${tn} 已到」？表里写着这个单号、还没分拣的件退回「已下单」。`, { okText: '撤销' }))) return;
+      await api.post('/api/staff/jp/shipments/unarrive', { batchId: Number(batch), trackingNo: tn });
+      toast('已撤销');
+      await render(view);
+    },
+    async addShipment({ batch }) {
+      const tn = await promptBox('补登一个日本运单号（骏河屋发货通知里的）');
+      if (!tn) return;
+      await api.post('/api/staff/jp/shipments', { batchId: Number(batch), trackingNo: tn });
+      toast('登记好了');
+      await render(view);
+    },
     async markMissing({ item }) {
       if (!(await confirmBox('这件在仓库里找不到？标成缺件后它退回「未签收」、从箱子里拿出来，管理员会看到；下一个快递到了还会出现在分拣页里。', { okText: '标缺件', danger: true }))) return;
       await api.post('/api/staff/jp/unreceive', { itemIds: [Number(item)], missing: true });

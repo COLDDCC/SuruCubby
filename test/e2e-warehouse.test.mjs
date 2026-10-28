@@ -102,3 +102,41 @@ test('② 签错了能退回、没找到能标缺件：退回后从箱子里拿�
   const back = (await ctx.admin.get(`/api/admin/batches/${ctx.batchId}`)).items.find((i) => i.id === directItem);
   assert.equal(back.missing, 0);
 });
+
+test('③ 一单几个日本快递：每个单号单独签收，看得出哪个还没到；仓库能补登单号', async () => {
+  let q = await ctx.jp.get('/api/staff/sort/queue');
+  let b = q.batches.find((x) => x.batchId === ctx.batchId);
+  const byTn = () => Object.fromEntries(b.jpShipments.map((s) => [s.trackingNo, s]));
+  assert.ok(byTn()[norm(TN_A)].arrivedAt, '分拣过的快递 A 算已到');
+  assert.equal(byTn()[norm(TN_A)].arrivedBy, '仓库小李');
+  assert.equal(byTn()[norm(TN_B)].arrivedAt, null, '快递 B 还没到');
+
+  // 快递 B 先签收，晚点再分拣：表里写着 B 的件变「已到日本仓」，但还在分拣队列里
+  const r = await ctx.jp.post('/api/staff/jp/shipments/arrive', { batchId: ctx.batchId, trackingNo: TN_B });
+  assert.equal(r.received, 1);
+  q = await ctx.jp.get('/api/staff/sort/queue');
+  b = q.batches.find((x) => x.batchId === ctx.batchId);
+  assert.ok(byTn()[norm(TN_B)].arrivedAt);
+  assert.equal(byTn()[norm(TN_B)].waiting, 1, '签收了但还没分拣');
+  const item = (await ctx.admin.get(`/api/admin/batches/${ctx.batchId}`)).items.find((i) => i.title === '拼团画集');
+  assert.equal(item.status, 'jp_warehouse');
+
+  // 点错了能撤
+  await ctx.jp.post('/api/staff/jp/shipments/unarrive', { batchId: ctx.batchId, trackingNo: TN_B });
+  assert.equal((await ctx.admin.get(`/api/admin/batches/${ctx.batchId}`)).items.find((i) => i.title === '拼团画集').status, 'ordered');
+  // 分拣过的快递 A 不能撤
+  const no = await ctx.jp.post('/api/staff/jp/shipments/unarrive', { batchId: ctx.batchId, trackingNo: TN_A }, { raw: true });
+  assert.equal(no.status, 400);
+
+  // 补登第三个快递；管理员在订单页一次填几个也认
+  await ctx.jp.post('/api/staff/jp/shipments', { batchId: ctx.batchId, trackingNo: 'WH-C 777' });
+  await ctx.admin.patch(`/api/admin/batches/${ctx.batchId}`, { japanTrackingNo: `${TN_A}，WH-D-888` });
+  const detail = await ctx.admin.get(`/api/admin/batches/${ctx.batchId}`);
+  assert.deepEqual(detail.jpShipments.map((s) => s.trackingNo).sort(), [norm(TN_A), norm(TN_B), 'WHC777', 'WHD888'].sort());
+  const list = (await ctx.admin.get('/api/admin/batches')).batches.find((x) => x.id === ctx.batchId);
+  assert.equal(list.jpShipments.filter((s) => s.arrivedAt).length, 1, '订单总览里看得到到了几个');
+  // 没到、也没有件写着它的单号可以删
+  await ctx.admin.call('DELETE', `/api/admin/batches/${ctx.batchId}/shipments/WHD888`);
+  const used = await ctx.admin.call('DELETE', `/api/admin/batches/${ctx.batchId}/shipments/${norm(TN_B)}`, undefined, { raw: true });
+  assert.equal(used.status, 400, '表里有件写着这个单号，不能删');
+});

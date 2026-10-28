@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
+import { badRequest, bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { fetchOgImage } from '../../lib/ogImage.ts';
 import { cacheImage, isHttpUrl, liveImageUrl, surugaImageCandidates } from '../../lib/images.ts';
 import { nowIso } from '../../lib/db.ts';
+import { loadShipments, parseTrackingList, registerStmts } from '../../lib/jpShipments.ts';
 
 export const batchRoutes = new Hono<{ Bindings: Env }>();
 
@@ -67,8 +68,10 @@ batchRoutes.get('/', async (c) => {
     people.set(r.batchId, names);
   }
 
+  const shipments = await loadShipments(db, rows.results.map((b) => b.id));
   const batches = rows.results.map((b) => ({
     ...b,
+    jpShipments: (shipments.get(b.id) ?? []).map((s) => ({ trackingNo: s.trackingNo, arrivedAt: s.arrivedAt })),
     statusCounts: statusCounts.get(b.id) ?? {},
     packages: packages.get(b.id) ?? [],
     customers: people.get(b.id) ?? [],
@@ -108,7 +111,8 @@ batchRoutes.get('/:id', async (c) => {
     .bind(id)
     .all();
 
-  return c.json({ batch, items: items.results, packages: packages.results });
+  const jpShipments = (await loadShipments(c.env.DB, [id])).get(id) ?? [];
+  return c.json({ batch, items: items.results, packages: packages.results, jpShipments });
 });
 
 batchRoutes.patch('/:id', async (c) => {
@@ -132,14 +136,38 @@ batchRoutes.patch('/:id', async (c) => {
     sets.push('order_no = ?');
     values.push(bound(optionalString(body.orderNo), '日本订单号', 60));
   }
+  let trackingNos: string[] = [];
   if (body.japanTrackingNo !== undefined) {
+    // 可以一次填几个（一单分几个快递到），每个都登记成一个待到的日本快递
+    trackingNos = parseTrackingList(bound(optionalString(body.japanTrackingNo), '日本物流单号', 200));
     sets.push('japan_tracking_no = ?');
-    values.push(bound(optionalString(body.japanTrackingNo), '日本物流单号', 60));
+    values.push(trackingNos.length ? trackingNos.join('、') : null);
   }
-  if (sets.length > 0)
-    await c.env.DB.prepare(`UPDATE batches SET ${sets.join(', ')} WHERE id = ?`)
-      .bind(...values, id)
-      .run();
+  const db = c.env.DB;
+  const statements: D1PreparedStatement[] = [];
+  if (sets.length > 0) statements.push(db.prepare(`UPDATE batches SET ${sets.join(', ')} WHERE id = ?`).bind(...values, id));
+  statements.push(...registerStmts(db, id, trackingNos, nowIso()));
+  if (statements.length) await db.batch(statements);
+  return c.json({ ok: true });
+});
+
+/** 删掉登记错的日本运单号：只能删还没到、也没有件写着它的。 */
+batchRoutes.delete('/:id/shipments/:tn', async (c) => {
+  const id = requireInt(c.req.param('id'), '批次 ID');
+  const tn = c.req.param('tn');
+  const db = c.env.DB;
+  const row = await db
+    .prepare(
+      `SELECT arrived_at AS arrivedAt,
+              (SELECT COUNT(*) FROM items WHERE batch_id = ? AND jp_tracking_no = ?) AS used
+         FROM jp_shipments WHERE batch_id = ? AND tracking_no = ?`,
+    )
+    .bind(id, tn, id, tn)
+    .first<{ arrivedAt: string | null; used: number }>();
+  if (!row) throw notFound('这一单没有登记这个运单号');
+  if (row.arrivedAt) throw badRequest('这个快递日本仓已经签收了，不能删');
+  if (row.used) throw badRequest(`有 ${row.used} 件写着这个运单号（导入表里的），不能删`);
+  await db.prepare('DELETE FROM jp_shipments WHERE batch_id = ? AND tracking_no = ?').bind(id, tn).run();
   return c.json({ ok: true });
 });
 

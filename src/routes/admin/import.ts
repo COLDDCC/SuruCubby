@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow, normalizeTrackingNo, parseDateCell } from '../../lib/excel.ts';
+import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow, parseDateCell } from '../../lib/excel.ts';
 import { badRequest, bound, optionalString, readJson, requireString } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
+import { parseTrackingList, registerStmts } from '../../lib/jpShipments.ts';
 import { randomToken } from '../../lib/crypto.ts';
 import type { FieldKey } from '../../lib/excel.ts';
 import { buildNameIndex, matchName, normalizeName, type NameIndex, type NameMatch } from '../../lib/nameMatch.ts';
@@ -135,7 +136,8 @@ importRoutes.post('/commit', async (c) => {
   // 和后台改名/改单号同一套上限：导入这条路以前不卡，粘一整页进来能直接入库
   const batchName = bound(requireString(body.batchName, '批次名'), '批次名', 60) as string;
   const orderNo = bound(optionalString(body.orderNo), '日本订单号', 60);
-  const japanTrackingNo = bound(optionalString(body.japanTrackingNo), '日本物流单号', 60);
+  // 一单分几个快递到时可以一次填几个（逗号、顿号、换行隔开），每个单号都登记成一个待到的快递
+  const japanTrackingNos = parseTrackingList(bound(optionalString(body.japanTrackingNo), '日本物流单号', 200));
   const packageNameInput = bound(optionalString(body.packageName), '包裹名', 60);
   const orderedAtInput = bound(optionalString(body.orderedAt), '下单日期', 30);
   const fileName = bound(optionalString(body.fileName), '文件名', 200);
@@ -334,7 +336,12 @@ importRoutes.post('/commit', async (c) => {
   statements.push(
     db
       .prepare('UPDATE batches SET order_no=?,japan_tracking_no=? WHERE id=?')
-      .bind(orderNo, normalizeTrackingNo(japanTrackingNo), batchId),
+      .bind(orderNo, japanTrackingNos.length ? japanTrackingNos.join('、') : null, batchId),
+  );
+  statements.push(
+    ...registerStmts(db, batchId, [
+      ...new Set([...japanTrackingNos, ...parsed.rows.map((r) => r.jpTrackingNo).filter((t): t is string => !!t)]),
+    ], now),
   );
   await db.batch(statements);
 

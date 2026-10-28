@@ -10,6 +10,8 @@ import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { badRequest, bound, intList, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { placeholders } from '../../lib/http.ts';
 import { staffOf } from '../../lib/staff.ts';
+import { normalizeTrackingNo } from '../../lib/excel.ts';
+import { arriveStmts, registerStmts } from '../../lib/jpShipments.ts';
 
 export const jpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -186,6 +188,86 @@ jpRoutes.post('/receive', async (c) => {
   statements.push(...syncBoxStatus(db, boxes));
   if (statements.length) await db.batch(statements);
   return c.json({ ok: true, received: todo.length, skipped: itemIds.length - todo.length });
+});
+
+async function requireBatch(db: D1Database, value: unknown): Promise<number> {
+  const batchId = requireInt(value, '日本订单 ID');
+  if (!(await db.prepare('SELECT id FROM batches WHERE id = ?').bind(batchId).first())) throw notFound('没有这个日本订单');
+  return batchId;
+}
+
+function requireTracking(value: unknown): string {
+  const tn = normalizeTrackingNo(typeof value === 'string' ? value : null);
+  if (!tn) throw badRequest('日本运单号不能为空（最多 40 位）');
+  return tn;
+}
+
+/** 补登一个日本快递：骏河屋发货通知里又多了一个单号，管理员没录的，仓库自己加。 */
+jpRoutes.post('/shipments', async (c) => {
+  const body = await readJson<{ batchId?: unknown; trackingNo?: unknown }>(c);
+  const db = c.env.DB;
+  const batchId = await requireBatch(db, body.batchId);
+  const tn = requireTracking(body.trackingNo);
+  await db.batch(registerStmts(db, batchId, [tn], nowIso()));
+  return c.json({ ok: true, trackingNo: tn });
+});
+
+/**
+ * 这个快递到了：先签收、晚点再分拣也行。表里写着这个运单号、还没签收的件一起变「已到日本仓」。
+ * 没写运单号的件不知道在不在这个快递里，不动，分拣时点到才算。
+ */
+jpRoutes.post('/shipments/arrive', async (c) => {
+  const body = await readJson<{ batchId?: unknown; trackingNo?: unknown }>(c);
+  const db = c.env.DB;
+  const batchId = await requireBatch(db, body.batchId);
+  const tn = requireTracking(body.trackingNo);
+  const staff = staffOf(c);
+  const at = nowIso();
+  const todo = await db
+    .prepare(
+      `SELECT id, package_id AS packageId FROM items
+        WHERE batch_id = ? AND jp_tracking_no = ? AND status = 'ordered' AND missing = 0 AND direct_parcel_id IS NULL`,
+    )
+    .bind(batchId, tn)
+    .all<{ id: number; packageId: number | null }>();
+  await db.batch([
+    ...arriveStmts(db, batchId, tn, staff.name, at),
+    ...todo.results.flatMap((r) => [
+      db.prepare("UPDATE items SET status = 'jp_warehouse', updated_at = ? WHERE id = ? AND status = 'ordered'").bind(at, r.id),
+      statusLogStmt(db, r.id, 'ordered', 'jp_warehouse', at, staff.name),
+    ]),
+  ]);
+  return c.json({ ok: true, trackingNo: tn, received: todo.results.length });
+});
+
+/** 点错了「到了」：还没分拣过这一箱才能撤，件退回「已下单」。 */
+jpRoutes.post('/shipments/unarrive', async (c) => {
+  const body = await readJson<{ batchId?: unknown; trackingNo?: unknown }>(c);
+  const db = c.env.DB;
+  const batchId = await requireBatch(db, body.batchId);
+  const tn = requireTracking(body.trackingNo);
+  const sorted = await db
+    .prepare('SELECT COUNT(*) AS n FROM items WHERE batch_id = ? AND jp_tracking_no = ? AND sorted_at IS NOT NULL')
+    .bind(batchId, tn)
+    .first<{ n: number }>();
+  if (sorted?.n) throw badRequest(`这个快递已经分拣过 ${sorted.n} 件了，不能撤；签错的件在回国箱里一件件点「签错了」`);
+  const staff = staffOf(c);
+  const at = nowIso();
+  const back = await db
+    .prepare(
+      `SELECT id FROM items WHERE batch_id = ? AND jp_tracking_no = ? AND status = 'jp_warehouse'
+          AND sorted_at IS NULL AND direct_parcel_id IS NULL`,
+    )
+    .bind(batchId, tn)
+    .all<{ id: number }>();
+  await db.batch([
+    db.prepare('UPDATE jp_shipments SET arrived_at = NULL, arrived_by = NULL WHERE batch_id = ? AND tracking_no = ?').bind(batchId, tn),
+    ...back.results.flatMap((r) => [
+      db.prepare("UPDATE items SET status = 'ordered', updated_at = ? WHERE id = ?").bind(at, r.id),
+      statusLogStmt(db, r.id, 'jp_warehouse', 'ordered', at, staff.name),
+    ]),
+  ]);
+  return c.json({ ok: true, count: back.results.length });
 });
 
 /**

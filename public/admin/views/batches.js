@@ -26,6 +26,7 @@ const FILTERS = [
   { key: 'done', label: '已完结', test: isDone },
   { key: 'unpaid', label: '货款没收齐', test: (b) => b.unpaidJpy > 0 },
   { key: 'noNo', label: '单号没填', test: (b) => !b.orderNo || !b.japanTrackingNo },
+  { key: 'waitJp', label: '日本快递没到齐', test: (b) => (b.jpShipments || []).some((s) => !s.arrivedAt) },
 ];
 
 const STORE_KEY = 'orders.filter';
@@ -59,10 +60,19 @@ function stageCounts(b) {
 }
 
 function searchText(b) {
-  return [b.name, b.orderNo, b.japanTrackingNo, b.sourceFile, ...b.customers, ...b.packages.map((p) => p.name)]
+  return [b.name, b.orderNo, b.japanTrackingNo, b.sourceFile, ...b.customers, ...b.packages.map((p) => p.name), ...(b.jpShipments || []).map((s) => s.trackingNo)]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+}
+
+/** 一单几个日本快递、日本仓到了几个 */
+function shipBadge(b) {
+  const list = b.jpShipments || [];
+  if (!list.length) return '';
+  const arrived = list.filter((s) => s.arrivedAt).length;
+  const cls = arrived === list.length ? 'ok' : arrived ? 'warn' : '';
+  return ` <span class="badge ${cls}" title="${list.map((s) => `${s.trackingNo} ${s.arrivedAt ? '已到' : '未到'}`).join('\n')}">日本快递到了 ${arrived}/${list.length}</span>`;
 }
 
 function orderRow(b) {
@@ -103,6 +113,7 @@ function orderRow(b) {
     <div class="small">
       日本订单 ${b.orderNo ? `<b>${escapeHtml(b.orderNo)}</b>` : '<span class="unpaid">待填</span>'}
       · 日本单号 ${b.japanTrackingNo ? `<b>${escapeHtml(b.japanTrackingNo)}</b>` : '<span class="unpaid">待填</span>'}
+      ${shipBadge(b)}
     </div>
     <div class="small muted">
       ${b.orderedAt ? `下单 ${escapeHtml(b.orderedAt)} · ` : ''}录入 ${beijingTime(b.createdAt)}

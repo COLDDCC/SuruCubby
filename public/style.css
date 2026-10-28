@@ -1721,3 +1721,28 @@ body.has-tabbar .sort-bar {
   min-height: 30px;
   padding: 2px 10px;
 }
+
+/* 日本仓：一单几个日本快递，到没到 */
+.jp-ships {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+.jp-ship {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+.jp-ship.is-waiting {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+.jp-ship.is-arrived {
+  background: var(--ok-bg);
+  border-color: transparent;
+}
