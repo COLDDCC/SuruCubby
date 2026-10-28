@@ -59,7 +59,9 @@ export async function render(view) {
         .map((r) =>
           row(
             customerLink(r),
-            `直邮包裹 #${r.parcelId} · ${r.itemCount} 件 · ${Number(r.weightG || 0).toLocaleString()} g`,
+            `直邮包裹 #${r.parcelId} · ${r.itemCount} 件 · ${Number(r.weightG || 0).toLocaleString()} g${
+              r.nudgeCount ? ` · <b class="unpaid">日本仓催过 ${r.nudgeCount} 次</b>` : ''
+            }`,
             `<span class="unpaid money">${money(r.feeFen)}</span>`,
             `<button class="small" data-action="payDirect" data-parcel="${r.parcelId}" data-fee="${r.feeFen}">已收款</button>`,
           ),

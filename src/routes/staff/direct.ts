@@ -44,13 +44,17 @@ interface ParcelRow {
   paidAt: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  nudgedAt: string | null;
+  nudgedBy: string | null;
+  nudgeCount: number;
+  qq: string;
 }
 
 const PARCEL_COLUMNS = `d.id, d.customer_id AS customerId, c.nickname, d.address_snapshot AS addressSnapshot,
   d.address_source AS addressSource, d.status, d.weight_g AS weightG, d.rate_fen_per_kg AS rateFenPerKg,
   d.fee_fen AS feeFen, d.carrier, d.tracking_no AS trackingNo, d.packed_by AS packedBy, d.shipped_by AS shippedBy,
   d.created_at AS createdAt, d.weighed_at AS weighedAt, d.paid_at AS paidAt, d.shipped_at AS shippedAt,
-  d.delivered_at AS deliveredAt`;
+  d.delivered_at AS deliveredAt, d.nudged_at AS nudgedAt, d.nudged_by AS nudgedBy, d.nudge_count AS nudgeCount, c.qq`;
 
 /** 包裹连同里面的件；给客户页、后台、日本仓共用。 */
 export async function loadParcels(db: D1Database, where: string, args: unknown[]) {
@@ -310,6 +314,32 @@ directStaffRoutes.post('/parcels/:id/remove', async (c) => {
       : [db.prepare('DELETE FROM direct_parcels WHERE id = ?').bind(id)]),
   ]);
   return c.json({ ok: true, left, removed: picked.length });
+});
+
+/**
+ * 催付款：称好重之后客户迟迟不付，仓库不用干等——点一下记上谁、什么时候催的，
+ * 返回一段现成的话，复制到 QQ 发给客户（或者发群里 @ 他）。管理员待办里也看得到催过几次。
+ */
+directStaffRoutes.post('/parcels/:id/nudge', async (c) => {
+  const id = requireInt(c.req.param('id'), '包裹 ID');
+  const db = c.env.DB;
+  const parcel = await getParcel(db, id);
+  if (parcel.status !== 'awaiting_payment') throw badRequest('只有称好重、等付款的包裹才需要催');
+  const staff = staffOf(c);
+  const at = nowIso();
+  await db
+    .prepare('UPDATE direct_parcels SET nudged_at = ?, nudged_by = ?, nudge_count = nudge_count + 1 WHERE id = ?')
+    .bind(at, staff.name, id)
+    .run();
+  const items = await parcelItemIds(db, id);
+  const fee = parcel.feeFen ?? 0;
+  const yuan = `${Math.floor(fee / 100)}.${String(fee % 100).padStart(2, '0')}`;
+  const origin = new URL(c.req.url).origin;
+  const message =
+    `【速达云仓】${parcel.nickname}，你的日本直邮包裹 #${id}（${items.length} 件）已经称好：` +
+    `${parcel.weightG ?? '?'} g，运费 ¥${yuan}。请扫码转给群主，确认收款后日本仓马上寄出。` +
+    `明细在你的仓库页：${origin}/login`;
+  return c.json({ ok: true, message, qq: parcel.qq, nudgeCount: parcel.nudgeCount + 1 });
 });
 
 /** 寄出：只有确认收款之后才能填单号寄出。 */

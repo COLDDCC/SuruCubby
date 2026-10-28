@@ -237,3 +237,32 @@ test('⑥ 回国箱记整箱重量和箱数：发出时填、发出后补，管�
   });
   assert.deepEqual([r.result.boxes[0].weightG, r.result.boxes[0].cartons], [3000, 1]);
 });
+
+test('⑦ 直邮待付款：仓库看得到等了多久、能催，管理员看得到催过；菜单红点按角色算', async () => {
+  let list = await ctx.jp.get('/api/staff/direct/parcels?status=awaiting_payment');
+  const p = list.parcels.find((x) => x.id === ctx.parcelId);
+  assert.ok(p.weighedAt, '称重时间在，前端算等了几天');
+  assert.equal(p.nudgeCount, 0);
+  const r = await ctx.jp.post(`/api/staff/direct/parcels/${ctx.parcelId}/nudge`);
+  assert.match(r.message, /运费 ¥/);
+  assert.equal(r.qq, Q.d);
+  list = await ctx.jp.get('/api/staff/direct/parcels?status=awaiting_payment');
+  const after = list.parcels.find((x) => x.id === ctx.parcelId);
+  assert.deepEqual([after.nudgeCount, after.nudgedBy], [1, '仓库小李']);
+  const dash = await ctx.admin.get('/api/admin/dashboard');
+  assert.equal(dash.directUnpaid.find((d) => d.parcelId === ctx.parcelId).nudgeCount, 1);
+
+  const jpBadges = await ctx.jp.get('/api/staff/badges');
+  assert.equal('#/requests' in jpBadges.badges, false, '日本仓看不到管理员的红点');
+  const adminBefore = await ctx.admin.get('/api/staff/badges');
+  assert.ok(adminBefore.detail.nudged >= 1);
+  assert.ok(adminBefore.badges['#/'] >= 1);
+
+  // 管理员确认收款 → 日本仓「直邮」红点 +1（付了款等寄出）
+  const before = jpBadges.badges['#/direct'];
+  await ctx.admin.post(`/api/admin/direct/${ctx.parcelId}/pay`);
+  const jpAfter = await ctx.jp.get('/api/staff/badges');
+  assert.equal(jpAfter.badges['#/direct'], before + 1);
+  const notAgain = await ctx.jp.post(`/api/staff/direct/parcels/${ctx.parcelId}/nudge`, {}, { raw: true });
+  assert.equal(notAgain.status, 400, '付过款就不用催了');
+});

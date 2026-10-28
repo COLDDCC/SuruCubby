@@ -50,7 +50,66 @@ function renderMenus() {
   const more = document.getElementById('more-open');
   if (more) more.onclick = () => openSheet(true);
   markNav();
+  paintBadges();
 }
+
+/**
+ * 菜单红点：每分钟问一次后端「现在有几件能动手的活」，标在对应菜单上；
+ * 浏览器标签页标题前也带上总数，切到别的页面时一眼看见有新活。数字变多时提示一句。
+ */
+const BASE_TITLE = document.title;
+let badges = {};
+let lastTotal = null;
+let badgeTimer = 0;
+
+function paintBadges() {
+  const paint = (root) =>
+    root.querySelectorAll('a[href^="#/"]').forEach((a) => {
+      a.querySelector('.nav-badge')?.remove();
+      const n = badges[a.getAttribute('href')];
+      if (n) a.insertAdjacentHTML('beforeend', `<span class="nav-badge">${n > 99 ? '99+' : n}</span>`);
+    });
+  paint(nav);
+  paint(tabbar);
+  paint(document.getElementById('more-links'));
+  // 有红点的菜单收在「更多」里时，「更多」上点一个小圆点
+  const more = document.getElementById('more-open');
+  if (more) {
+    const shown = new Set([...tabbar.querySelectorAll('a')].map((a) => a.getAttribute('href')));
+    const hidden = Object.entries(badges).some(([href, n]) => n && !shown.has(href));
+    more.classList.toggle('has-dot', hidden);
+  }
+}
+
+async function refreshBadges() {
+  clearTimeout(badgeTimer);
+  if (!session.loggedIn) return;
+  try {
+    const r = await api.get('/api/staff/badges');
+    // 待办、日本仓这些菜单对这个账号不可见时不画
+    const visible = new Set(menuFor(session.role).map((n) => n.href));
+    badges = Object.fromEntries(Object.entries(r.badges).filter(([href]) => visible.has(href)));
+    const total = Object.values(badges).reduce((a, b) => a + b, 0);
+    document.title = total ? `(${total}) ${BASE_TITLE}` : BASE_TITLE;
+    if (lastTotal !== null && total > lastTotal && document.visibilityState === 'visible') {
+      toast(`有 ${total - lastTotal} 件新活，看菜单上的红点`);
+    }
+    lastTotal = total;
+    paintBadges();
+  } catch {
+    /* 网络抖一下没关系，下一分钟再问 */
+  }
+  badgeTimer = setTimeout(refreshBadges, 60_000);
+}
+// 页面上点完一个按钮（签收、打包、确认收款……）也顺手刷新红点
+let workTimer = 0;
+document.addEventListener('work-done', () => {
+  clearTimeout(workTimer);
+  workTimer = setTimeout(refreshBadges, 400);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshBadges();
+});
 
 function openSheet(open) {
   sheet.hidden = !open;
@@ -128,6 +187,9 @@ function markNav() {
 function renderLogin(message = '') {
   showSearch(false);
   session = { loggedIn: false, role: 'admin', name: '' };
+  badges = {};
+  lastTotal = null;
+  document.title = BASE_TITLE;
   renderMenus();
   view.innerHTML = `
     <div class="card login-card">
@@ -189,6 +251,8 @@ export async function route() {
     const mod = await match.module();
     await mod.render(view, params);
     highlightItem();
+    // 每次办完事回到菜单，红点马上跟着变，不用等一分钟
+    refreshBadges();
   } catch (err) {
     if (err?.status === 401) return;
     console.error(err);

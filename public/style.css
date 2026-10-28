@@ -1849,3 +1849,30 @@ body.has-tabbar .sort-bar {
   width: 84px;
   flex: 0 0 84px;
 }
+
+/* 菜单红点 */
+.nav-badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: var(--card);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: 1px;
+}
+#more-open.has-dot::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--danger);
+  vertical-align: 2px;
+}

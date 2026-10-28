@@ -97,6 +97,7 @@ export function bindActions(root, handlers) {
         toast(err?.message ? err.message : '这一步没成，刷新后重试', true);
       } finally {
         el.disabled = false;
+        document.dispatchEvent(new CustomEvent('work-done'));
       }
     });
   });

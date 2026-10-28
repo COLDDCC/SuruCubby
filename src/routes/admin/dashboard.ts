@@ -82,7 +82,7 @@ dashboardRoutes.get('/', async (c) => {
   const directUnpaid = await db
     .prepare(
       `SELECT d.id AS parcelId, d.customer_id AS customerId, c.nickname, c.qq, d.weight_g AS weightG,
-              d.fee_fen AS feeFen, d.weighed_at AS weighedAt,
+              d.fee_fen AS feeFen, d.weighed_at AS weighedAt, d.nudge_count AS nudgeCount, d.nudged_at AS nudgedAt,
               (SELECT COUNT(*) FROM items i WHERE i.direct_parcel_id = d.id) AS itemCount
          FROM direct_parcels d
          JOIN customers c ON c.id = d.customer_id

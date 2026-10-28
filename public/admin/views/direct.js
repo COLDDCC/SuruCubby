@@ -1,6 +1,6 @@
 import { api } from '/admin/api.js';
 import { currentSession } from '/admin/app.js';
-import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, money, promptBox, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, money, openModal, promptBox, toast } from '/admin/ui.js';
 import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
@@ -25,6 +25,17 @@ function addressText(a) {
   return [a.recipient, a.phone, a.detail].filter(Boolean).join(' ');
 }
 
+/** 称好重以后等了几天、催过没有 */
+function waitingText(p) {
+  const since = p.weighedAt || p.createdAt;
+  const days = since ? Math.floor((Date.now() - Date.parse(since)) / 86400000) : 0;
+  const waited = days >= 1 ? `称好 ${days} 天了还没付` : '今天刚称好';
+  const nudged = p.nudgeCount
+    ? ` · 催过 ${p.nudgeCount} 次（上次 ${escapeHtml(p.nudgedBy || '')} ${beijingTime(p.nudgedAt)}）`
+    : '';
+  return `<span class="${days >= 3 ? 'unpaid' : 'muted'}">${waited}${nudged}</span>`;
+}
+
 function parcelCard(p, isAdmin, priceFenPerKg) {
   const addr = addressText(p.address);
   const actions = [];
@@ -41,6 +52,8 @@ function parcelCard(p, isAdmin, priceFenPerKg) {
         ? `<p><button data-action="pay" data-id="${p.id}" data-fee="${p.feeFen}">客户已付 ${money(p.feeFen)}，确认收款</button></p>`
         : '<p class="small muted">等客户扫码付运费、管理员确认收款后，这里会变成「待寄出」。</p>',
     );
+    actions.push(`<p class="small">${waitingText(p)}
+      <button class="small plain" data-action="nudge" data-id="${p.id}">催付款</button></p>`);
   }
   if (p.status === 'paid') {
     actions.push(`<div class="row ship-row">
@@ -137,6 +150,25 @@ export async function render(view) {
 
   bindItemDetails(view);
   bindActions(view, {
+    async nudge({ id }) {
+      const r = await api.post(`/api/staff/direct/parcels/${id}/nudge`);
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(r.message);
+        copied = true;
+      } catch {
+        /* 复制不了就弹出来让人手动复制 */
+      }
+      openModal((box, close) => {
+        box.innerHTML = `<p><b>${copied ? '催款的话已经复制好了' : '把下面这段发给客户'}</b>，发给 QQ ${escapeHtml(r.qq)}（或者在群里 @ 他）：</p>
+          <textarea readonly style="width:100%;min-height:120px">${escapeHtml(r.message)}</textarea>
+          <p class="small muted">已记下这是第 ${r.nudgeCount} 次催，管理员那边看得到。</p>
+          <div class="row" style="justify-content:flex-end"><button data-close>好</button></div>`;
+        box.querySelector('textarea').select();
+        box.querySelector('[data-close]').onclick = close;
+      });
+      await render(view);
+    },
     async weigh({ id }) {
       const weightG = Number(view.querySelector(`[data-weight="${id}"]`).value.trim());
       if (!weightG) return toast('先填重量（克）', true);
