@@ -4,7 +4,7 @@ import { badRequest, bound, intList, notFound, optionalString, readJson, require
 import { changeRoute } from '../../lib/routing.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { isItemStatus } from '../../lib/status.ts';
-import { surugaCode } from '../../lib/images.ts';
+import { searchItems } from '../../lib/itemSearch.ts';
 
 export const itemRoutes = new Hono<{ Bindings: Env }>();
 
@@ -23,44 +23,9 @@ itemRoutes.post('/route', async (c) => {
  * 返回每一件在哪个包裹 / 批次，前端好直接跳过去。
  */
 itemRoutes.get('/search', async (c) => {
-  const q = (c.req.query('q') ?? '').replace(/[%_\\]/g, '').trim();
-  if (q.length < 2) return c.json({ items: [] });
   const rawPackage = c.req.query('packageId');
   const packageId = rawPackage && /^\d+$/.test(rawPackage) ? Number(rawPackage) : null;
-  const like = `%${q}%`;
-  const rows = await c.env.DB.prepare(
-    `SELECT i.id, i.title, i.image_url AS imageUrl, i.product_url AS productUrl, i.status,
-            i.package_id AS packageId, i.batch_id AS batchId, i.customer_id AS customerId,
-            c.nickname, c.self_return AS selfReturn, b.name AS batchName, p.name AS packageName, p.allocated_at AS allocatedAt
-       FROM items i
-       JOIN customers c ON c.id = i.customer_id
-       JOIN batches b ON b.id = i.batch_id
-       LEFT JOIN packages p ON p.id = i.package_id
-      WHERE (i.product_url LIKE ? OR i.title LIKE ? OR c.nickname LIKE ?
-             OR EXISTS (SELECT 1 FROM customer_aliases ca WHERE ca.customer_id = i.customer_id AND ca.alias LIKE ?))
-        ${packageId ? 'AND i.package_id = ?' : ''}
-      ORDER BY i.id
-      LIMIT 30`,
-  )
-    .bind(...(packageId ? [like, like, like, like, packageId] : [like, like, like, like]))
-    .all<{
-      id: number;
-      title: string;
-      imageUrl: string | null;
-      productUrl: string | null;
-      status: string;
-      packageId: number | null;
-      batchId: number;
-      customerId: number;
-      nickname: string;
-      selfReturn: number;
-      batchName: string;
-      packageName: string | null;
-      allocatedAt: string | null;
-    }>();
-  return c.json({
-    items: rows.results.map((r) => ({ ...r, code: surugaCode(r.productUrl ?? '') })),
-  });
+  return c.json({ items: await searchItems(c.env.DB, c.req.query('q') ?? '', { packageId }) });
 });
 
 /** 单件手动改状态 / 记异常（处理砍单、损坏等）。 */

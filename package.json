@@ -7,7 +7,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/*.test.ts\" test/sheet.test.mjs test/xlsx.test.mjs test/public.test.mjs",
-    "test:e2e": "node scripts/sandbox.mjs --state .sandbox/e2e --port 8791 -- node --test --test-concurrency=1 test/e2e.test.mjs test/e2e-staff.test.mjs test/e2e-direct.test.mjs test/e2e-sort.test.mjs",
+    "test:e2e": "node scripts/sandbox.mjs --state .sandbox/e2e --port 8791 -- node --test --test-concurrency=1 test/e2e.test.mjs test/e2e-staff.test.mjs test/e2e-direct.test.mjs test/e2e-sort.test.mjs test/e2e-warehouse.test.mjs",
     "seed": "node scripts/sandbox.mjs --state .sandbox/demo --port 8790 --keep -- node scripts/seed-demo.mjs",
     "preview": "node scripts/build-preview.mjs",
     "vendor": "node scripts/fetch-vendor.mjs",

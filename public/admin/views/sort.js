@@ -48,7 +48,7 @@ function people(items) {
 function card(i) {
   const code = itemCode(i.productUrl);
   return `<div class="sort-card${i.found ? ' found' : ''}${i.route === 'direct' ? ' is-direct' : ''}" role="button" tabindex="0"
-      data-id="${i.id}" data-search="${escapeHtml(`${code} ${i.title} ${i.cn} ${i.nickname} ${i.qq}`.toLowerCase())}" aria-pressed="${i.found}">
+      data-id="${i.id}" data-focus-item="${i.id}" data-search="${escapeHtml(`${code} ${i.title} ${i.cn} ${i.nickname} ${i.qq}`.toLowerCase())}" aria-pressed="${i.found}">
     <div class="sort-img">${thumb(i)}</div>
     <div class="cn-box">${escapeHtml(i.cn)}</div>
     <div class="sort-meta">

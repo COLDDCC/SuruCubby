@@ -42,7 +42,7 @@ function renderMenus() {
   document.getElementById('more-links').innerHTML = items.map(link).join('');
   tabbar.hidden = !session.loggedIn;
   document.body.classList.toggle('has-tabbar', session.loggedIn);
-  document.getElementById('search-toggle').hidden = !session.loggedIn || session.role !== 'admin';
+  document.getElementById('search-toggle').hidden = !session.loggedIn;
   document.getElementById('logout').hidden = !session.loggedIn;
   const who = session.loggedIn ? `${session.name || ''}${session.role === 'jp' ? '（日本仓）' : ''}` : '';
   document.getElementById('who').textContent = who;
@@ -169,7 +169,7 @@ export async function route() {
     }
     session = { loggedIn: true, role: s.role || 'admin', name: s.name || '' };
     renderMenus();
-    showSearch(session.role === 'admin');
+    showSearch(true, session.role);
   }
   markNav();
   let path = currentPath();
