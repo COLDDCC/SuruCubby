@@ -110,7 +110,7 @@ jpRoutes.get('/overview', async (c) => {
     .prepare(
       `SELECT ${ITEM_COLUMNS}, i.import_address AS importAddress, c.direct_address_id AS directAddressId
          FROM items i JOIN customers c ON c.id = i.customer_id
-        WHERE i.route = 'direct' AND i.status = 'jp_warehouse' AND i.direct_parcel_id IS NULL
+        WHERE i.route = 'direct' AND i.status = 'jp_warehouse' AND i.direct_parcel_id IS NULL AND c.self_return = 0
         ORDER BY c.nickname, i.id`,
     )
     .all<JpItem & { importAddress: string | null; directAddressId: number | null }>();
@@ -142,7 +142,21 @@ jpRoutes.get('/overview', async (c) => {
     };
   });
 
+  // 不拼邮（自己带回国 / 另找转运）：已签收、不在任何箱子和直邮包裹里，按人放一边等他来拿
+  const selfRows = await db
+    .prepare(
+      `SELECT ${ITEM_COLUMNS} FROM items i JOIN customers c ON c.id = i.customer_id
+        WHERE c.self_return = 1 AND i.status = 'jp_warehouse' AND i.package_id IS NULL AND i.direct_parcel_id IS NULL
+        ORDER BY c.nickname, i.id`,
+    )
+    .all<JpItem>();
+  const selfReturn = [...new Set(selfRows.results.map((i) => i.customerId))].map((customerId) => {
+    const list = selfRows.results.filter((i) => i.customerId === customerId);
+    return { customerId, nickname: list[0].nickname, items: list.map(shape) };
+  });
+
   return c.json({
+    selfReturn,
     inbound: batches.map((b) => ({
       ...b,
       items: inboundRows.results.filter((i) => i.batchId === b.id).map(shape),
@@ -270,6 +284,44 @@ jpRoutes.post('/shipments/unarrive', async (c) => {
   return c.json({ ok: true, count: back.results.length });
 });
 
+/** 不拼邮的件误放进了回国箱（比如分拣之后客户才说要自己带）：拿出来单独放，箱子空了就收掉。 */
+jpRoutes.post('/set-aside', async (c) => {
+  const body = await readJson<{ itemIds?: unknown }>(c);
+  const itemIds = [...new Set(intList(body.itemIds, '物品 ID'))];
+  const db = c.env.DB;
+  const rows = await db
+    .prepare(
+      `SELECT i.id, i.status, i.package_id AS packageId, i.direct_parcel_id AS parcelId, i.weigh_group_id AS weighGroupId,
+              c.self_return AS selfReturn, p.status AS boxStatus, p.allocated_at AS boxAllocated
+         FROM items i JOIN customers c ON c.id = i.customer_id LEFT JOIN packages p ON p.id = i.package_id
+        WHERE i.id IN (${placeholders(itemIds.length)})`,
+    )
+    .bind(...itemIds)
+    .all<{
+      id: number;
+      status: string;
+      packageId: number | null;
+      parcelId: number | null;
+      weighGroupId: number | null;
+      selfReturn: number;
+      boxStatus: string | null;
+      boxAllocated: string | null;
+    }>();
+  if (rows.results.length !== itemIds.length) throw badRequest('有的件已经不在系统里了，刷新页面');
+  if (rows.results.some((r) => !r.selfReturn)) throw badRequest('只有标了「不拼邮」的客户的件要拿出来；其他人的件照常跟箱回国');
+  if (
+    rows.results.some(
+      (r) => r.status !== 'jp_warehouse' || r.parcelId || r.weighGroupId || r.boxAllocated || !['ordered', 'jp_warehouse'].includes(r.boxStatus ?? 'jp_warehouse'),
+    )
+  ) {
+    throw badRequest('箱子已经发出了，或者这件不在日本仓里');
+  }
+  const at = nowIso();
+  await db.batch(rows.results.map((r) => db.prepare('UPDATE items SET package_id = NULL, updated_at = ? WHERE id = ?').bind(at, r.id)));
+  await dropEmptyBoxes(db, rows.results.map((r) => r.packageId).filter((x): x is number => x !== null));
+  return c.json({ ok: true, count: rows.results.length });
+});
+
 /**
  * 日本仓发出的箱子分空了就收掉：没有件、没有称重组、只属于这一单、还没发出也没算费。
  * 分拣发送和「退回 / 缺件」都会把件从箱子里拿走，留个空箱挂在后台只会让人以为还有东西没发。
@@ -391,9 +443,16 @@ jpRoutes.post('/boxes/:id/ship', async (c) => {
     throw badRequest('这个箱子已经发出或者算过运费了');
   }
   const items = await db
-    .prepare("SELECT id, status FROM items WHERE package_id = ? AND status IN ('ordered', 'jp_warehouse')")
+    .prepare(
+      `SELECT i.id, i.status, c.self_return AS selfReturn FROM items i JOIN customers c ON c.id = i.customer_id
+        WHERE i.package_id = ? AND i.status IN ('ordered', 'jp_warehouse')`,
+    )
     .bind(id)
-    .all<{ id: number; status: string }>();
+    .all<{ id: number; status: string; selfReturn: number }>();
+  const selfCount = items.results.filter((i) => i.selfReturn).length;
+  if (selfCount) {
+    throw badRequest(`箱里有 ${selfCount} 件是「不拼邮」（客户自己带回国）的，不能跟着回国。先点那几件的「拿出来」再发出`, { selfReturn: selfCount });
+  }
   const waiting = items.results.filter((i) => i.status === 'ordered').length;
   if (waiting) {
     throw badRequest(`箱里还有 ${waiting} 件没签收。先签收；真没到的告诉管理员标缺货或挪到别的箱，再发出`, { waiting });

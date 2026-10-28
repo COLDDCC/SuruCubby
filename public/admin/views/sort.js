@@ -52,7 +52,7 @@ function card(i) {
     <div class="sort-img">${thumb(i)}</div>
     <div class="cn-box">${escapeHtml(i.cn)}</div>
     <div class="sort-meta">
-      <span class="badge ${i.route === 'direct' ? 'warn' : ''}">${i.route === 'direct' ? '直邮' : i.selfReturn ? '不拼邮' : '拼团'}</span>
+      <span class="badge ${i.selfReturn ? 'danger' : i.route === 'direct' ? 'warn' : ''}">${i.selfReturn ? '不拼邮·放一边' : i.route === 'direct' ? '直邮' : '拼团'}</span>
       ${code ? `<span class="mono">${escapeHtml(code)}</span>` : ''}
       ${i.missing ? '<span class="badge danger">上次没找到</span>' : ''}
     </div>

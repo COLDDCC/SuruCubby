@@ -3,16 +3,18 @@ import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, promptBox, R
 import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
- * 日本仓：三件事分三栏——
+ * 日本仓：四件事分四栏——
  *   待分拣     日本的快递到了：按日本运单号（一个快递箱）进分拣页，铺在地上照卡片分堆，发送一次落定；
  *   回国箱     分拣时没填回国单号的箱子，在这里填单号发出；
- *   待打包直邮 分拣时客户还没地址的直邮件，等客户填了地址在这里打包。
- * 手机上一次看一栏（顶上切换），电脑上三栏一起列。
+ *   待打包直邮 分拣时客户还没地址的直邮件，等客户填了地址在这里打包；
+ *   不拼邮     客户自己带回国 / 另找转运的件，签收后放一边，不进回国箱。
+ * 手机上一次看一栏（顶上切换），电脑上几栏一起列。
  */
 const TABS = [
   { key: 'inbound', label: '待分拣' },
   { key: 'boxes', label: '回国箱' },
   { key: 'direct', label: '待打包直邮' },
+  { key: 'self', label: '不拼邮' },
 ];
 let currentTab = null;
 
@@ -40,7 +42,9 @@ function itemRow(item, { pick = false, checked = false, route = true, fix = fals
       <span class="jp-title">${escapeHtml(item.title)}</span>
       <span class="small">${codeTag(item)} <b>${escapeHtml(item.nickname ?? '')}</b>
         ${route ? `<span class="badge ${item.route === 'direct' ? 'warn' : ''}">${ROUTE_LABELS[item.route] ?? ''}</span>` : ''}
-        ${item.missing ? '<span class="badge danger">缺件</span>' : ''}</span>
+        ${item.missing ? '<span class="badge danger">缺件</span>' : ''}
+        ${item.selfReturn ? '<span class="badge danger">不拼邮 · 别装回国箱</span>' : ''}</span>
+      ${item.selfReturn && item.packageId && item.status === 'jp_warehouse' ? `<span class="jp-fix"><button type="button" class="small danger" data-action="setAside" data-item="${item.id}">从箱里拿出来</button></span>` : ''}
       ${fix ? fixButtons(item) : ''}
     </span>
   </label>`;
@@ -150,6 +154,24 @@ function boxesHtml(list) {
     .join('');
 }
 
+function selfHtml(list) {
+  if (!list.length) {
+    return '<div class="card"><p class="empty">没有放在一边等自己来拿的件。标了「不拼邮」的客户的东西签收后会出现在这里，不进回国箱、不打直邮包。</p></div>';
+  }
+  return list
+    .map(
+      (g) => `<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h3 style="margin:0">${escapeHtml(g.nickname)} <span class="small muted">${g.items.length} 件</span></h3>
+          <span class="badge danger">自己带回国 / 另找转运</span>
+        </div>
+        <p class="small muted" style="margin:4px 0 0">单独放一边，别装进回国箱。交给他之后告诉管理员，在客户页标「已当面给他」。</p>
+        <div class="jp-list">${g.items.map((i) => itemRow({ ...i, selfReturn: false }, { route: false, fix: true })).join('')}</div>
+      </div>`,
+    )
+    .join('');
+}
+
 function directHtml(list) {
   if (!list.length) {
     return '<div class="card"><p class="empty">没有待打包的直邮件。打好的包裹在 <a href="#/direct">直邮</a> 页收款、寄出。</p></div>';
@@ -183,6 +205,7 @@ export async function render(view) {
     inbound: queue.batches.reduce((n, b) => n + b.total, 0),
     boxes: data.boxes.length,
     direct: data.direct.reduce((n, g) => n + g.items.length, 0),
+    self: (data.selfReturn || []).reduce((n, g) => n + g.items.length, 0),
   };
   if (!currentTab) currentTab = TABS.find((t) => counts[t.key])?.key ?? 'inbound';
 
@@ -203,6 +226,7 @@ export async function render(view) {
       <section class="jp-col" data-col="inbound"><h3 class="col-title">待分拣</h3>${queueHtml(queue)}</section>
       <section class="jp-col" data-col="boxes"><h3 class="col-title">回国箱</h3>${boxesHtml(data.boxes)}</section>
       <section class="jp-col" data-col="direct"><h3 class="col-title">待打包直邮</h3>${directHtml(data.direct)}</section>
+      <section class="jp-col" data-col="self"><h3 class="col-title">不拼邮（放一边）</h3>${selfHtml(data.selfReturn || [])}</section>
     </div>`;
 
   const applyTab = () => {
@@ -250,6 +274,11 @@ export async function render(view) {
       if (!tn) return;
       await api.post('/api/staff/jp/shipments', { batchId: Number(batch), trackingNo: tn });
       toast('登记好了');
+      await render(view);
+    },
+    async setAside({ item }) {
+      await api.post('/api/staff/jp/set-aside', { itemIds: [Number(item)] });
+      toast('拿出来了，在「不拼邮」那一栏');
       await render(view);
     },
     async markMissing({ item }) {

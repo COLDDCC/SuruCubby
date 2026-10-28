@@ -824,7 +824,7 @@ button.block {
   }
   .sheet-links {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 8px;
     margin-top: 12px;
   }
@@ -1110,7 +1110,7 @@ td.actions button + button {
   flex-wrap: wrap;
   gap: 8px;
 }
-/* 电脑宽屏：三栏一起看，不用切 */
+/* 电脑宽屏：几栏一起看，不用切 */
 @media (min-width: 1200px) {
   .shell:has(.jp-cols) {
     max-width: 1680px;
@@ -1120,7 +1120,7 @@ td.actions button + button {
   }
   .jp-cols {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 14px;
     align-items: start;
   }

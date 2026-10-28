@@ -140,3 +140,37 @@ test('③ 一单几个日本快递：每个单号单独签收，看得出哪个�
   const used = await ctx.admin.call('DELETE', `/api/admin/batches/${ctx.batchId}/shipments/${norm(TN_B)}`, undefined, { raw: true });
   assert.equal(used.status, 400, '表里有件写着这个单号，不能删');
 });
+
+test('④ 不拼邮的件签收后放一边，不在回国箱里；误放进箱的拦住发出，能拿出来', async () => {
+  let ov = await ctx.jp.get('/api/staff/jp/overview');
+  const selfId = ctx.item['自带立牌'].id;
+  assert.equal(ov.boxes.some((b) => b.items.some((i) => i.id === selfId)), false, '不在任何回国箱里');
+  const g = ov.selfReturn.find((x) => x.items.some((i) => i.id === selfId));
+  assert.ok(g, '在「不拼邮」那一栏');
+
+  // 分拣快递 B：拼团画集进一个箱子（不填回国单号，留在日本仓）
+  await sortBox(TN_B, { found: ['拼团画集'] });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  const box = ov.boxes.find((b) => b.items.some((i) => i.id === ctx.item['拼团画集'].id));
+  ctx.boxB = box.id;
+  // 分拣完客户才说自己带：箱里这件变成不拼邮，发出被拦
+  const gCustomer = ctx.item['拼团画集'].customerId;
+  await ctx.admin.patch(`/api/admin/customers/${gCustomer}`, { selfReturn: true });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  assert.equal(ov.boxes.find((b) => b.id === ctx.boxB).items[0].selfReturn, true, '箱里标得出来');
+  const blocked = await ctx.jp.post(`/api/staff/jp/boxes/${ctx.boxB}/ship`, { trackingNo: 'RET-X' }, { raw: true });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.data.error, /不拼邮/);
+  await ctx.jp.post('/api/staff/jp/set-aside', { itemIds: [ctx.item['拼团画集'].id] });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  assert.equal(ov.boxes.some((b) => b.id === ctx.boxB), false, '箱子空了就收掉');
+  assert.ok(ov.selfReturn.some((x) => x.items.some((i) => i.id === ctx.item['拼团画集'].id)));
+  // 改回拼邮，再分进箱子，后面的用例要用
+  await ctx.admin.patch(`/api/admin/customers/${gCustomer}`, { selfReturn: false });
+  await ctx.jp.post('/api/staff/jp/unreceive', { itemIds: [ctx.item['拼团画集'].id] });
+  await sortBox(TN_B, { found: ['拼团画集'] });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  ctx.boxB = ov.boxes.find((b) => b.items.some((i) => i.id === ctx.item['拼团画集'].id)).id;
+  const notSelf = await ctx.jp.post('/api/staff/jp/set-aside', { itemIds: [ctx.item['拼团画集'].id] }, { raw: true });
+  assert.equal(notSelf.status, 400, '拼邮的件不让拿出来');
+});

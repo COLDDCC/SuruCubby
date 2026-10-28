@@ -341,6 +341,12 @@ sortRoutes.post('/:batchId/commit', async (c) => {
     if (item.status === 'ordered') statements.push(statusLogStmt(db, item.id, 'ordered', 'jp_warehouse', at, staff.name));
   }
 
+  // 不拼邮（自己带回国）的件：签收后单独放着，不留在导入时的整单箱子里——
+  // 留在箱里，回国箱列表就会把它当成要发回国的货
+  for (const item of selfReturnFound) {
+    if (item.packageId) statements.push(db.prepare('UPDATE items SET package_id = NULL, updated_at = ? WHERE id = ?').bind(at, item.id));
+  }
+
   // 回国箱
   const priorBoxes = (
     await db.prepare('SELECT COALESCE(SUM(box_count), 0) AS n FROM sort_sessions WHERE batch_id = ?').bind(batchId).first<{ n: number }>()
