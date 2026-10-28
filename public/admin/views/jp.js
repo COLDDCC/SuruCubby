@@ -22,7 +22,16 @@ function cover(item) {
     : '<div class="noimg">无图</div>';
 }
 
-function itemRow(item, { pick = false, checked = false, route = true } = {}) {
+/** 每件下面的两个小按钮：没找到（标缺件）、签错了（退回未签收）。只给已签收、还没打包发出的件。 */
+function fixButtons(item) {
+  if (item.status !== 'jp_warehouse') return '';
+  return `<span class="jp-fix">
+    <button type="button" class="small plain" data-action="markMissing" data-item="${item.id}">没找到</button>
+    <button type="button" class="small plain" data-action="unreceive" data-item="${item.id}">签错了</button>
+  </span>`;
+}
+
+function itemRow(item, { pick = false, checked = false, route = true, fix = false } = {}) {
   return `<label class="jp-item${item.missing ? ' is-missing' : ''}" data-focus-item="${item.id}">
     <button type="button" class="small plain jp-info" data-detail="${item.id}">详情</button>
     ${pick ? `<input type="checkbox" data-pick="${item.id}" ${checked ? 'checked' : ''}>` : ''}
@@ -32,6 +41,7 @@ function itemRow(item, { pick = false, checked = false, route = true } = {}) {
       <span class="small">${codeTag(item)} <b>${escapeHtml(item.nickname ?? '')}</b>
         ${route ? `<span class="badge ${item.route === 'direct' ? 'warn' : ''}">${ROUTE_LABELS[item.route] ?? ''}</span>` : ''}
         ${item.missing ? '<span class="badge danger">缺件</span>' : ''}</span>
+      ${fix ? fixButtons(item) : ''}
     </span>
   </label>`;
 }
@@ -95,7 +105,7 @@ function boxesHtml(list) {
         </div>
         <details ${b.items.length <= 12 ? 'open' : ''}><summary>箱里 ${b.items.length} 件</summary>
           <div class="jp-list">${b.items
-            .map((i) => itemRow({ ...i, title: `${i.status === 'ordered' ? '【未签收】' : ''}${i.title}` }, { route: false }))
+            .map((i) => itemRow({ ...i, title: `${i.status === 'ordered' ? '【未签收】' : ''}${i.title}` }, { route: false, fix: true }))
             .join('')}</div>
         </details>
         <div class="row ship-row">
@@ -121,7 +131,7 @@ function directHtml(list) {
             g.addressReady ? (g.addressSource === 'import' ? '地址：导入表里有' : '地址：客户已选') : '还没有地址'
           }</span>
         </div>
-        <div class="jp-list">${g.items.map((i) => itemRow(i, { pick: true, checked: true, route: false })).join('')}</div>
+        <div class="jp-list">${g.items.map((i) => itemRow(i, { pick: true, checked: true, route: false, fix: true })).join('')}</div>
         ${
           g.addressReady
             ? `<div class="row ship-row">
@@ -192,6 +202,18 @@ export async function render(view) {
   const picked = (root) => [...root.querySelectorAll('[data-pick]:checked')].map((el) => Number(el.dataset.pick));
 
   bindActions(view, {
+    async markMissing({ item }) {
+      if (!(await confirmBox('这件在仓库里找不到？标成缺件后它退回「未签收」、从箱子里拿出来，管理员会看到；下一个快递到了还会出现在分拣页里。', { okText: '标缺件', danger: true }))) return;
+      await api.post('/api/staff/jp/unreceive', { itemIds: [Number(item)], missing: true });
+      toast('已标缺件，管理员那边看得到');
+      await render(view);
+    },
+    async unreceive({ item }) {
+      if (!(await confirmBox('签错了，退回「未签收」？这件会从箱子里拿出来，等它真到了再在分拣页点。', { okText: '退回' }))) return;
+      await api.post('/api/staff/jp/unreceive', { itemIds: [Number(item)] });
+      toast('已退回未签收');
+      await render(view);
+    },
     async shipBox({ box }) {
       const trackingNo = view.querySelector(`[data-box-tracking="${box}"]`).value.trim();
       if (!trackingNo) return toast('先填回国单号', true);

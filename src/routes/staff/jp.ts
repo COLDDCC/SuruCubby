@@ -188,34 +188,107 @@ jpRoutes.post('/receive', async (c) => {
   return c.json({ ok: true, received: todo.length, skipped: itemIds.length - todo.length });
 });
 
-/** 点错了签收，退回「已下单」。已经装进直邮包裹、或箱子已经发出的不能退。 */
+/**
+ * 日本仓发出的箱子分空了就收掉：没有件、没有称重组、只属于这一单、还没发出也没算费。
+ * 分拣发送和「退回 / 缺件」都会把件从箱子里拿走，留个空箱挂在后台只会让人以为还有东西没发。
+ */
+export async function dropEmptyBoxes(db: D1Database, packageIds: number[]): Promise<void> {
+  const ids = [...new Set(packageIds)];
+  if (!ids.length) return;
+  const empties = await db
+    .prepare(
+      `SELECT p.id FROM packages p
+        WHERE p.id IN (${placeholders(ids.length)}) AND p.allocated_at IS NULL AND p.status IN ('ordered', 'jp_warehouse')
+          AND NOT EXISTS (SELECT 1 FROM items WHERE package_id = p.id)
+          AND NOT EXISTS (SELECT 1 FROM weigh_groups WHERE package_id = p.id)`,
+    )
+    .bind(...ids)
+    .all<{ id: number }>();
+  if (!empties.results.length) return;
+  await db.batch(
+    empties.results.flatMap((p) => [
+      db.prepare('DELETE FROM package_batches WHERE package_id = ?').bind(p.id),
+      db.prepare('DELETE FROM packages WHERE id = ?').bind(p.id),
+    ]),
+  );
+}
+
+/**
+ * 签错了退回 / 标缺件（同一个口子，missing 决定要不要挂「缺件」）。
+ *
+ *   已到日本仓、还没打包也没发出的件：退回「已下单」、撤掉分拣、从还没发的回国箱里拿出来——
+ *     等于这件没到过，下一个快递到了它还会出现在分拣页里；
+ *   还没签收的件：只改缺件标记（missing=false 就是「找到了，取消缺件」）。
+ *
+ * 已经装进直邮包裹、称过重、箱子已发出的件不能退：那边已经记账或者出了日本。
+ */
 jpRoutes.post('/unreceive', async (c) => {
-  const body = await readJson<{ itemIds?: unknown }>(c);
+  const body = await readJson<{ itemIds?: unknown; missing?: unknown }>(c);
   const itemIds = [...new Set(intList(body.itemIds, '物品 ID'))];
+  if (itemIds.length > 500) throw badRequest('一次最多 500 件');
+  if (body.missing !== undefined && typeof body.missing !== 'boolean') throw badRequest('missing 要是 true / false');
+  const missing = body.missing === true;
   const db = c.env.DB;
   const rows = await db
     .prepare(
-      `SELECT id, status, package_id AS packageId, direct_parcel_id AS parcelId, weigh_group_id AS weighGroupId
-         FROM items WHERE id IN (${placeholders(itemIds.length)})`,
+      `SELECT i.id, i.title, i.status, i.package_id AS packageId, i.direct_parcel_id AS parcelId,
+              i.weigh_group_id AS weighGroupId, p.status AS boxStatus, p.allocated_at AS boxAllocated
+         FROM items i LEFT JOIN packages p ON p.id = i.package_id
+        WHERE i.id IN (${placeholders(itemIds.length)})`,
     )
     .bind(...itemIds)
-    .all<{ id: number; status: string; packageId: number | null; parcelId: number | null; weighGroupId: number | null }>();
-  const bad = rows.results.filter((r) => r.status !== 'jp_warehouse' || r.parcelId || r.weighGroupId);
-  if (bad.length || rows.results.length !== itemIds.length) {
-    throw badRequest('只有「已到日本仓」、还没打包的件能退回未签收');
-  }
-  const at = nowIso();
-  const statements: D1PreparedStatement[] = rows.results.flatMap((r) => [
-    db.prepare("UPDATE items SET status = 'ordered', updated_at = ? WHERE id = ?").bind(at, r.id),
-    statusLogStmt(db, r.id, 'jp_warehouse', 'ordered', at, staffOf(c).name),
-  ]);
-  for (const id of new Set(rows.results.map((r) => r.packageId).filter((x): x is number => x !== null))) {
-    statements.push(
-      db.prepare("UPDATE packages SET status = 'ordered' WHERE id = ? AND status = 'jp_warehouse' AND allocated_at IS NULL").bind(id),
+    .all<{
+      id: number;
+      title: string;
+      status: string;
+      packageId: number | null;
+      parcelId: number | null;
+      weighGroupId: number | null;
+      boxStatus: string | null;
+      boxAllocated: string | null;
+    }>();
+  if (rows.results.length !== itemIds.length) throw badRequest('有的件已经不在系统里了，刷新页面再试');
+  const locked = rows.results.filter(
+    (r) =>
+      !['ordered', 'jp_warehouse'].includes(r.status) ||
+      r.parcelId ||
+      r.weighGroupId ||
+      (r.packageId && (r.boxAllocated || !['ordered', 'jp_warehouse'].includes(r.boxStatus ?? ''))),
+  );
+  if (locked.length) {
+    throw badRequest(
+      `「${locked[0].title}」${locked.length > 1 ? `等 ${locked.length} 件` : ''}已经打进直邮包裹、称过重或者箱子已经发出了，不能退回。直邮包裹先拆包再退`,
+      { itemIds: locked.map((r) => r.id) },
     );
   }
+  const staff = staffOf(c);
+  const at = nowIso();
+  const note = missing ? `日本仓标缺件（${staff.name}）` : null;
+  const statements: D1PreparedStatement[] = [];
+  for (const r of rows.results) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE items SET status = 'ordered', sorted_at = NULL, sort_session_id = NULL, sort_found_at = NULL, sort_found_by = NULL,
+                  package_id = CASE WHEN status = 'jp_warehouse' THEN NULL ELSE package_id END,
+                  missing = ?, exception_note = CASE WHEN ? THEN ? ELSE exception_note END, updated_at = ?
+            WHERE id = ?`,
+        )
+        .bind(missing ? 1 : 0, missing ? 1 : 0, note, at, r.id),
+    );
+    if (r.status === 'jp_warehouse') statements.push(statusLogStmt(db, r.id, 'jp_warehouse', 'ordered', at, staff.name));
+  }
   await db.batch(statements);
-  return c.json({ ok: true, count: rows.results.length });
+  await dropEmptyBoxes(
+    db,
+    rows.results.filter((r) => r.status === 'jp_warehouse' && r.packageId).map((r) => r.packageId as number),
+  );
+  return c.json({
+    ok: true,
+    count: rows.results.length,
+    returned: rows.results.filter((r) => r.status === 'jp_warehouse').length,
+    missing,
+  });
 });
 
 /**

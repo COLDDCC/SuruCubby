@@ -91,6 +91,20 @@ dashboardRoutes.get('/', async (c) => {
     )
     .all();
 
+  // 日本仓说没找到的件：管理员要去问骏河屋，或者确认砍单（标缺货取消）
+  const missingItems = await db
+    .prepare(
+      `SELECT i.id AS itemId, i.title, i.customer_id AS customerId, c.nickname, c.qq, i.batch_id AS batchId,
+              b.name AS batchName, i.jp_tracking_no AS jpTrackingNo, i.exception_note AS note, i.updated_at AS updatedAt
+         FROM items i
+         JOIN customers c ON c.id = i.customer_id
+         JOIN batches b ON b.id = i.batch_id
+        WHERE i.missing = 1 AND i.status = 'ordered'
+        ORDER BY i.updated_at DESC
+        LIMIT 200`,
+    )
+    .all();
+
   const now = Date.now();
   const domesticStock = stockRows.results
     .map((row) => ({
@@ -105,6 +119,7 @@ dashboardRoutes.get('/', async (c) => {
     domesticUnpaid: domesticUnpaid.results,
     directUnpaid: directUnpaid.results,
     pendingRefunds: pendingRefunds.results,
+    missingItems: missingItems.results,
     domesticStock,
   });
 });

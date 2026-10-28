@@ -93,13 +93,29 @@ export async function render(view) {
         .join('')
     : empty('还没有可发货的物品');
 
+  const missing = (data.missingItems || []).length
+    ? data.missingItems
+        .map((r) =>
+          row(
+            `${customerLink(r)} · ${escapeHtml(r.title)}`,
+            `<a href="#/batches/${r.batchId}?item=${r.itemId}">${escapeHtml(r.batchName)}</a>${
+              r.jpTrackingNo ? ` · 日本运单 ${escapeHtml(r.jpTrackingNo)}` : ''
+            }${r.note ? ` · ${escapeHtml(r.note)}` : ''}`,
+            '',
+            `<button class="small ghost" data-action="cancelMissing" data-item="${r.itemId}">确认缺货取消</button>`,
+          ),
+        )
+        .join('')
+    : empty('日本仓没有报缺件');
+
   view.innerHTML = `
     <div class="card"><h2>① 货款未付</h2>${goods}</div>
     <div class="card"><h2>② 国际运费未付</h2>${intl}</div>
     <div class="card"><h2>③ 国内运费未付</h2>${domestic}</div>
     <div class="card"><h2>④ 直邮运费未付<span class="muted small"> · 收款后日本仓才能寄出</span></h2>${direct}</div>
     <div class="card"><h2>⑤ 待退款</h2>${refunds}</div>
-    <div class="card"><h2>⑥ 可发货<span class="muted small"> · 包裹分摊后立刻进入这里，按天数倒序</span></h2>${stock}</div>`;
+    <div class="card"><h2>⑥ 可发货<span class="muted small"> · 包裹分摊后立刻进入这里，按天数倒序</span></h2>${stock}</div>
+    <div class="card"><h2>⑦ 日本仓没找到<span class="muted small"> · 先问骏河屋；确认不会来了再标缺货取消，之后在⑤待退款里退钱</span></h2>${missing}</div>`;
 
   bindActions(view, {
     payGoods: async ({ customer, batch }) => {
@@ -130,6 +146,12 @@ export async function render(view) {
         shipmentId: Number(shipment),
       });
       toast('已记账');
+      render(view);
+    },
+    cancelMissing: async ({ item }) => {
+      if (!(await confirmBox('确认这件不会来了，标成「缺货取消」？付过货款的会出现在「待退款」里。', { okText: '标缺货取消', danger: true }))) return;
+      await api.patch(`/api/admin/items/${item}`, { status: 'cancelled' });
+      toast('已标缺货取消');
       render(view);
     },
     payDirect: async ({ parcel, fee }) => {
