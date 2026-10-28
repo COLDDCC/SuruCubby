@@ -43,6 +43,7 @@ function renderVerify(message, kind = 'err') {
   lastData = null;
   app.innerHTML = `
     <div class="card">
+      <p class="small muted" style="margin:0">速达云仓</p>
       <h1>我的仓库</h1>
       <p class="muted">输入你的 QQ 号和密码。第一次进来密码是群主发的初始密码，进去之后会让你换成自己的。</p>
       <label for="qq">QQ 号</label>

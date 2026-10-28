@@ -162,7 +162,7 @@ if (isMain) {
   if (!opts.sessionSecret) console.warn('警告：没有设置 SESSION_SECRET，登录会失败。');
   const { server } = createServer(opts);
   server.listen(opts.port, opts.host, () => {
-    console.log(`SuruCubby 已启动：http://${opts.host}:${opts.port}  数据目录 ${opts.dataDir}`);
+    console.log(`速达云仓 已启动：http://${opts.host}:${opts.port}  数据目录 ${opts.dataDir}`);
   });
   const stop = () => server.close(() => process.exit(0));
   process.on('SIGTERM', stop);

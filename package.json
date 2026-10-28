@@ -1,7 +1,7 @@
 {
   "name": "surucubby",
   "version": "1.0.0",
-  "description": "代购电子仓库：Excel 导入、日本仓分拣、直邮与拼团、称重分摊、收款与寄出管理",
+  "description": "速达云仓 · 代购电子仓库：Excel 导入、日本仓分拣、直邮与拼团、称重分摊、收款与寄出管理",
   "scripts": {
     "dev": "node --watch --disable-warning=ExperimentalWarning src/server.ts",
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
