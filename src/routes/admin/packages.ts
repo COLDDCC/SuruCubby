@@ -122,10 +122,10 @@ packageRoutes.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-/** 批量改包裹状态：包裹内所有物品同步变更（跳过取消/退款/已称重之后的）。 */
+/** 批量改包裹状态：包裹内物品跟着往前推（跳过取消/退款/已称重之后的、缺件的；默认不往回拽）。 */
 packageRoutes.post('/:id/status', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
-  const body = await readJson<{ status?: string }>(c);
+  const body = await readJson<{ status?: string; allowBackward?: unknown }>(c);
   const status = requireString(body.status, '状态');
   if (!isItemStatus(status)) throw badRequest(`未知状态：${status}`);
   if (!PACKAGE_BULK_STATUSES.includes(status)) {
@@ -135,13 +135,26 @@ packageRoutes.post('/:id/status', async (c) => {
   const pkg = await db.prepare('SELECT id FROM packages WHERE id = ?').bind(id).first();
   if (!pkg) throw notFound('包裹不存在');
 
-  const items = await db
+  const candidates = await db
     .prepare(
-      `SELECT id, status FROM items
+      `SELECT id, status, missing FROM items
         WHERE package_id = ? AND status NOT IN (${placeholders(BULK_SKIP_STATUSES.length)}) AND status != ?`,
     )
     .bind(id, ...BULK_SKIP_STATUSES, status)
-    .all<{ id: number; status: string }>();
+    .all<{ id: number; status: string; missing: number }>();
+  // 整箱改状态默认只往前推：已经走在前面的件不被拽回去（选错一下拉框，日本仓签收的就全退回「已下单」了），
+  // 标了缺件的也不跟着往前走（它根本不在箱子里）。真要往回改，前端确认后带 allowBackward。
+  const rank = (s: string) => PACKAGE_BULK_STATUSES.indexOf(s as (typeof PACKAGE_BULK_STATUSES)[number]);
+  const target = rank(status);
+  const allowBackward = body.allowBackward === true;
+  const items = {
+    results: candidates.results.filter((i) => {
+      const r = rank(i.status);
+      if (r > target) return allowBackward;
+      return !(i.missing && r < target);
+    }),
+  };
+  const heldBack = candidates.results.length - items.results.length;
 
   const at = nowIso();
   const statements: D1PreparedStatement[] = [
@@ -163,7 +176,7 @@ packageRoutes.post('/:id/status', async (c) => {
     .bind(id, ...BULK_SKIP_STATUSES)
     .first<{ count: number }>();
 
-  return c.json({ status, updated: items.results.length, skipped: skipped?.count ?? 0 });
+  return c.json({ status, updated: items.results.length, skipped: (skipped?.count ?? 0) + heldBack, heldBack });
 });
 
 /** 调整包裹包含的批次（同时把这些批次里还没进包裹的物品挂进来）。 */

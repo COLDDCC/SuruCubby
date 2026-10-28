@@ -332,3 +332,40 @@ test("日本运单号、下单时间两列：横线空格去掉，Excel 日期�
     ],
   );
 });
+
+test("表头上面有标题行：往下找到真正的表头，行号和链接都跟着对齐", () => {
+  const sheet = {
+    headers: ["10月骏河屋拼团", null, null],
+    rows: [
+      [null, null, null],
+      ["名称", "cn", "实际价格"],
+      ["手办", "阿猫", 1000],
+      ["画集", "阿狗", 800],
+    ],
+    urls: [[null, null, null], [null, null, null], ["https://x.test/a", null, null], [null, null, null]],
+  };
+  const parsed = parseSheet(sheet);
+  assert.equal(parsed.headerRow, 3);
+  assert.deepEqual(parsed.missingColumns, []);
+  assert.deepEqual(parsed.rows.map((r) => [r.rowNo, r.title, r.cn]), [[4, "手办", "阿猫"], [5, "画集", "阿狗"]]);
+  // 改了列对应也还认同一行表头
+  const edited = parseSheet(sheet, { columns: { "2": "goodsFeeJpy" } });
+  assert.equal(edited.headerRow, 3);
+  assert.equal(edited.rows[0].goodsFeeJpy, 1000);
+});
+
+test("表头就在第 1 行时不乱挪；找不到表头照常报缺列", () => {
+  assert.equal(parseSheet({ headers: ["名称", "cn", "实际价格"], rows: [["a", "b", 1]] }).headerRow, 1);
+  const none = parseSheet({ headers: ["x"], rows: [["y"], ["z"]] });
+  assert.equal(none.headerRow, 1);
+  assert.ok(none.missingColumns.length > 0);
+});
+
+test("控制字符去掉；名称、cn 太长拦下", () => {
+  const ok = parseSheet({ headers: ["名称", "cn", "实际价格"], rows: [["手\u0000办\u000b", "阿猫", 1]] });
+  assert.equal(ok.rows[0].title, "手办");
+  const long = parseSheet({ headers: ["名称", "cn", "实际价格"], rows: [["长".repeat(501), "阿猫", 1], ["a", "名".repeat(61), 1]] });
+  assert.equal(long.errors.length, 2);
+  assert.match(long.errors[0].reason, /名称」太长/);
+  assert.match(long.errors[1].reason, /cn」太长/);
+});

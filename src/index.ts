@@ -32,6 +32,24 @@ function imageCache(env: Env): ImageCache {
   if (env.IMAGE_CACHE) return env.IMAGE_CACHE;
   return (globalThis as unknown as { caches: { default: ImageCache } }).caches.default;
 }
+/**
+ * 所有响应都带的安全头：不许别的网站把后台 / 客户页套进 iframe（点击劫持），
+ * 不许浏览器把上传的东西猜成别的类型执行。页面里还有内联事件（图片 onerror），所以 CSP 只管框架和 base。
+ */
+app.use('*', async (c, next) => {
+  await next();
+  try {
+    c.res.headers.set('X-Content-Type-Options', 'nosniff');
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Content-Security-Policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+  } catch {
+    // 直接透传的 fetch 响应头是只读的：复制一份再加
+    c.res = new Response(c.res.body, c.res);
+    c.res.headers.set('X-Content-Type-Options', 'nosniff');
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Content-Security-Policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+  }
+});
 app.use('/api/*', mutationGuard);
 
 app.onError((err, c) => {

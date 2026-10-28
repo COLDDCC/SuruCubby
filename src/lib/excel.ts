@@ -74,6 +74,8 @@ export interface ParseResult {
   errors: SkippedRow[];
   missingColumns: string[];
   columns: ColumnInfo[];
+  /** 表头在表里第几行（1 起）。表格上面常有一两行标题（「10月骏河屋拼团」），表头不一定在第 1 行 */
+  headerRow: number;
 }
 
 interface ColumnSpec {
@@ -352,7 +354,31 @@ export function parseRoute(raw: Cell): "group" | "direct" | null {
 
 function text(cell: Cell): string {
   if (cell === null || cell === undefined) return "";
-  return String(cell).trim();
+  // 控制字符（复制网页时夹带的 \x00、\x0b 之类）去掉：存进库里会让导出和复制都出怪字
+  return String(cell).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").trim();
+}
+
+/** 往下最多找几行表头 */
+const HEADER_SCAN_ROWS = 10;
+
+/**
+ * 表头不在第 1 行时往下找：第 1 行认不出「名称」「cn」，就看接下来几行，
+ * 第一行能把必需的列都认出来的就是表头，它上面的标题行丢掉、下面才是数据。
+ * 只看自动识别、不看手动指认：这样预览和导入、改列前和改列后认的都是同一行表头
+ * （手动指认按列号算，表头挪了列号也不变）。
+ */
+export function locateHeader(sheet: RawSheet): { sheet: RawSheet; headerRow: number } {
+  if (!mapHeaders(sheet.headers).missingColumns.length) return { sheet, headerRow: 1 };
+  const limit = Math.min(HEADER_SCAN_ROWS - 1, sheet.rows.length);
+  for (let k = 0; k < limit; k += 1) {
+    const candidate = sheet.rows[k];
+    if (!candidate || mapHeaders(candidate).missingColumns.length) continue;
+    return {
+      sheet: { headers: candidate, rows: sheet.rows.slice(k + 1), urls: sheet.urls?.slice(k + 1) },
+      headerRow: k + 2,
+    };
+  }
+  return { sheet, headerRow: 1 };
 }
 
 /**
@@ -382,15 +408,18 @@ export interface ParseOptions {
  * 解析整张表。rowNo 为 Excel 中的行号（表头算第 1 行，数据从第 2 行开始）。
  */
 export function parseSheet(
-  sheet: RawSheet,
+  rawSheet: RawSheet,
   options: ParseOptions = {},
 ): ParseResult {
+  const located = locateHeader(rawSheet);
+  const sheet = located.sheet;
+  const headerRow = located.headerRow;
   const { index, missingColumns, columns } = mapHeaders(
     sheet.headers,
     options.columns,
   );
   if (missingColumns.length > 0) {
-    return { rows: [], skipped: [], errors: [], missingColumns, columns };
+    return { rows: [], skipped: [], errors: [], missingColumns, columns, headerRow };
   }
 
   if (
@@ -413,6 +442,7 @@ export function parseSheet(
       ],
       missingColumns: [],
       columns,
+      headerRow,
     };
   }
 
@@ -421,7 +451,7 @@ export function parseSheet(
   const errors: SkippedRow[] = [];
 
   sheet.rows.forEach((row, i) => {
-    const rowNo = i + 2;
+    const rowNo = i + headerRow + 1;
     const get = (field: FieldKey): Cell => {
       const at = index[field];
       return at === undefined ? null : row[at];
@@ -442,9 +472,17 @@ export function parseSheet(
       skipped.push({ rowNo, reason: "没有「名称」" });
       return;
     }
+    if (title.length > 500) {
+      errors.push({ rowNo, reason: `「名称」太长了（${title.length} 个字，最多 500），多半是把整页内容粘进了一格` });
+      return;
+    }
     const cn = text(get("cn"));
     if (cn === "") {
       errors.push({ rowNo, reason: "没有填「cn」（归属客户）" });
+      return;
+    }
+    if (cn.length > 60) {
+      errors.push({ rowNo, reason: `「cn」太长了（${cn.length} 个字，最多 60）` });
       return;
     }
 
@@ -533,7 +571,7 @@ export function parseSheet(
     }
   });
 
-  return { rows, skipped, errors, missingColumns, columns };
+  return { rows, skipped, errors, missingColumns, columns, headerRow };
 }
 
 export interface CnGroup {

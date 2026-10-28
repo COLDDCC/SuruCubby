@@ -266,3 +266,55 @@ test('⑦ 直邮待付款：仓库看得到等了多久、能催，管理员看�
   const notAgain = await ctx.jp.post(`/api/staff/direct/parcels/${ctx.parcelId}/nudge`, {}, { raw: true });
   assert.equal(notAgain.status, 400, '付过款就不用催了');
 });
+
+
+test('整箱改状态只往前推：签收过的不被拽回「已下单」，缺件的不跟着回国；确认后才能往回改', async () => {
+  const name = uniq('前推箱');
+  const r = await ctx.admin.post('/api/admin/import/commit', {
+    fileName: 'fwd.xlsx',
+    fileHash: `fwd-${stamp}`,
+    sheet: { headers: ['名称', '实际价格', 'cn'], rows: [['甲', 100, N.g], ['乙', 100, N.g], ['丙', 100, N.g]] },
+    batchName: name,
+    assignments: [{ cn: N.g, customerId: ctx.item['拼团画集'].customerId }],
+  });
+  const detail = await ctx.admin.get(`/api/admin/batches/${r.batchId}`);
+  const id = Object.fromEntries(detail.items.map((i) => [i.title, i.id]));
+  await ctx.jp.post('/api/staff/jp/receive', { itemIds: [id['甲']] });
+  await ctx.admin.patch(`/api/admin/items/${id['丙']}`, { missing: true });
+  // 选错成「已下单」：签收过的甲不动
+  const back = await ctx.admin.post(`/api/admin/packages/${r.packageId}/status`, { status: 'ordered' });
+  assert.equal(back.updated, 0);
+  // 推到回国中：乙跟着走，丙缺件不动
+  await ctx.admin.post(`/api/admin/packages/${r.packageId}/status`, { status: 'intl_transit' });
+  let pkg = await ctx.admin.get(`/api/admin/packages/${r.packageId}`);
+  const st = () => Object.fromEntries(pkg.items.map((i) => [i.title, i.status]));
+  assert.deepEqual(st(), { 甲: 'intl_transit', 乙: 'intl_transit', 丙: 'ordered' });
+  // 确认后往回改
+  await ctx.admin.post(`/api/admin/packages/${r.packageId}/status`, { status: 'jp_warehouse', allowBackward: true });
+  pkg = await ctx.admin.get(`/api/admin/packages/${r.packageId}`);
+  assert.equal(st()['甲'], 'jp_warehouse');
+});
+
+test('导入：标题行自动跳过；同一个日本订单号、同样的件再导会提醒，订单号重复要确认', async () => {
+  const sheet = {
+    headers: ['10月拼团', null, null],
+    rows: [['名称', 'cn', '实际价格'], ['拼团画集', N.g, 800]],
+  };
+  const pre = await ctx.admin.post('/api/admin/import/preview', { fileName: 'x.xlsx', fileHash: `ov-${stamp}`, orderNo: `WH-${stamp}`, sheet });
+  assert.equal(pre.headerRow, 2);
+  assert.equal(pre.sameOrder.id, ctx.batchId, '同一个日本订单号录过');
+  assert.ok(pre.overlaps.some((o) => o.batchId === ctx.batchId && o.count === 1), '拼团画集已经在库里（同人同名同链接）');
+  const body = {
+    fileName: 'x.xlsx',
+    fileHash: `ov-${stamp}`,
+    orderNo: `WH-${stamp}`,
+    sheet,
+    batchName: uniq('重复单'),
+    assignments: [{ cn: N.g, customerId: ctx.item['拼团画集'].customerId }],
+  };
+  const blocked = await ctx.admin.post('/api/admin/import/commit', body, { raw: true });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.data.error, /已经录过/);
+  const ok = await ctx.admin.post('/api/admin/import/commit', { ...body, confirmDuplicate: true });
+  assert.ok(ok.batchId);
+});

@@ -5,6 +5,7 @@ import {
   beijingTime,
   bindActions,
   codeTag,
+  confirmBox,
   escapeHtml,
   money,
   openModal,
@@ -106,8 +107,14 @@ export async function render(view, [id]) {
 
   document.getElementById('status').addEventListener('change', async (e) => {
     try {
-      const result = await api.post(`/api/admin/packages/${id}/status`, { status: e.target.value });
-      toast(`已更新 ${result.updated} 件${result.skipped ? `，跳过 ${result.skipped} 件` : ''}`);
+      const order = PACKAGE_BULK_STATUSES;
+      const backward = order.includes(pkg.status) && order.indexOf(e.target.value) < order.indexOf(pkg.status);
+      if (backward && !(await confirmBox(`往回改成「${statusLabel(e.target.value)}」？已经走在前面的件也会被拽回去（比如日本仓签收过的变回未签收）。只是看错了就点取消。`, { okText: '确实要往回改', danger: true }))) {
+        e.target.value = pkg.status;
+        return;
+      }
+      const result = await api.post(`/api/admin/packages/${id}/status`, { status: e.target.value, allowBackward: backward });
+      toast(`已更新 ${result.updated} 件${result.skipped ? `，跳过 ${result.skipped} 件${result.heldBack ? `（其中 ${result.heldBack} 件已经走在前面或标了缺件）` : ''}` : ''}`);
       render(view, [id]);
     } catch (err) {
       toast(err.message, true);

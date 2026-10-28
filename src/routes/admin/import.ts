@@ -20,6 +20,7 @@ interface CustomerRow {
 interface PreviewBody {
   fileName?: string;
   fileHash?: string;
+  orderNo?: string;
   sheet?: RawSheet;
   /** 管理员在预览里指认的「Excel 列 → 用途」，key 用中文用途名或英文字段名都认 */
   columns?: Record<string, unknown>;
@@ -68,6 +69,53 @@ async function findDuplicate(env: Env, fileHash: string | null) {
     .first<{ id: number; name: string; createdAt: string }>();
 }
 
+/** 同一个日本订单号已经录过：骏河屋改了单重新导出的表，文件指纹对不上，靠订单号认出来。 */
+async function findSameOrder(env: Env, orderNo: string | null) {
+  if (!orderNo) return null;
+  return env.DB.prepare('SELECT id, name, created_at AS createdAt FROM batches WHERE order_no = ? ORDER BY id DESC')
+    .bind(orderNo)
+    .first<{ id: number; name: string; createdAt: string }>();
+}
+
+/**
+ * 这张表里有多少件已经在库里了（同一个人、同名、同链接）：表格改过一个字再导一次，
+ * 文件指纹就变了，靠这个提醒「是不是重复导了」。同一个人买两件一样的是正常的，
+ * 所以按件数抵扣——库里已有 2 件，表里同样的前 2 件才算重复。只提醒，不拦。
+ */
+async function findOverlaps(db: D1Database, rows: Array<{ customerId: number; row: ParsedRow }>) {
+  if (!rows.length) return [];
+  const customerIds = [...new Set(rows.map((r) => r.customerId))];
+  const existing: Array<{ customerId: number; title: string; productUrl: string | null; batchId: number; batchName: string }> = [];
+  for (let i = 0; i < customerIds.length; i += 50) {
+    const ids = customerIds.slice(i, i + 50);
+    const found = await db
+      .prepare(
+        `SELECT i.customer_id AS customerId, i.title, i.product_url AS productUrl, i.batch_id AS batchId, b.name AS batchName
+           FROM items i JOIN batches b ON b.id = i.batch_id
+          WHERE i.customer_id IN (${ids.map(() => '?').join(', ')}) AND i.status NOT IN ('cancelled', 'refunded')`,
+      )
+      .bind(...ids)
+      .all<{ customerId: number; title: string; productUrl: string | null; batchId: number; batchName: string }>();
+    existing.push(...found.results);
+  }
+  const key = (customerId: number, title: string, url: string | null) => `${customerId}\u0000${title}\u0000${url ?? ''}`;
+  const pool = new Map<string, Array<{ batchId: number; batchName: string }>>();
+  for (const e of existing) {
+    const k = key(e.customerId, e.title, e.productUrl);
+    pool.set(k, [...(pool.get(k) ?? []), { batchId: e.batchId, batchName: e.batchName }]);
+  }
+  const byBatch = new Map<number, { batchId: number; name: string; count: number }>();
+  for (const { customerId, row } of rows) {
+    const list = pool.get(key(customerId, row.title, row.productUrl));
+    const hit = list?.shift();
+    if (!hit) continue;
+    const entry = byBatch.get(hit.batchId) ?? { batchId: hit.batchId, name: hit.batchName, count: 0 };
+    entry.count += 1;
+    byBatch.set(hit.batchId, entry);
+  }
+  return [...byBatch.values()].sort((a, b) => b.count - a.count);
+}
+
 /** 管理员手动指认过的算最高优先级，没指认的才让程序自己认。 */
 function resolveGroups(index: NameIndex, groups: Array<{ cn: string }>, assignments: Map<string, Assignment>) {
   return groups.map((group) => {
@@ -89,6 +137,7 @@ importRoutes.post('/preview', async (c) => {
         missingColumns: parsed.missingColumns,
         fields: FIELD_LABELS,
         columns: parsed.columns,
+        headerRow: parsed.headerRow,
         error: `表头缺少这些列：${parsed.missingColumns.join('、')}`,
       },
       400,
@@ -101,12 +150,22 @@ importRoutes.post('/preview', async (c) => {
     match: matchName(index, g.cn),
   }));
   const duplicate = await findDuplicate(c.env, optionalString(body.fileHash));
+  const sameOrder = await findSameOrder(c.env, optionalString(body.orderNo));
+  const overlaps = await findOverlaps(
+    c.env.DB,
+    matched.flatMap(({ group, match }) =>
+      match.customer ? parsed.rows.filter((r) => r.cn === group.cn).map((r) => ({ customerId: match.customer!.id, row: r })) : [],
+    ),
+  );
 
   return c.json({
     missingColumns: [],
     fields: FIELD_LABELS,
     columns: parsed.columns,
+    headerRow: parsed.headerRow,
     duplicate,
+    sameOrder,
+    overlaps,
     skipped: parsed.skipped,
     errors: parsed.errors,
     totals: {
@@ -155,6 +214,10 @@ importRoutes.post('/commit', async (c) => {
     const duplicate = await findDuplicate(c.env, fileHash);
     if (duplicate) {
       throw badRequest('这张表可能已经导过', { duplicate });
+    }
+    const sameOrder = await findSameOrder(c.env, orderNo);
+    if (sameOrder) {
+      throw badRequest(`日本订单号 ${orderNo} 已经录过（「${sameOrder.name}」），确认要再录一次吗`, { duplicate: sameOrder });
     }
   }
 

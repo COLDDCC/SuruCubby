@@ -54,6 +54,10 @@ export async function render(view) {
     <div id="preview"></div>`;
 
   document.getElementById('file').addEventListener('change', (e) => handleFile(e.target.files[0], view));
+  // 表已经选好了再填订单号：重新预览一次，看看这个订单号是不是录过
+  document.getElementById('orderNo').addEventListener('change', () => {
+    if (state.sheet) loadPreview(view).catch((err) => toast(err.message, true));
+  });
 }
 
 async function handleFile(file, view) {
@@ -103,6 +107,7 @@ async function loadPreview(view) {
   const preview = await api.post('/api/admin/import/preview', {
     fileName: state.fileName,
     fileHash: state.fileHash,
+    orderNo: document.getElementById('orderNo')?.value || '',
     sheet: state.sheet,
     columns: state.columnEdits,
   });
@@ -133,7 +138,7 @@ function columnsCard(p) {
           (col) => `<tr class="${col.field ? '' : 'highlight-row'}">
             <td>${escapeHtml(col.header || `第 ${col.index + 1} 列`)}</td>
             <td><select data-col="${col.index}">${options(col.field)}</select>${col.manual ? ' <span class="badge">已改</span>' : ''}</td>
-            <td class="small muted">${escapeHtml(String(state.sheet.rows.find((r) => r[col.index] !== null && String(r[col.index]).trim() !== '')?.[col.index] ?? '—')).slice(0, 40)}</td>
+            <td class="small muted">${escapeHtml(String(state.sheet.rows.slice(Math.max(0, (p.headerRow || 1) - 1)).find((r) => r[col.index] !== null && String(r[col.index]).trim() !== '')?.[col.index] ?? '—')).slice(0, 40)}</td>
           </tr>`,
         )
         .join('')}</tbody></table></div>
@@ -164,6 +169,26 @@ function renderPreview(view) {
           </div>`
         : ''
     }
+    ${
+      p.sameOrder && !p.duplicate
+        ? `<div class="card" style="border-color:var(--warn)">
+            <p class="badge warn">这个日本订单号已经录过</p>
+            <p class="small">已有订单「<a href="#/batches/${p.sameOrder.id}">${escapeHtml(p.sameOrder.name)}</a>」用的是同一个日本订单号。骏河屋改单后重新导出的表要先把旧的处理掉，不然货会记两遍。</p>
+            <label class="row"><input type="checkbox" id="confirmDup"> 我确认要再录一次</label>
+          </div>`
+        : ''
+    }
+    ${
+      p.overlaps && p.overlaps.length
+        ? `<div class="card" style="border-color:var(--warn)">
+            <p class="badge warn">有的件好像已经录过</p>
+            <p class="small">同一个人、同名、同链接的东西库里已经有了：${p.overlaps
+              .map((o) => `<a href="#/batches/${o.batchId}">${escapeHtml(o.name)}</a> ${o.count} 件`)
+              .join('、')}。同一个人再买一件一样的是正常的；如果是同一张表改了几个字又导一次，就别导了。</p>
+          </div>`
+        : ''
+    }
+    ${p.headerRow > 1 ? `<p class="small muted">表头在第 ${p.headerRow} 行，上面的 ${p.headerRow - 1} 行当标题跳过了。</p>` : ''}
     ${p.columns && p.columns.length ? columnsCard(p) : ''}
     <div class="card">
       <h3>预览</h3>
@@ -306,7 +331,7 @@ function renderPreview(view) {
     },
     commit: async (dataset, el) => {
       const confirmDup = document.getElementById('confirmDup');
-      if (p.duplicate && !confirmDup?.checked) return toast('请先勾选「我确认要重复导入」', true);
+      if ((p.duplicate || p.sameOrder) && !confirmDup?.checked) return toast('请先勾选确认重复导入', true);
       // 预览之后又改过列的对应关系，屏幕上核对过的金额已经不是要导入的那批了
       if (JSON.stringify(state.columnEdits) !== state.previewedEdits) {
         return toast('列的对应关系改过了，等预览刷新完再导入', true);
@@ -322,7 +347,7 @@ function renderPreview(view) {
           orderedAt: document.getElementById('orderedAt').value || null,
           orderNo: document.getElementById('orderNo').value,
           japanTrackingNo: document.getElementById('japanTrackingNo').value,
-          confirmDuplicate: Boolean(p.duplicate),
+          confirmDuplicate: Boolean(p.duplicate || p.sameOrder),
           assignments: [...state.assignments.entries()].map(([cn, a]) => ({
             cn,
             customerId: a.customerId,

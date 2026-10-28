@@ -15,6 +15,12 @@ export const customerRoutes = new Hono<{ Bindings: Env }>();
 const WINDOW_MS = 15 * 60 * 1000;
 const LOCK_MS = 15 * 60 * 1000;
 const MAX_FAILS = 5;
+/**
+ * 同一个 IP 15 分钟里最多错 30 次。按 QQ 锁只防得住「盯着一个号猜密码」：
+ * 初始密码大家都是 123456，有人拿它挨个 QQ 号去试，每个号只错一次，按 QQ 永远锁不住。
+ * 30 次够一家人、一个宿舍共用一个出口 IP 偶尔输错，挡得住批量撞号。
+ */
+const MAX_IP_FAILS = 30;
 
 interface AttemptRow {
   token: string;
@@ -33,7 +39,7 @@ async function checkLock(env: Env, token: string): Promise<number | null> {
   return null;
 }
 
-async function recordFailure(env: Env, token: string): Promise<{ locked: boolean; left: number }> {
+async function recordFailure(env: Env, token: string, maxFails = MAX_FAILS): Promise<{ locked: boolean; left: number }> {
   const now = Date.now();
   const row = await env.DB.prepare('SELECT * FROM token_attempts WHERE token = ?')
     .bind(token)
@@ -48,7 +54,7 @@ async function recordFailure(env: Env, token: string): Promise<{ locked: boolean
       windowStart = row.window_start;
     }
   }
-  const locked = failCount >= MAX_FAILS;
+  const locked = failCount >= maxFails;
   const lockedUntil = locked ? new Date(now + LOCK_MS).toISOString() : null;
   await env.DB.prepare(
     `INSERT INTO token_attempts (token, fail_count, window_start, locked_until)
@@ -59,7 +65,7 @@ async function recordFailure(env: Env, token: string): Promise<{ locked: boolean
   )
     .bind(token, locked ? 0 : failCount, locked ? new Date(now).toISOString() : windowStart, lockedUntil)
     .run();
-  return { locked, left: Math.max(0, MAX_FAILS - failCount) };
+  return { locked, left: Math.max(0, maxFails - failCount) };
 }
 
 async function clearFailures(env: Env, token: string): Promise<void> {
@@ -73,6 +79,11 @@ customerRoutes.post('/login', async (c) => {
   if (qq === '') throw badRequest('请输入 QQ 号');
   if (password === '') throw badRequest('请输入密码');
   if (qq.length > 32 || password.length > 64) throw badRequest('账号或密码太长了');
+
+  const ipKey = `ip:${c.req.header('CF-Connecting-IP') ?? 'local'}`;
+  if (await checkLock(c.env, ipKey)) {
+    return c.json({ error: '这个网络试错太多次了，请过 15 分钟再试' }, 429);
+  }
 
   // 锁定按 QQ 计，换成统一入口也照样防得住挨个试密码
   const key = `qq:${qq}`;
@@ -91,6 +102,7 @@ customerRoutes.post('/login', async (c) => {
     .first<{ id: number; qq: string; token: string; passwordHash: string | null }>();
 
   if (!customer || !(await verifyPassword(password, customer.passwordHash ?? null))) {
+    await recordFailure(c.env, ipKey, MAX_IP_FAILS);
     const result = await recordFailure(c.env, key);
     return c.json(
       {
