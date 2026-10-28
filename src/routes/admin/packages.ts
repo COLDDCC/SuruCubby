@@ -20,7 +20,7 @@ export const packageRoutes = new Hono<{ Bindings: Env }>();
 packageRoutes.get('/', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT p.id, p.name, p.status, p.tracking_no AS trackingNo, p.total_fee_fen AS totalFeeFen,
-            p.total_weight_g AS totalWeightG, p.allocated_at AS allocatedAt, p.created_at AS createdAt,
+            p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount, p.total_weight_g AS totalWeightG, p.allocated_at AS allocatedAt, p.created_at AS createdAt,
             (SELECT COUNT(*) FROM items i WHERE i.package_id = p.id) AS itemCount,
             (SELECT COUNT(DISTINCT i.customer_id) FROM items i WHERE i.package_id = p.id) AS customerCount
        FROM packages p
@@ -54,6 +54,7 @@ packageRoutes.get('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '包裹 ID');
   const pkg = await c.env.DB.prepare(
     `SELECT id, name, status, tracking_no AS trackingNo, total_fee_fen AS totalFeeFen,
+            jp_weight_g AS jpWeightG, carton_count AS cartonCount,
             total_weight_g AS totalWeightG, allocated_at AS allocatedAt, created_at AS createdAt
        FROM packages WHERE id = ?`,
   )

@@ -13,7 +13,11 @@ export async function render(view) {
         <tbody>${data.packages
           .map(
             (p) => `<tr>
-            <td><a href="#/packages/${p.id}">${escapeHtml(p.name)}</a>
+            <td><a href="#/packages/${p.id}">${escapeHtml(p.name)}</a>${
+              p.jpWeightG || p.cartonCount
+                ? `<div class="small muted">日本仓 ${p.jpWeightG ? `${(p.jpWeightG / 1000).toFixed(2)} kg` : ''}${p.cartonCount ? ` · ${p.cartonCount} 箱` : ''}</div>`
+                : ''
+            }
               <div class="small muted">${p.customerCount} 位客户 · ${beijingTime(p.createdAt, false)}</div></td>
             <td>
               <select data-status-for="${p.id}" class="small">

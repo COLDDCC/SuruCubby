@@ -17,6 +17,7 @@ import { HttpError, badRequest, bound, intList, notFound, optionalString, placeh
 import { staffOf } from '../../lib/staff.ts';
 import { arriveStmts, loadShipments } from '../../lib/jpShipments.ts';
 import { resolveAddress } from './direct.ts';
+import { boxWeight, cartonCount } from './jp.ts';
 
 export const sortRoutes = new Hono<{ Bindings: Env }>();
 
@@ -294,9 +295,14 @@ sortRoutes.post('/:batchId/commit', async (c) => {
 
   // ---- 拼团：分箱 ----
   const boxesRaw = Array.isArray(body.boxes) ? body.boxes : [];
-  const boxes = boxesRaw.map((b, k) => ({
-    trackingNo: bound(normalizeTrackingNo(optionalString((b as Record<string, unknown> | null)?.trackingNo)), `第 ${k + 1} 箱的回国单号`, 40),
-  }));
+  const boxes = boxesRaw.map((b, k) => {
+    const o = (b ?? {}) as Record<string, unknown>;
+    return {
+      trackingNo: bound(normalizeTrackingNo(optionalString(o.trackingNo)), `第 ${k + 1} 箱的回国单号`, 40),
+      weightG: boxWeight(o.weightG),
+      cartons: cartonCount(o.cartons),
+    };
+  });
   const maxBoxes = await maxBoxesPerSort(c.env);
   if (boxes.length > maxBoxes) throw badRequest(`一次最多开 ${maxBoxes} 箱（设置里可以改）`);
   const assign = (body.assign ?? {}) as Record<string, unknown>;
@@ -352,15 +358,15 @@ sortRoutes.post('/:batchId/commit', async (c) => {
     await db.prepare('SELECT COALESCE(SUM(box_count), 0) AS n FROM sort_sessions WHERE batch_id = ?').bind(batchId).first<{ n: number }>()
   )?.n ?? 0;
   let packageId = ((await db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM packages').first<{ n: number }>())?.n ?? 1) as number;
-  const boxResults: Array<{ no: number; packageId: number; name: string; trackingNo: string | null; items: SortItem[] }> = [];
+  const boxResults: Array<{ no: number; packageId: number; name: string; trackingNo: string | null; weightG: number | null; cartons: number | null; items: SortItem[] }> = [];
   boxes.forEach((box, idx) => {
     const k = idx + 1;
     const name = `${batch.name} 第${priorBoxes + k}箱`;
     const shipped = !!box.trackingNo;
     statements.push(
       db
-        .prepare('INSERT INTO packages (id, name, tracking_no, status, created_at) VALUES (?, ?, ?, ?, ?)')
-        .bind(packageId, name, box.trackingNo, shipped ? 'intl_transit' : 'jp_warehouse', at),
+        .prepare('INSERT INTO packages (id, name, tracking_no, status, jp_weight_g, carton_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(packageId, name, box.trackingNo, shipped ? 'intl_transit' : 'jp_warehouse', box.weightG, box.cartons ?? (shipped ? 1 : null), at),
       db.prepare('INSERT INTO package_batches (package_id, batch_id) VALUES (?, ?)').bind(packageId, batchId),
     );
     const inBox = groupFound.filter((i) => boxOf.get(i.id) === k);
@@ -375,7 +381,7 @@ sortRoutes.post('/:batchId/commit', async (c) => {
       );
       if (shipped) statements.push(statusLogStmt(db, item.id, 'jp_warehouse', 'intl_transit', at, staff.name));
     }
-    boxResults.push({ no: priorBoxes + k, packageId, name, trackingNo: box.trackingNo, items: inBox });
+    boxResults.push({ no: priorBoxes + k, packageId, name, trackingNo: box.trackingNo, weightG: box.weightG, cartons: box.cartons, items: inBox });
     packageId += 1;
   });
 
@@ -486,7 +492,7 @@ sortRoutes.post('/:batchId/commit', async (c) => {
       address: p.address,
       items: p.items.map((i) => ({ id: i.id, title: i.title })),
     })),
-    boxes: boxResults.map((b) => ({ no: b.no, packageId: b.packageId, name: b.name, trackingNo: b.trackingNo, people: people(b.items) })),
+    boxes: boxResults.map((b) => ({ no: b.no, packageId: b.packageId, name: b.name, trackingNo: b.trackingNo, weightG: b.weightG, cartons: b.cartons, people: people(b.items) })),
     selfReturn: people(selfReturnFound),
     unpacked: unpacked.map((u) => ({ ...who(u.items[0]), reason: u.reason, items: u.items.map((i) => ({ id: i.id, title: i.title })) })),
     missing: missingIds.map((id) => {

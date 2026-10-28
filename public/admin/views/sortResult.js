@@ -17,7 +17,7 @@ function groupText(r) {
   if (r.boxes.length) {
     out.push('', `■ 拼团（${r.boxes.length} 箱）`);
     for (const b of r.boxes) {
-      out.push(`第${b.no}箱 回国单号 ${b.trackingNo || '待填'}`);
+      out.push(`第${b.no}箱 回国单号 ${b.trackingNo || '待填'}${b.weightG ? `｜整箱 ${(b.weightG / 1000).toFixed(2)}kg` : ''}${b.cartons > 1 ? `｜${b.cartons} 箱` : ''}`);
       for (const p of b.people) out.push(`  ${p.cn}（QQ ${p.qq}）${p.items.length} 件：${p.items.map((i) => i.title).join('、')}`);
     }
   }
@@ -85,7 +85,7 @@ export async function render(view, [id]) {
             ? r.boxes
                 .map(
                   (b) => `<div class="pile">
-              <div class="pile-head"><b>第 ${b.no} 箱</b> <span>回国单号 <b class="mono">${escapeHtml(b.trackingNo || '待填')}</b></span></div>
+              <div class="pile-head"><b>第 ${b.no} 箱</b> <span>回国单号 <b class="mono">${escapeHtml(b.trackingNo || '待填')}</b>${b.weightG ? ` · 整箱 ${(b.weightG / 1000).toFixed(2)} kg` : ''}${b.cartons > 1 ? ` · ${b.cartons} 箱` : ''}</span></div>
               ${b.people
                 .map(
                   (p) => `<div class="small" style="margin:4px 0"><span class="cn-chip">${escapeHtml(p.cn)}</span> ${p.items.length} 件：${p.items

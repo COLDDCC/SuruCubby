@@ -47,6 +47,11 @@ export async function render(view, [id]) {
         </select>
         <button class="small plain" data-action="tracking">回国单号：${escapeHtml(pkg.trackingNo || '待填')}</button>
       </div>
+      ${
+        pkg.jpWeightG || pkg.cartonCount
+          ? `<p class="small">日本仓封箱：${pkg.jpWeightG ? `整箱 ${(pkg.jpWeightG / 1000).toFixed(2)} kg` : '没称'}${pkg.cartonCount ? ` · ${pkg.cartonCount} 箱` : ''}</p>`
+          : ''
+      }
       <p><button data-action="moveItems" class="small plain">拆包 / 合包：移动勾选商品</button></p>
       <p class="small muted">改状态会同步包裹里所有物品，已取消 / 已退款 / 已经是「可发货」或已寄出的物品不受影响。</p>
       ${

@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, promptBox, ROUTE_LABELS, toast } from '/admin/ui.js';
+import { beijingTime, bindActions, codeTag, confirmBox, escapeHtml, kgToGrams, promptBox, ROUTE_LABELS, toast } from '/admin/ui.js';
 import { bindItemDetails } from '/admin/itemDetail.js';
 
 /**
@@ -148,12 +148,34 @@ function boxesHtml(list) {
         </details>
         <div class="row ship-row">
           <input data-box-tracking="${b.id}" placeholder="回国单号" value="${escapeHtml(b.trackingNo || '')}" ${ready ? '' : 'disabled'}>
+          <input class="box-num" data-box-kg="${b.id}" inputmode="decimal" placeholder="整箱 kg" value="${b.jpWeightG ? (b.jpWeightG / 1000).toString() : ''}" ${ready ? '' : 'disabled'}>
+          <input class="box-num" data-box-cartons="${b.id}" inputmode="numeric" placeholder="几箱" value="${b.cartonCount || ''}" ${ready ? '' : 'disabled'}>
           <button data-action="shipBox" data-box="${b.id}" ${ready ? '' : 'disabled'}>封箱发出</button>
         </div>
+        <p class="small muted" style="margin:4px 0 0">整箱重量（毛重）和箱数国内对账用：一个回国单号几箱一起走就填几箱。</p>
         ${b.waiting ? `<p class="small muted">还有 ${b.waiting} 件没签收，签收齐了才能发出；真没到的告诉管理员处理。</p>` : ''}
       </div>`;
     })
     .join('');
+}
+
+function shippedHtml(list) {
+  if (!list.length) return '';
+  return `<div class="card"><h3 style="margin-top:0">已发出、国内还没称的箱子</h3>
+    <p class="small muted" style="margin-top:0">发出后才称的整箱重量、箱数在这里补；国内称重分摊之后就改不了了。</p>
+    ${list
+      .map(
+        (b) => `<div class="list-row">
+          <div class="main">${escapeHtml(b.name)} <span class="small muted">${b.itemCount} 件</span>
+            <div class="small">回国单号 <b class="mono">${escapeHtml(b.trackingNo || '—')}</b> · ${
+              b.jpWeightG ? `整箱 ${(b.jpWeightG / 1000).toFixed(2)} kg` : '<span class="unpaid">重量没填</span>'
+            } · ${b.cartonCount ? `${b.cartonCount} 箱` : '<span class="unpaid">箱数没填</span>'}</div></div>
+          <div class="side"><button class="small plain" data-action="boxInfo" data-box="${b.id}"
+            data-kg="${b.jpWeightG ? b.jpWeightG / 1000 : ''}" data-cartons="${b.cartonCount || ''}" data-tn="${escapeHtml(b.trackingNo || '')}">补填 / 改</button>
+            <a class="small" href="#/print/box/${b.id}">装箱单</a></div>
+        </div>`,
+      )
+      .join('')}</div>`;
 }
 
 function selfHtml(list) {
@@ -230,7 +252,7 @@ export async function render(view) {
     </div>
     <div class="jp-cols">
       <section class="jp-col" data-col="inbound"><h3 class="col-title">待分拣</h3>${queueHtml(queue)}</section>
-      <section class="jp-col" data-col="boxes"><h3 class="col-title">回国箱</h3>${boxesHtml(data.boxes)}</section>
+      <section class="jp-col" data-col="boxes"><h3 class="col-title">回国箱</h3>${boxesHtml(data.boxes)}${shippedHtml(data.shippedBoxes || [])}</section>
       <section class="jp-col" data-col="direct"><h3 class="col-title">待打包直邮</h3>${directHtml(data.direct)}</section>
       <section class="jp-col" data-col="self"><h3 class="col-title">不拼邮（放一边）</h3>${selfHtml(data.selfReturn || [])}</section>
     </div>`;
@@ -282,6 +304,21 @@ export async function render(view) {
       toast('登记好了');
       await render(view);
     },
+    async boxInfo({ box, kg, cartons, tn }) {
+      const trackingNo = await promptBox('回国单号', tn || '');
+      if (trackingNo === null) return;
+      const weight = await promptBox('整箱重量（kg，毛重）', kg || '', { type: 'text' });
+      if (weight === null) return;
+      const count = await promptBox('这个回国单号下一共几箱', cartons || '1');
+      if (count === null) return;
+      await api.post(`/api/staff/jp/boxes/${box}/info`, {
+        trackingNo,
+        weightG: kgToGrams(weight),
+        cartons: count === '' ? null : Number(count),
+      });
+      toast('记上了');
+      await render(view);
+    },
     async setAside({ item }) {
       await api.post('/api/staff/jp/set-aside', { itemIds: [Number(item)] });
       toast('拿出来了，在「不拼邮」那一栏');
@@ -302,8 +339,11 @@ export async function render(view) {
     async shipBox({ box }) {
       const trackingNo = view.querySelector(`[data-box-tracking="${box}"]`).value.trim();
       if (!trackingNo) return toast('先填回国单号', true);
-      if (!(await confirmBox(`封箱发出，回国单号 ${trackingNo}？箱里的件会变成「回国中」，客户页面能看到这个单号。`, { okText: '发出' }))) return;
-      const r = await api.post(`/api/staff/jp/boxes/${box}/ship`, { trackingNo });
+      const weightG = kgToGrams(view.querySelector(`[data-box-kg="${box}"]`).value);
+      const cartons = view.querySelector(`[data-box-cartons="${box}"]`).value.trim() || 1;
+      if (!weightG && !(await confirmBox('整箱重量还没填，国内对账会少一个依据。先不填直接发出？（发出后还能在这里补）', { okText: '先发出' }))) return;
+      if (!(await confirmBox(`封箱发出，回国单号 ${trackingNo}${weightG ? `，整箱 ${(weightG / 1000).toFixed(2)} kg` : ''}，${cartons} 箱？箱里的件会变成「回国中」，客户页面能看到这个单号。`, { okText: '发出' }))) return;
+      const r = await api.post(`/api/staff/jp/boxes/${box}/ship`, { trackingNo, weightG, cartons: Number(cartons) });
       toast(`已发出，${r.count} 件变成回国中`);
       await render(view);
     },

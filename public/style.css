@@ -1844,3 +1844,8 @@ body.has-tabbar .sort-bar {
     break-after: auto;
   }
 }
+
+.box-num {
+  width: 84px;
+  flex: 0 0 84px;
+}

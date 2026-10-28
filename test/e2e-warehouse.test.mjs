@@ -205,3 +205,35 @@ test('⑤ 打包前就看得到寄到哪；装箱单、打包单的数据接口'
   assert.equal(p.parcel.address.detail, '东京都新宿区1-2-3');
   assert.deepEqual(p.parcel.items.map((i) => i.title), ['直邮色纸']);
 });
+
+test('⑥ 回国箱记整箱重量和箱数：发出时填、发出后补，管理员称重台看得到', async () => {
+  const noWeight = await ctx.jp.post(`/api/staff/jp/boxes/${ctx.boxB}/ship`, { trackingNo: 'RET-B', weightG: 999999 }, { raw: true });
+  assert.equal(noWeight.status, 400, '100 kg 以上当成手滑');
+  await ctx.jp.post(`/api/staff/jp/boxes/${ctx.boxB}/ship`, { trackingNo: 'RET-B', weightG: 12500, cartons: 2 });
+  let ov = await ctx.jp.get('/api/staff/jp/overview');
+  const shipped = ov.shippedBoxes.find((b) => b.id === ctx.boxB);
+  assert.deepEqual([shipped.trackingNo, shipped.jpWeightG, shipped.cartonCount], ['RET-B', 12500, 2]);
+  await ctx.jp.post(`/api/staff/jp/boxes/${ctx.boxB}/info`, { weightG: 12800, cartons: 3 });
+  const weigh = await ctx.admin.get(`/api/admin/packages/${ctx.boxB}/weigh`);
+  assert.deepEqual([weigh.package.jpWeightG, weigh.package.cartonCount], [12800, 3]);
+  const list = (await ctx.admin.get('/api/admin/packages')).packages.find((p) => p.id === ctx.boxB);
+  assert.equal(list.jpWeightG, 12800);
+
+  // 分拣时当场开箱发出，也能一起填
+  const tn = 'WH-E-' + String(stamp).slice(-5);
+  await ctx.jp.post('/api/staff/jp/shipments', { batchId: ctx.batchId, trackingNo: tn });
+  const extra = await ctx.admin.post('/api/admin/import/commit', {
+    fileName: 'wh2.xlsx',
+    fileHash: `wh2-${stamp}`,
+    sheet: { headers: ['名称', '实际价格', 'cn', '日本运单号'], rows: [['加单徽章', 100, N.g, tn]] },
+    batchName: uniq('仓库加单'),
+    assignments: [{ cn: N.g, customerId: ctx.item['拼团画集'].customerId }],
+  });
+  const s = await ctx.jp.get(`/api/staff/sort/${extra.batchId}?tn=${encodeURIComponent(tn)}`);
+  await ctx.jp.post('/api/staff/sort/mark', { itemIds: s.items.map((i) => i.id), found: true });
+  const r = await ctx.jp.post(`/api/staff/sort/${extra.batchId}/commit`, {
+    trackingNo: tn,
+    boxes: [{ trackingNo: 'RET-E', weightG: 3000, cartons: 1 }],
+  });
+  assert.deepEqual([r.result.boxes[0].weightG, r.result.boxes[0].cartons], [3000, 1]);
+});

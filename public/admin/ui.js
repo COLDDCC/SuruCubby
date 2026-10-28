@@ -101,3 +101,13 @@ export function bindActions(root, handlers) {
     });
   });
 }
+
+/** 「12.5」「12.5kg」「12500g」→ 克；空 → null。填错的留给后端报错。 */
+export function kgToGrams(text) {
+  const t = String(text ?? '').trim().toLowerCase();
+  if (!t) return null;
+  const n = Number(t.replace(/kg|公斤|千克|g|克/g, '').trim());
+  if (!Number.isFinite(n) || n <= 0) return t;
+  return /(?<!k)g$|克$/.test(t) ? Math.round(n) : Math.round(n * 1000);
+}
+

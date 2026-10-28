@@ -13,13 +13,15 @@ interface PackageRow {
   status: string;
   totalFeeFen: number | null;
   totalWeightG: number | null;
+  jpWeightG: number | null;
+  cartonCount: number | null;
   allocatedAt: string | null;
 }
 
 async function loadPackage(env: Env, id: number): Promise<PackageRow> {
   const pkg = await env.DB.prepare(
     `SELECT id, name, status, total_fee_fen AS totalFeeFen, total_weight_g AS totalWeightG,
-            allocated_at AS allocatedAt
+            jp_weight_g AS jpWeightG, carton_count AS cartonCount, allocated_at AS allocatedAt
        FROM packages WHERE id = ?`,
   )
     .bind(id)

@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
-import { badRequest, bound, intList, notFound, readJson, requireInt, requireString } from '../../lib/http.ts';
+import { badRequest, bound, intList, notFound, optionalString, readJson, requireInt, requireString } from '../../lib/http.ts';
 import { placeholders } from '../../lib/http.ts';
 import { staffOf } from '../../lib/staff.ts';
 import { normalizeTrackingNo } from '../../lib/excel.ts';
@@ -84,7 +84,7 @@ jpRoutes.get('/overview', async (c) => {
 
   const boxRows = await db
     .prepare(
-      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.status,
+      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.status, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount,
               SUM(i.status = 'jp_warehouse') AS received,
               SUM(i.status = 'ordered') AS waiting
          FROM packages p JOIN items i ON i.package_id = p.id
@@ -92,7 +92,7 @@ jpRoutes.get('/overview', async (c) => {
           AND i.status IN ('ordered', 'jp_warehouse') AND i.sorted_at IS NOT NULL
         GROUP BY p.id ORDER BY p.id`,
     )
-    .all<{ id: number; name: string; trackingNo: string | null; status: string; received: number; waiting: number }>();
+    .all<{ id: number; name: string; trackingNo: string | null; status: string; jpWeightG: number | null; cartonCount: number | null; received: number; waiting: number }>();
   const boxIds = boxRows.results.map((b) => b.id);
   const boxItems = boxIds.length
     ? (
@@ -166,7 +166,20 @@ jpRoutes.get('/overview', async (c) => {
     return { customerId, nickname: list[0].nickname, items: list.map(shape) };
   });
 
+  // 已经发出、国内还没称重分摊的箱子：发出后才称的整箱重量、箱数还能在这里补
+  const shippedBoxes = await db
+    .prepare(
+      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount,
+              (SELECT COUNT(*) FROM items i WHERE i.package_id = p.id) AS itemCount
+         FROM packages p
+        WHERE p.allocated_at IS NULL AND p.status IN ('intl_transit', 'cn_arrived')
+          AND EXISTS (SELECT 1 FROM items i WHERE i.package_id = p.id)
+        ORDER BY p.id DESC LIMIT 20`,
+    )
+    .all();
+
   return c.json({
+    shippedBoxes: shippedBoxes.results,
     selfReturn,
     inbound: batches.map((b) => ({
       ...b,
@@ -179,6 +192,25 @@ jpRoutes.get('/overview', async (c) => {
     direct,
   });
 });
+
+const MAX_BOX_WEIGHT_G = 100_000; // 回国箱一般 30 kg 以内，100 kg 再多就是多打了零
+const MAX_CARTONS = 20;
+
+/** 整箱重量（克）：空就是没称；可以填 12.5kg 这种写法的数字由前端换算好再传克。 */
+export function boxWeight(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n <= 0) throw badRequest('整箱重量要填正整数（克）');
+  if (n > MAX_BOX_WEIGHT_G) throw badRequest(`整箱重量 ${n} 克超过 100 kg 了，检查一下是不是多打了零`);
+  return n;
+}
+
+export function cartonCount(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1 || n > MAX_CARTONS) throw badRequest(`箱数要填 1 到 ${MAX_CARTONS}`);
+  return n;
+}
 
 /** 地址快照（JSON）→ 一行能抄到面单上的字 */
 export function addressText(snapshot: string): string {
@@ -196,7 +228,7 @@ jpRoutes.get('/boxes/:id', async (c) => {
   const db = c.env.DB;
   const box = await db
     .prepare(
-      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.status, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount,
+      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.status, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount,
               p.created_at AS createdAt,
               (SELECT GROUP_CONCAT(b.name, '、') FROM package_batches pb JOIN batches b ON b.id = pb.batch_id WHERE pb.package_id = p.id) AS batchNames
          FROM packages p WHERE p.id = ?`,
@@ -478,8 +510,10 @@ jpRoutes.post('/unreceive', async (c) => {
  */
 jpRoutes.post('/boxes/:id/ship', async (c) => {
   const id = requireInt(c.req.param('id'), '回国箱 ID');
-  const body = await readJson<{ trackingNo?: unknown }>(c);
+  const body = await readJson<{ trackingNo?: unknown; weightG?: unknown; cartons?: unknown }>(c);
   const trackingNo = bound(requireString(body.trackingNo, '回国单号'), '回国单号', 60) as string;
+  const weightG = boxWeight(body.weightG);
+  const cartons = cartonCount(body.cartons) ?? 1;
   const db = c.env.DB;
   const pkg = await db
     .prepare('SELECT id, status, allocated_at AS allocatedAt FROM packages WHERE id = ?')
@@ -507,11 +541,46 @@ jpRoutes.post('/boxes/:id/ship', async (c) => {
   if (!items.results.length) throw badRequest('箱子是空的，没东西可发');
   const at = nowIso();
   await db.batch([
-    db.prepare("UPDATE packages SET status = 'intl_transit', tracking_no = ? WHERE id = ?").bind(trackingNo, id),
+    db
+      .prepare("UPDATE packages SET status = 'intl_transit', tracking_no = ?, jp_weight_g = COALESCE(?, jp_weight_g), carton_count = ? WHERE id = ?")
+      .bind(trackingNo, weightG, cartons, id),
     ...items.results.flatMap((i) => [
       db.prepare("UPDATE items SET status = 'intl_transit', updated_at = ? WHERE id = ?").bind(at, i.id),
       statusLogStmt(db, i.id, i.status, 'intl_transit', at, staffOf(c).name),
     ]),
   ]);
   return c.json({ ok: true, count: items.results.length });
+});
+
+/**
+ * 补填 / 改回国箱的单号、整箱重量、箱数：发出之后才称、或者填错了都能改，
+ * 一直到国内称重分摊之前（分摊后这些就是账了，要改先撤销分摊）。
+ */
+jpRoutes.post('/boxes/:id/info', async (c) => {
+  const id = requireInt(c.req.param('id'), '回国箱 ID');
+  const body = await readJson<{ trackingNo?: unknown; weightG?: unknown; cartons?: unknown }>(c);
+  const db = c.env.DB;
+  const pkg = await db
+    .prepare('SELECT id, allocated_at AS allocatedAt FROM packages WHERE id = ?')
+    .bind(id)
+    .first<{ id: number; allocatedAt: string | null }>();
+  if (!pkg) throw notFound('没有这个回国箱');
+  if (pkg.allocatedAt) throw badRequest('这一箱国内已经称重分摊过了，重量和箱数不能再改');
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  if (body.trackingNo !== undefined) {
+    sets.push('tracking_no = ?');
+    values.push(bound(optionalString(body.trackingNo), '回国单号', 60));
+  }
+  if (body.weightG !== undefined) {
+    sets.push('jp_weight_g = ?');
+    values.push(boxWeight(body.weightG));
+  }
+  if (body.cartons !== undefined) {
+    sets.push('carton_count = ?');
+    values.push(cartonCount(body.cartons));
+  }
+  if (!sets.length) throw badRequest('没有要改的');
+  await db.prepare(`UPDATE packages SET ${sets.join(', ')} WHERE id = ?`).bind(...values, id).run();
+  return c.json({ ok: true });
 });

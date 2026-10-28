@@ -1,4 +1,5 @@
 import { api } from '/admin/api.js';
+import { kgToGrams } from '/admin/ui.js';
 import { confirmBox, escapeHtml, itemCode, money, thumb, toast } from '/admin/ui.js';
 import { bindItemDetails } from '/admin/itemDetail.js';
 
@@ -280,6 +281,8 @@ export async function render(view, [batchId]) {
             return `<div class="box-row">
               <b>第 ${idx + 1} 箱</b>
               <input class="mono" data-box-tn="${idx}" value="${escapeHtml(b.trackingNo || '')}" placeholder="回国单号">
+              <input class="box-num" data-box-kg="${idx}" inputmode="decimal" value="${escapeHtml(b.kg || '')}" placeholder="整箱 kg">
+              <input class="box-num" data-box-cartons="${idx}" inputmode="numeric" value="${escapeHtml(b.cartons || '')}" placeholder="几箱">
               <span class="small muted">${inBox.length} 件 · ${new Set(inBox.map((i) => i.customerId)).size} 人</span>
               ${n > 1 ? `<button class="small plain" data-del-box="${idx}">删掉</button>` : ''}
             </div>`;
@@ -375,6 +378,18 @@ export async function render(view, [batchId]) {
         persist();
       };
     });
+    view.querySelectorAll('[data-box-kg]').forEach((el) => {
+      el.oninput = () => {
+        state.boxes[Number(el.dataset.boxKg)].kg = el.value.trim();
+        persist();
+      };
+    });
+    view.querySelectorAll('[data-box-cartons]').forEach((el) => {
+      el.oninput = () => {
+        state.boxes[Number(el.dataset.boxCartons)].cartons = el.value.trim();
+        persist();
+      };
+    });
     view.querySelector('#add-box')?.addEventListener('click', () => {
       state.boxes.push({ trackingNo: '' });
       rerender();
@@ -434,7 +449,7 @@ export async function render(view, [batchId]) {
         for (const i of groupItems) assign[i.id] = boxOfItem(i);
         const r = await api.post(`/api/staff/sort/${batchId}/commit`, {
           trackingNo: state.trackingNo || null,
-          boxes: state.boxes.map((b) => ({ trackingNo: b.trackingNo || null })),
+          boxes: state.boxes.map((b) => ({ trackingNo: b.trackingNo || null, weightG: kgToGrams(b.kg), cartons: b.cartons ? Number(b.cartons) : null })),
           assign,
           direct: directPeople.map((p) => ({
             customerId: p.customerId,

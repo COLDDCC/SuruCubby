@@ -70,6 +70,13 @@ export async function render(view, [id]) {
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
+      ${
+        pkg.jpWeightG || pkg.cartonCount
+          ? `<p class="small">日本仓封箱时：${pkg.jpWeightG ? `整箱 <b>${(pkg.jpWeightG / 1000).toFixed(2)} kg</b>` : '没称'}${
+              pkg.cartonCount ? ` · <b>${pkg.cartonCount}</b> 箱` : ''
+            } <span class="muted">（和这边各摞合计对一下，差太多就是少了一箱或者有件没认领）</span></p>`
+          : ''
+      }
       <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。<strong>不用等全箱称完</strong>：哪一摞称好了就先「算分摊」那一摞，那个人马上就能申请发货，剩下的人称好了再算一次，账各记各的。已经算过运费的那几摞要改，得先「撤销分摊」。<strong>已经寄出或签收的件不在这台秤上</strong>（进度、认领、分摊都不算它们），改回拼邮也不会再收一次运费。</p>
       ${
         p.unclaimedItems > 0
