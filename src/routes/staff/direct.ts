@@ -163,6 +163,14 @@ directStaffRoutes.get('/parcels', async (c) => {
   return c.json({ parcels, labels: PARCEL_LABELS, priceFenPerKg: await directPriceFenPerKg(c.env) });
 });
 
+/** 一个直邮包裹（打印打包单用）。 */
+directStaffRoutes.get('/parcels/:id', async (c) => {
+  const id = requireInt(c.req.param('id'), '包裹 ID');
+  const [parcel] = await loadParcels(c.env.DB, 'WHERE d.id = ?', [id]);
+  if (!parcel) throw notFound('没有这个直邮包裹');
+  return c.json({ parcel });
+});
+
 /** 打包：选一位客户的几件直邮货装成一包；带上重量就顺手称好、直接变「待付款」。 */
 directStaffRoutes.post('/parcels', async (c) => {
   const body = await readJson<{ customerId?: unknown; itemIds?: unknown; weightG?: unknown }>(c);

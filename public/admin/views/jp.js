@@ -107,7 +107,8 @@ function queueHtml(queue) {
             (x) => `<a class="queue-row" href="#/sort/${b.batchId}?tn=${encodeURIComponent(x.trackingNo)}">
               <span><span class="small muted">日本运单</span> <b class="mono">${escapeHtml(x.trackingNo)}</b></span>
               <span class="small">${x.count} 件${x.found ? ` · 已点 ${x.found}` : ''}${b.untracked ? ` <span class="muted">+ 没写运单号的 ${b.untracked}</span>` : ''}</span>
-              <span class="btn small">分拣这一箱 →</span></a>`,
+              <span class="btn small">分拣这一箱 →</span></a>
+            <a class="small queue-print" href="#/print/sort/${b.batchId}?tn=${encodeURIComponent(x.trackingNo)}">打印这一箱的分拣单</a>`,
           )
           .join('')}
         ${
@@ -137,7 +138,8 @@ function boxesHtml(list) {
       return `<div class="card" data-box="${b.id}">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0">${escapeHtml(b.name)}</h3>
-          <span class="small">已签收 <b>${b.received}</b> · 未签收 <b class="${b.waiting ? 'unpaid' : ''}">${b.waiting}</b></span>
+          <span class="small">已签收 <b>${b.received}</b> · 未签收 <b class="${b.waiting ? 'unpaid' : ''}">${b.waiting}</b>
+            · <a href="#/print/box/${b.id}">打印装箱单</a></span>
         </div>
         <details ${b.items.length <= 12 ? 'open' : ''}><summary>箱里 ${b.items.length} 件</summary>
           <div class="jp-list">${b.items
@@ -181,10 +183,14 @@ function directHtml(list) {
       (g) => `<div class="card" data-customer="${g.customerId}">
         <div class="row" style="justify-content:space-between">
           <h3 style="margin:0">${escapeHtml(g.nickname)} <span class="small muted">${g.items.length} 件</span></h3>
-          <span class="small ${g.addressReady ? 'paid' : 'unpaid'}">${
-            g.addressReady ? (g.addressSource === 'import' ? '地址：导入表里有' : '地址：客户已选') : '还没有地址'
-          }</span>
+          <a class="small" href="#/print/direct?customer=${g.customerId}">打印打包单</a>
         </div>
+        ${
+          g.address
+            ? `<div class="jp-addr"><span class="small muted">${g.addressSource === 'import' ? '寄到（导入表）' : '寄到（客户选的）'}</span>
+                <div>${escapeHtml(g.address)} <button type="button" class="small plain" data-copy="${escapeHtml(g.address)}">复制</button></div></div>`
+            : `<p class="small unpaid">${escapeHtml(g.addressProblem || '还没有地址')}</p>`
+        }
         <div class="jp-list">${g.items.map((i) => itemRow(i, { pick: true, checked: true, route: false, fix: true })).join('')}</div>
         ${
           g.addressReady
@@ -192,7 +198,7 @@ function directHtml(list) {
                 <input data-weight="${g.customerId}" inputmode="numeric" placeholder="重量（克，可以先空着）">
                 <button data-action="pack" data-customer="${g.customerId}">把勾上的打成一包</button>
               </div>`
-            : '<p class="small muted">导入表里没写地址，客户也还没选。请客户在自己的页面上填一个收货地址（只存一个就自动用它），这里就能打包了。</p>'
+            : '<p class="small muted">请客户在自己的页面上填一个收货地址（只存一个就自动用它），这里就能打包了。</p>'
         }
       </div>`,
     )

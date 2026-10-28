@@ -14,7 +14,7 @@ const sheet = document.getElementById('more-sheet');
 const NAV = [
   { href: '#/', label: '待办', roles: ['admin'], primary: true },
   // also：不在菜单上、但属于这一项的页面（分拣页、分拣结果），点亮菜单和权限都按它算
-  { href: '#/jp', label: '日本仓', roles: ['admin', 'jp'], primary: true, also: ['/sort', '/sort-result'] },
+  { href: '#/jp', label: '日本仓', roles: ['admin', 'jp'], primary: true, also: ['/sort', '/sort-result', '/print'] },
   { href: '#/import', label: '导入', roles: ['admin'] },
   { href: '#/batches', label: '订单', roles: ['admin'] },
   { href: '#/packages', label: '包裹', roles: ['admin'], primary: true },
@@ -70,6 +70,8 @@ const routes = [
   {pattern:/^\/requests$/, module:()=>import('/admin/views/requests.js')},
   { pattern: /^\/?$/, module: () => import('/admin/views/dashboard.js') },
   { pattern: /^\/import$/, module: () => import('/admin/views/import.js') },
+  { pattern: /^\/print\/(box|sort|parcel)\/(\d+)$/, module: () => import('/admin/views/print.js') },
+  { pattern: /^\/print\/(direct)$/, module: () => import('/admin/views/print.js') },
   { pattern: /^\/batches$/, module: () => import('/admin/views/batches.js') },
   { pattern: /^\/batches\/(\d+)$/, module: () => import('/admin/views/batch.js') },
   { pattern: /^\/packages$/, module: () => import('/admin/views/packages.js') },

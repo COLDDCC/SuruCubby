@@ -73,7 +73,8 @@ function parcelCard(p, isAdmin, priceFenPerKg) {
     </div>
     <div class="addr">
       <span class="small muted">${p.addressSource === 'import' ? '寄到（导入表）' : '寄到（客户选的）'}</span>
-      <div>${escapeHtml(addr)} <button class="small plain" data-copy="${escapeHtml(addr)}">复制地址</button></div>
+      <div>${escapeHtml(addr)} <button class="small plain" data-copy="${escapeHtml(addr)}">复制地址</button>
+        <a class="small" href="#/print/parcel/${p.id}">打印打包单</a></div>
     </div>
     ${
       p.trackingNo && !['shipped', 'delivered'].includes(p.status)

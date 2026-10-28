@@ -12,6 +12,7 @@ import { placeholders } from '../../lib/http.ts';
 import { staffOf } from '../../lib/staff.ts';
 import { normalizeTrackingNo } from '../../lib/excel.ts';
 import { arriveStmts, registerStmts } from '../../lib/jpShipments.ts';
+import { resolveAddress } from './direct.ts';
 
 export const jpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -127,20 +128,30 @@ jpRoutes.get('/overview', async (c) => {
           .all<{ customerId: number; n: number; chosen: number }>()
       ).results
     : [];
-  const direct = customerIds.map((customerId) => {
+  // 打包前就要看到寄哪：地址的着落和打包时同一套规则（导入表写了 > 客户选定了 > 客户只存了一个地址）
+  const direct = [];
+  for (const customerId of customerIds) {
     const list = directRows.results.filter((i) => i.customerId === customerId);
     const counts = addressCounts.find((a) => a.customerId === customerId);
-    const importAddress = list.find((i) => i.importAddress)?.importAddress ?? null;
-    // 地址的着落：导入表写了 > 客户选定了 > 客户只存了一个地址（自动用它）
-    const addressReady = !!importAddress || !!counts?.chosen || counts?.n === 1;
-    return {
+    const importAddresses = list.map((i) => i.importAddress).filter((a): a is string => !!a);
+    let address: string | null = null;
+    let addressProblem: string | null = null;
+    try {
+      const resolved = await resolveAddress(db, customerId, importAddresses);
+      address = addressText(resolved.snapshot);
+    } catch (err) {
+      addressProblem = err instanceof Error ? err.message : '地址没着落';
+    }
+    direct.push({
       customerId,
       nickname: list[0].nickname,
-      addressReady,
-      addressSource: importAddress ? 'import' : counts?.chosen || counts?.n === 1 ? 'customer' : null,
+      addressReady: !!address,
+      addressSource: importAddresses.length ? 'import' : counts?.chosen || counts?.n === 1 ? 'customer' : null,
+      address,
+      addressProblem,
       items: list.map(shape),
-    };
-  });
+    });
+  }
 
   // 不拼邮（自己带回国 / 另找转运）：已签收、不在任何箱子和直邮包裹里，按人放一边等他来拿
   const selfRows = await db
@@ -167,6 +178,42 @@ jpRoutes.get('/overview', async (c) => {
     })),
     direct,
   });
+});
+
+/** 地址快照（JSON）→ 一行能抄到面单上的字 */
+export function addressText(snapshot: string): string {
+  try {
+    const a = JSON.parse(snapshot) as { raw?: string; recipient?: string; phone?: string; detail?: string };
+    return a.raw ?? [a.recipient, a.phone, a.detail].filter(Boolean).join(' ');
+  } catch {
+    return snapshot;
+  }
+}
+
+/** 一个回国箱的装箱单：箱里每件、按 cn 排好，打印出来贴箱 / 对货用。 */
+jpRoutes.get('/boxes/:id', async (c) => {
+  const id = requireInt(c.req.param('id'), '回国箱 ID');
+  const db = c.env.DB;
+  const box = await db
+    .prepare(
+      `SELECT p.id, p.name, p.tracking_no AS trackingNo, p.status, p.jp_weight_g AS jpWeightG, p.carton_count AS cartonCount,
+              p.created_at AS createdAt,
+              (SELECT GROUP_CONCAT(b.name, '、') FROM package_batches pb JOIN batches b ON b.id = pb.batch_id WHERE pb.package_id = p.id) AS batchNames
+         FROM packages p WHERE p.id = ?`,
+    )
+    .bind(id)
+    .first();
+  if (!box) throw notFound('没有这个回国箱');
+  const items = await db
+    .prepare(
+      `SELECT ${ITEM_COLUMNS}, COALESCE(NULLIF(TRIM(i.cn_label), ''), c.nickname) AS cn
+         FROM items i JOIN customers c ON c.id = i.customer_id
+        WHERE i.package_id = ? AND i.status NOT IN ('cancelled', 'refunded')
+        ORDER BY cn COLLATE NOCASE, i.customer_id, i.id`,
+    )
+    .bind(id)
+    .all<JpItem & { cn: string }>();
+  return c.json({ box, items: items.results.map((i) => ({ ...shape(i), cn: i.cn })) });
 });
 
 /** 回国箱里还没签收的件都签收了，箱子状态跟着变成「已到日本仓」。 */

@@ -174,3 +174,34 @@ test('④ 不拼邮的件签收后放一边，不在回国箱里；误放进箱�
   const notSelf = await ctx.jp.post('/api/staff/jp/set-aside', { itemIds: [ctx.item['拼团画集'].id] }, { raw: true });
   assert.equal(notSelf.status, 400, '拼邮的件不让拿出来');
 });
+
+test('⑤ 打包前就看得到寄到哪；装箱单、打包单的数据接口', async () => {
+  let ov = await ctx.jp.get('/api/staff/jp/overview');
+  const directItem = ctx.item['直邮色纸'].id;
+  // 前面把直邮色纸标过缺件又找回来了，现在还没签收：分拣快递 A 再签一次
+  await sortBox(TN_A, { boxes: [], found: ['直邮色纸'] });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  let g = ov.direct.find((x) => x.items.some((i) => i.id === directItem));
+  assert.equal(g.address, null);
+  assert.match(g.addressProblem, /还没有收货地址/);
+  // 客户填了地址：待打包直邮里直接看到整行地址
+  let cust = new Client();
+  let r = await cust.post('/api/w/login', { qq: Q.d, password: '123456' });
+  await cust.post(`/api/w/${r.token}/password`, { oldPassword: '123456', newPassword: 'mypass-888' });
+  cust = new Client();
+  r = await cust.post('/api/w/login', { qq: Q.d, password: 'mypass-888' });
+  await cust.post(`/api/w/${r.token}/addresses`, { recipient: '山田', phone: '090-0000-1111', detail: '东京都新宿区1-2-3' });
+  ov = await ctx.jp.get('/api/staff/jp/overview');
+  g = ov.direct.find((x) => x.items.some((i) => i.id === directItem));
+  assert.equal(g.address, '山田 090-0000-1111 东京都新宿区1-2-3');
+
+  const box = await ctx.jp.get(`/api/staff/jp/boxes/${ctx.boxB}`);
+  assert.deepEqual(box.items.map((i) => i.title), ['拼团画集']);
+  assert.equal(box.items[0].cn, N.g);
+
+  const parcel = await ctx.jp.post('/api/staff/direct/parcels', { customerId: g.customerId, itemIds: [directItem], weightG: 800 });
+  ctx.parcelId = parcel.id;
+  const p = await ctx.jp.get(`/api/staff/direct/parcels/${parcel.id}`);
+  assert.equal(p.parcel.address.detail, '东京都新宿区1-2-3');
+  assert.deepEqual(p.parcel.items.map((i) => i.title), ['直邮色纸']);
+});
