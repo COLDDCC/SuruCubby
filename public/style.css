@@ -1648,4 +1648,65 @@ body.has-tabbar .sort-bar {
   margin: 6px 0 0;
   padding-left: 18px;
   font-size: 13px;
+/* 订单总览 */
+.order-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.order-row {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  display: grid;
+  gap: 4px;
+}
+.order-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.order-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.order-money {
+  text-align: right;
+  white-space: nowrap;
+}
+.order-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
+  margin: 4px 0;
+}
+.order-bar .seg {
+  background: var(--muted);
+  opacity: 0.55;
+}
+.order-bar .seg.ok {
+  background: var(--ok);
+  opacity: 1;
+}
+.order-bar .seg.warn {
+  background: var(--warn);
+  opacity: 1;
+}
+.order-bar .seg.danger {
+  background: var(--danger);
+  opacity: 1;
+}
+.order-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  overflow-wrap: anywhere;
 }

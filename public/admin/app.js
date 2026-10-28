@@ -16,7 +16,7 @@ const NAV = [
   // also：不在菜单上、但属于这一项的页面（分拣页、分拣结果），点亮菜单和权限都按它算
   { href: '#/jp', label: '日本仓', roles: ['admin', 'jp'], primary: true, also: ['/sort', '/sort-result'] },
   { href: '#/import', label: '导入', roles: ['admin'] },
-  { href: '#/batches', label: '批次', roles: ['admin'] },
+  { href: '#/batches', label: '订单', roles: ['admin'] },
   { href: '#/packages', label: '包裹', roles: ['admin'], primary: true },
   { href: '#/customers', label: '客户', roles: ['admin'], primary: true },
   { href: '#/requests', label: '发货申请', roles: ['admin'] },

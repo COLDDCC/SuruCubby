@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow, normalizeTrackingNo, parseDateCell } from '../../lib/excel.ts';
-import { badRequest, optionalString, readJson, requireString } from '../../lib/http.ts';
+import { badRequest, bound, optionalString, readJson, requireString } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
 import { randomToken } from '../../lib/crypto.ts';
 import type { FieldKey } from '../../lib/excel.ts';
@@ -132,7 +132,13 @@ importRoutes.post('/preview', async (c) => {
 importRoutes.post('/commit', async (c) => {
   const body = await readJson<CommitBody>(c);
   const sheet = requireSheet(body);
-  const batchName = requireString(body.batchName, '批次名');
+  // 和后台改名/改单号同一套上限：导入这条路以前不卡，粘一整页进来能直接入库
+  const batchName = bound(requireString(body.batchName, '批次名'), '批次名', 60) as string;
+  const orderNo = bound(optionalString(body.orderNo), '日本订单号', 60);
+  const japanTrackingNo = bound(optionalString(body.japanTrackingNo), '日本物流单号', 60);
+  const packageNameInput = bound(optionalString(body.packageName), '包裹名', 60);
+  const orderedAtInput = bound(optionalString(body.orderedAt), '下单日期', 30);
+  const fileName = bound(optionalString(body.fileName), '文件名', 200);
   const parsed = parseSheet(sheet, { columns: columnOverrides(body) });
   if (parsed.missingColumns.length > 0) {
     throw badRequest(`表头缺少这些列：${parsed.missingColumns.join('、')}`);
@@ -268,16 +274,16 @@ importRoutes.post('/commit', async (c) => {
 
   const batchId = await nextId(db, 'batches');
   const packageId = await nextId(db, 'packages');
-  const packageName = optionalString(body.packageName) ?? batchName;
+  const packageName = packageNameInput ?? batchName;
   // 下单日期：导入页填的为准（默认当天，东京时间）；表里有「下单时间」列的件另记在件上
-  const orderedAt = parseDateCell(optionalString(body.orderedAt)) ?? new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  const orderedAt = parseDateCell(orderedAtInput) ?? new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 
   statements.push(
     db
       .prepare(
         'INSERT INTO batches (id, name, ordered_at, source_file, file_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .bind(batchId, batchName, orderedAt, optionalString(body.fileName), fileHash, now),
+      .bind(batchId, batchName, orderedAt, fileName, fileHash, now),
     db
       .prepare('INSERT INTO packages (id, name, status, created_at) VALUES (?, ?, ?, ?)')
       .bind(packageId, packageName, 'ordered', now),
@@ -328,7 +334,7 @@ importRoutes.post('/commit', async (c) => {
   statements.push(
     db
       .prepare('UPDATE batches SET order_no=?,japan_tracking_no=? WHERE id=?')
-      .bind(optionalString(body.orderNo), normalizeTrackingNo(optionalString(body.japanTrackingNo)), batchId),
+      .bind(orderNo, normalizeTrackingNo(japanTrackingNo), batchId),
   );
   await db.batch(statements);
 
