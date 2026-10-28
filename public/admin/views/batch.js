@@ -68,6 +68,7 @@ export async function render(view, [id]) {
 
   view.innerHTML = `
     <div class="card">
+      <p class="small" style="margin:0"><a href="#/batches">← 全部订单</a></p>
       <h2>${escapeHtml(data.batch.name)}</h2>
       <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
       <p class="small muted">

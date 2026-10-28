@@ -1814,3 +1814,48 @@ test('脏输入不能变成钱，也不能悄悄存进去：单价上限、超�
   );
   assert.equal(removeFromOther.status, 400, '这件已经在别的箱子里，不能从这一箱移出');
 });
+
+test('订单总览：每一单都列出来，带单号、人数、各状态件数、包裹', async () => {
+  const name = `总览${stamp}`;
+  const added = await call('POST', '/api/admin/import/commit', {
+    batchName: name,
+    fileHash: name,
+    orderNo: `JP-${stamp}`,
+    sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['一件', name, 100], ['两件', name, 200]] },
+    assignments: [{ cn: name, newCustomer: { qq: `${stamp + 41}`.slice(-9), nickname: name } }],
+  });
+  const { batches } = await call('GET', '/api/admin/batches');
+  const row = batches.find((b) => b.id === added.batchId);
+  assert.ok(row, '刚录的订单要在列表里');
+  assert.equal(row.orderNo, `JP-${stamp}`);
+  assert.equal(row.japanTrackingNo, null);
+  assert.equal(row.itemCount, 2);
+  assert.equal(row.customerCount, 1);
+  assert.equal(row.amountJpy, 300);
+  assert.equal(row.unpaidJpy, 300);
+  assert.deepEqual(row.statusCounts, { ordered: 2 });
+  assert.equal(row.packages.length, 1);
+  assert.deepEqual(row.customers, [name]);
+  assert.equal(batches[0].id >= row.id, true, '新的排前面');
+
+  // 单号填错了能清空；不存在的订单不许回 ok；超长单号拦住
+  await call('PATCH', `/api/admin/batches/${added.batchId}`, { japanTrackingNo: 'WRONG' });
+  await call('PATCH', `/api/admin/batches/${added.batchId}`, { japanTrackingNo: '' });
+  const detail = await call('GET', `/api/admin/batches/${added.batchId}`);
+  assert.equal(detail.batch.japanTrackingNo, null);
+  assert.equal(detail.batch.orderNo, `JP-${stamp}`, '只改日本单号时订单号不能被顺手清掉');
+  assert.equal((await call('PATCH', '/api/admin/batches/99999999', { orderNo: 'x' }, { raw: true })).status, 404);
+  const long = await call('PATCH', `/api/admin/batches/${added.batchId}`, { orderNo: 'x'.repeat(61) }, { raw: true });
+  assert.equal(long.status, 400);
+  const longImport = await call(
+    'POST',
+    '/api/admin/import/commit',
+    {
+      batchName: 'y'.repeat(61),
+      fileHash: `${name}-long`,
+      sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['一件', name, 100]] },
+    },
+    { raw: true },
+  );
+  assert.equal(longImport.status, 400);
+});
