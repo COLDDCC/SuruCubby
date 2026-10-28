@@ -1822,7 +1822,7 @@ test('订单总览：每一单都列出来，带单号、人数、各状态件�
     fileHash: name,
     orderNo: `JP-${stamp}`,
     sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['一件', name, 100], ['两件', name, 200]] },
-    assignments: [{ cn: name, newCustomer: { qq: `${stamp + 41}`.slice(-9), nickname: name } }],
+    assignments: [{ cn: name, newCustomer: { qq: `${stamp + 977}`.slice(-9), nickname: name } }],
   });
   const { batches } = await call('GET', '/api/admin/batches');
   const row = batches.find((b) => b.id === added.batchId);
