@@ -1,13 +1,21 @@
-/* 手机优先的基础样式，后台和客户页共用 */
+/* 手机优先的基础样式，后台和客户页共用。
+   整站一套天蓝：天蓝顶栏 + 微蓝底 + 带蓝的卡片阴影，
+   变量名不变，JS/HTML 不用动，改这一份就够了。 */
 :root {
-  --bg: #f5f6f8;
-  --card: #fdfdfc;
-  --text: #1c1f23;
-  --muted: #6b7280;
-  --line: #e5e7eb;
+  /* 页面底色往天蓝偏一档，不再是纯灰；顶栏那层「霞光」由 --sky-wash 铺 */
+  --bg: #eaf4fb;
+  --sky-wash: #d9ecfa;
+  --card: #fbfdff;
+  /* 卡片里的第二层底（表头、统计卡渐变末端），比卡片再深一点点 */
+  --card-2: #eef6fd;
+  --text: #14222e;
+  --muted: #5c7284;
+  --line: #d5e6f2;
   /* 天蓝底配深墨字：#0ea5e9 + 白字只有 2.7:1，看不清 */
   --brand: #0ea5e9;
-  --brand-ink: #0a6f96;
+  --brand-strong: #0284c7;
+  --brand-ink: #0369a1;
+  --brand-line: #bfdff2;
   --on-brand: #0a2e42;
   --danger: #c92f2f;
   --danger-bg: #fceaea;
@@ -17,18 +25,22 @@
   --ok-bg: #d8f2e3;
   --warn: #96621a;
   --warn-bg: #fdf3d7;
-  --radius: 12px;
+  --radius: 14px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14161a;
-    --card: #1d2026;
-    --text: #e8eaed;
-    --muted: #9aa1ab;
-    --line: #2e333b;
+    --bg: #0c1520;
+    --sky-wash: rgba(14, 165, 233, 0.1);
+    --card: #15212e;
+    --card-2: #1b2a3a;
+    --text: #e8eff7;
+    --muted: #93a8bb;
+    --line: #27394b;
     --brand: #0ea5e9;
+    --brand-strong: #0284c7;
     --brand-ink: #7dd3fc;
+    --brand-line: rgba(14, 165, 233, 0.45);
     /* 深底上要换成亮色才看得清；胶囊底跟着改成同色的半透明，
        不然浅色胶囊压在深卡上像贴了张白纸 */
     --danger: #ff8f8f;
@@ -51,7 +63,10 @@
 body {
   margin: 0;
   padding: 0 0 48px;
-  background: var(--bg);
+  background-color: var(--bg);
+  /* 顶上一段天蓝霞光，往下淡出成底色，页面一开就有天蓝味 */
+  background-image: linear-gradient(180deg, var(--sky-wash) 0, transparent 420px);
+  background-repeat: no-repeat;
   color: var(--text);
   font:
     15px/1.6 -apple-system,
@@ -62,6 +77,10 @@ body {
     Arial,
     sans-serif;
   -webkit-text-size-adjust: 100%;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.28);
 }
 
 a {
@@ -90,20 +109,27 @@ h3 {
   padding: 16px;
 }
 
+/* 顶栏：整条天蓝渐变。白字压在天蓝上只有 2.7:1，所以字一律用深墨；
+   选中的那一项翻成白胶囊，才跳得出来 */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--card);
-  border-bottom: 1px solid var(--line);
+  background-color: var(--brand);
+  background-image: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
+  border-bottom: 1px solid #0b98d6;
+  box-shadow: 0 8px 22px -12px rgba(3, 105, 161, 0.65);
   padding: 10px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  color: var(--on-brand);
 }
 .topbar .brand {
   font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--on-brand);
 }
 .topbar nav {
   display: flex;
@@ -113,13 +139,23 @@ h3 {
 }
 .topbar nav a {
   padding: 6px 10px;
-  border-radius: 8px;
-  color: var(--muted);
+  border-radius: 999px;
+  color: var(--on-brand);
   white-space: nowrap;
 }
+.topbar nav a:not(.active):hover {
+  background: rgba(255, 255, 255, 0.35);
+}
 .topbar nav a.active {
-  background: var(--brand);
+  background: #fff;
+  color: var(--brand-ink);
+  box-shadow: 0 2px 6px rgba(3, 105, 161, 0.3);
+}
+/* 退出按钮也是深墨字 + 半白底，压在渐变上才看得见 */
+.topbar button.plain {
+  background: rgba(255, 255, 255, 0.85);
   color: var(--on-brand);
+  border-color: rgba(255, 255, 255, 0.9);
 }
 
 .card {
@@ -128,6 +164,7 @@ h3 {
   border-radius: var(--radius);
   padding: 14px;
   margin-bottom: 14px;
+  box-shadow: 0 10px 26px -20px rgba(3, 105, 161, 0.5);
 }
 .card > h2:first-child,
 .card > h3:first-child {
@@ -141,10 +178,11 @@ h3 {
 }
 
 .stat {
-  background: var(--card);
+  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
+  box-shadow: 0 10px 26px -22px rgba(3, 105, 161, 0.55);
 }
 .stat .label {
   color: var(--muted);
@@ -154,6 +192,9 @@ h3 {
   font-size: 22px;
   font-weight: 700;
   margin-top: 4px;
+}
+.stat.big {
+  border-color: var(--brand-line);
 }
 .stat.big .value {
   font-size: 28px;
@@ -165,11 +206,17 @@ button,
   font: inherit;
   white-space: nowrap;
   padding: 8px 14px;
-  border-radius: 9px;
-  border: 1px solid var(--brand);
-  background: var(--brand);
+  border-radius: 10px;
+  border: 1px solid var(--brand-strong);
+  background-color: var(--brand);
+  background-image: linear-gradient(180deg, #29b4f0 0%, #0ea5e9 100%);
   color: var(--on-brand);
   cursor: pointer;
+  box-shadow: 0 4px 12px -6px rgba(3, 105, 161, 0.6);
+}
+button:hover:not(:disabled),
+.btn:hover {
+  background-image: linear-gradient(180deg, #3ac0f5 0%, #1aa9ea 100%);
 }
 button:disabled {
   opacity: 0.5;
@@ -178,15 +225,21 @@ button:disabled {
 button.ghost,
 .btn.ghost {
   background: transparent;
+  background-image: none;
   color: var(--brand-ink);
+  border-color: var(--brand);
+  box-shadow: none;
 }
 button.plain {
   background: transparent;
+  background-image: none;
   color: var(--muted);
   border-color: var(--line);
+  box-shadow: none;
 }
 button.danger {
-  background: var(--danger);
+  background-color: var(--danger);
+  background-image: none;
   border-color: var(--danger);
   color: #fff;
 }
@@ -201,10 +254,17 @@ textarea {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--card);
   color: var(--text);
   max-width: 100%;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-color: var(--brand);
 }
 label {
   display: block;
@@ -232,7 +292,7 @@ td {
   vertical-align: middle;
 }
 th {
-  color: var(--muted);
+  color: var(--brand-ink);
   font-weight: 600;
   font-size: 13px;
 }
@@ -264,6 +324,28 @@ th {
 .badge.danger {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* 单号和店铺是拿去群里对货的短串，排在货号底下，点一下就复制 */
+button.copy-chip {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 1px 8px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+button.copy-chip:hover {
+  border-color: var(--brand);
+  border-style: solid;
+  color: var(--brand-ink);
+  background: var(--card-2);
+}
+button.copy-chip.mono {
+  font-family: ui-monospace, Consolas, Menlo, monospace;
 }
 
 .muted {
@@ -448,7 +530,7 @@ th {
   font-size: 12px;
   line-height: 1.5;
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--warn-bg);
   color: var(--text);
   text-decoration: none;
@@ -526,6 +608,7 @@ tr.hit > td {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px 12px;
+  box-shadow: 0 10px 26px -20px rgba(3, 105, 161, 0.5);
 }
 .rail label {
   margin: 0 0 6px;
@@ -543,7 +626,7 @@ tr.hit > td {
   text-decoration: none;
 }
 .rail-item:hover {
-  background: var(--bg);
+  background: var(--card-2);
 }
 .rail-text {
   display: flex;
@@ -616,9 +699,9 @@ tr.hit > td {
   right: 0;
   bottom: 0;
   z-index: 8;
-  background: var(--card);
-  border-top: 1px solid var(--line);
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+  border-top: 2px solid var(--brand);
+  box-shadow: 0 -10px 28px -12px rgba(3, 105, 161, 0.5);
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
 }
 .shipbar-inner {
@@ -668,7 +751,7 @@ body.has-shipbar {
   position: sticky;
   top: 0;
   z-index: 9;
-  background: var(--card);
+  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
   border-bottom: 1px solid var(--line);
   padding: 8px 12px;
   font-size: 14px;
@@ -682,13 +765,13 @@ body.has-shipbar {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  background: #22252b;
+  background: #0b2e44;
   color: #fff;
   padding: 10px 16px;
-  border-radius: 10px;
+  border-radius: 12px;
   max-width: 90vw;
   z-index: 100;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 10px 28px -8px rgba(3, 105, 161, 0.6);
 }
 .toast.err {
   background: var(--danger);
@@ -697,7 +780,7 @@ body.has-shipbar {
 .modal-back {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(4, 40, 64, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -712,6 +795,7 @@ body.has-shipbar {
   max-width: 520px;
   max-height: 85vh;
   overflow: auto;
+  box-shadow: 0 24px 60px -20px rgba(3, 105, 161, 0.6);
 }
 
 details summary {
