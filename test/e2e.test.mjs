@@ -397,6 +397,16 @@ test('设置里的金额：键名带 Yuan 按元收，带 Fen 按分收', async 
       `「${bad}」不是合法的分`,
     );
   }
+  // 「0.005 元」以前会被悄悄四舍五入成 1 分，这一分还会摊进整箱运费，谁都在纸上算不平
+  for (const bad of ['0.005', '12.345', '¥0.001']) {
+    const res = await call('POST', '/api/admin/settings', { domesticFeeYuan: bad }, { raw: true });
+    assert.equal(res.status, 400, `「${bad}」细于分，要拒绝而不是悄悄进位`);
+  }
+  const untouched = await call('GET', '/api/admin/settings');
+  assert.equal(untouched.domesticFeeFen, before.domesticFeeFen, '被拒的输入不该留下痕迹');
+  // 末尾多写的零不是精度问题，照旧收
+  assert.equal((await call('POST', '/api/admin/settings', { domesticFeeYuan: '12.340' })).domesticFeeFen, 1234);
+  await call('POST', '/api/admin/settings', { domesticFeeFen: before.domesticFeeFen });
 });
 
 test('分摊：¥100.00 / 三个 1000 g → 每人 ¥33.33，尾差 ¥0.01 记需求方', async () => {

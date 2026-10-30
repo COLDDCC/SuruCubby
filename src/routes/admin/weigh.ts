@@ -3,7 +3,7 @@ import type { Env } from '../../lib/env.ts';
 import { badRequest, bound, HttpError, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso, statusLogStmt, intlPriceFenPerKg, isSelfReturn } from '../../lib/db.ts';
 import { allocate, feeFromWeight, splitGroupFee } from '../../lib/allocate.ts';
-import { toFen } from '../../lib/money.ts';
+import { toFenStrict } from '../../lib/money.ts';
 
 export const weighRoutes = new Hono<{ Bindings: Env }>();
 
@@ -305,7 +305,8 @@ async function buildAllocation(env: Env, packageId: number, body: AllocateBody) 
   if (body.totalFeeFen !== undefined && body.totalFeeFen !== null && body.totalFeeFen !== '') {
     totalFeeFen = requireInt(body.totalFeeFen, '国际运费（分）');
   } else if (body.totalFeeYuan !== undefined && body.totalFeeYuan !== null && body.totalFeeYuan !== '') {
-    totalFeeFen = toFen(body.totalFeeYuan);
+    totalFeeFen = toFenStrict(body.totalFeeYuan);
+    if (totalFeeFen === null) throw badRequest('总运费最多填到分（小数点后两位）');
   }
   if (totalFeeFen !== null && totalFeeFen < 0) throw badRequest('国际运费不能是负数');
 

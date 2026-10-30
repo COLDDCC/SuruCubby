@@ -58,7 +58,11 @@ requestAdminRoutes.get('/',async c=>{
 requestAdminRoutes.post('/:id/paid',async c=>{
  const id=requireInt(c.req.param('id'),'申请 ID'),db=c.env.DB;
  const r=await db.prepare('SELECT * FROM shipping_requests WHERE id=?').bind(id).first<any>();
- if(!r||r.status!=='pending') throw badRequest('申请不存在或已经处理');
+ if(!r) throw notFound('申请不存在');
+ // 撤销过运费收款会留下「申请显示已确认、件却没收到钱」，直接说清下一步往哪点
+ if(r.status==='paid'&&await db.prepare('SELECT i.id FROM request_items ri JOIN items i ON i.id=ri.item_id WHERE ri.request_id=? AND i.intl_paid=0 LIMIT 1').bind(id).first())
+  throw badRequest('这一笔里有商品的国际运费收款被撤销了：到「收款」页重新收那一摞，或把这笔的国内运费收款也撤销、再重新确认');
+ if(r.status!=='pending') throw badRequest('申请不存在或已经处理');
  // International charges remain settled per customer/package, as in the existing ledger.
  const items=await db.prepare(`SELECT i.id,i.intl_fee_fen FROM request_items ri JOIN items i ON i.id=ri.item_id WHERE ri.request_id=? AND i.intl_paid=0`).bind(id).all<any>();
  let payment=await nextId(db,'payments');const at=nowIso(); const statements:D1PreparedStatement[]=[];

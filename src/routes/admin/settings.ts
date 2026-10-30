@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
 import { domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
-import { toFen } from '../../lib/money.ts';
+import { toFenStrict } from '../../lib/money.ts';
 
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -28,8 +28,8 @@ function capFen(fen: number, label: string, max: number): number {
 
 /** 页面上填的是「元」，进来先按元换算 */
 function yuanToFenValue(value: unknown, label: string): number {
-  const fen = toFen(value);
-  if (fen === null || fen < 0) throw badRequest(`${label}金额不合法`);
+  const fen = toFenStrict(value);
+  if (fen === null || fen < 0) throw badRequest(`${label}金额不合法，最多填到分（小数点后两位）`);
   return fen;
 }
 

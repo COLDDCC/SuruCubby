@@ -44,6 +44,20 @@ export function toFen(raw: unknown): number | null {
   return decimalToScaledInt(s, 2);
 }
 
+/**
+ * 群主手填的金额专用：比 toFen 多一道「只能到分」。
+ * 0.005 元这种会被四舍五入成 1 分，账上凭空多出一分钱，还会摊进整箱运费，
+ * 谁都不可能在纸上算平——所以宁可直接拒绝，让他填成型里写得出的数。
+ */
+export function toFenStrict(raw: unknown): number | null {
+  if (typeof raw === 'number' && !Number.isFinite(raw)) return null;
+  const text = typeof raw === 'number' ? raw.toFixed(6) : normalizeNumberText(raw);
+  if (text === '') return null;
+  const fraction = text.includes('.') ? text.split('.')[1].replace(/0+$/, '') : '';
+  if (fraction.length > 2) return null;
+  return decimalToScaledInt(text, 2);
+}
+
 /** 单元格 → 円（整数）。 */
 export function toJpy(raw: unknown): number | null {
   if (typeof raw === 'number') {
