@@ -46,6 +46,7 @@ interface CommitBody extends PreviewBody {
   batchName?: string;
   orderedAt?: string;
   orderNo?: string;
+  shop?: string;
   japanTrackingNo?: string;
   packageName?: string;
   confirmDuplicate?: boolean;
@@ -129,6 +130,7 @@ importRoutes.post('/commit', async (c) => {
   // 和后台改名/改单号同一套上限：导入这条路以前不卡，粘一整页进来能直接入库
   const batchName = bound(requireString(body.batchName, '批次名'), '批次名', 60) as string;
   const orderNo = bound(optionalString(body.orderNo), '日本订单号', 60);
+  const shop = bound(optionalString(body.shop), '来源店铺', 40);
   const japanTrackingNo = bound(optionalString(body.japanTrackingNo), '日本物流单号', 60);
   const packageNameInput = bound(optionalString(body.packageName), '包裹名', 60);
   const orderedAtInput = bound(optionalString(body.orderedAt), '下单日期', 30);
@@ -319,8 +321,8 @@ importRoutes.post('/commit', async (c) => {
 
   statements.push(
     db
-      .prepare('UPDATE batches SET order_no=?,japan_tracking_no=? WHERE id=?')
-      .bind(orderNo, japanTrackingNo, batchId),
+      .prepare('UPDATE batches SET order_no=?,shop=?,japan_tracking_no=? WHERE id=?')
+      .bind(orderNo, shop, japanTrackingNo, batchId),
   );
   await db.batch(statements);
 

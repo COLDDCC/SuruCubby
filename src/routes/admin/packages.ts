@@ -66,9 +66,11 @@ packageRoutes.get('/:id', async (c) => {
             i.product_url AS productUrl,
             i.status, i.goods_fee_jpy AS goodsFeeJpy, i.missing, i.exception_note AS exceptionNote,
             i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen,
-            i.weigh_group_id AS weighGroupId, i.batch_id AS batchId
+            i.weigh_group_id AS weighGroupId, i.batch_id AS batchId,
+            b.order_no AS orderNo, b.shop AS shop
        FROM items i
        JOIN customers c ON c.id = i.customer_id
+       JOIN batches b ON b.id = i.batch_id
       WHERE i.package_id = ?
       ORDER BY c.nickname, i.id`,
   )

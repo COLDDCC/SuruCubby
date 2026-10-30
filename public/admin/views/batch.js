@@ -5,6 +5,7 @@ import {
   codeTag,
   confirmBox,
   escapeHtml,
+  orderTag,
   statusLabel,
   thumb,
   yen,
@@ -50,7 +51,7 @@ export async function render(view, [id]) {
               <td class="cell-thumb">${thumb(i)}</td>
               <td class="small muted">${i.rowNo ?? ''}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
-                <div>${codeTag(i)}</div></td>
+                <div>${codeTag(i)}</div>${orderTag(i)}</td>
               <td class="right small">${yen(i.actualPriceJpy)}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
@@ -70,7 +71,7 @@ export async function render(view, [id]) {
     <div class="card">
       <p class="small" style="margin:0"><a href="#/batches">← 全部订单</a></p>
       <h2>${escapeHtml(data.batch.name)}</h2>
-      <p><button data-action="orderTracking" class="small plain">日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
+      <p><button data-action="orderTracking" class="small plain">来源 ${escapeHtml(data.batch.shop || '待填')} · 日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
       <p class="small muted">
         导入于 ${beijingTime(data.batch.createdAt)} ·
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·
@@ -94,11 +95,13 @@ export async function render(view, [id]) {
 
   bindActions(view, {
     orderTracking: async () => {
+      const shop = await promptBox('来源店铺（骏河屋 / 骏河屋秋叶原店 / booth …）', data.batch.shop || '');
+      if (shop === null) return;
       const orderNo = await promptBox('日本订单号', data.batch.orderNo || '');
       if (orderNo === null) return;
       const japanTrackingNo = await promptBox('日本物流单号', data.batch.japanTrackingNo || '');
       if (japanTrackingNo === null) return;
-      await api.patch(`/api/admin/batches/${id}`, { orderNo, japanTrackingNo });
+      await api.patch(`/api/admin/batches/${id}`, { shop, orderNo, japanTrackingNo });
       await render(view, [id]);
     },
     fetchImages: async (dataset, el) => {

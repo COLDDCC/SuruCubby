@@ -146,3 +146,42 @@ export function codeTag(item) {
   if (!code) return `<a class="code" href="${url}" target="_blank" rel="noreferrer">商品页</a>`;
   return `<a class="code" href="${url}" target="_blank" rel="noreferrer" title="${url}">${escapeHtml(code)}</a>`;
 }
+
+/** 商品链接的域名 → 店铺名。只在批次上没填店铺时兜底用。 */
+const SHOP_BY_HOST = [
+  [/(^|\.)suruga-ya\.jp$/i, '骏河屋'],
+  [/(^|\.)booth\.pm$/i, 'booth'],
+];
+
+/**
+ * 这件东西是从哪家店买的。
+ * 批次上填了的优先（「骏河屋秋叶原店」这种链接里根本看不出来的，只能靠人手填）；
+ * 没填就照商品链接的域名认；都认不出来返回空，不硬编一个店名。
+ */
+export function shopOf(item) {
+  const filled = String(item.shop ?? '').trim();
+  if (filled) return filled;
+  try {
+    const host = new URL(item.productUrl).hostname;
+    return SHOP_BY_HOST.find(([re]) => re.test(host))?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 货号底下的「单号 + 店铺」：都是要贴进群里的短串，点一下就复制走。
+ * 两样都没有就什么都不画，不占地方。
+ */
+export function orderTag(item) {
+  const orderNo = String(item.orderNo ?? '').trim();
+  const shop = shopOf(item);
+  if (!orderNo && !shop) return '';
+  const order = orderNo
+    ? `<button class="badge copy-chip mono" data-copy="${escapeHtml(orderNo)}" title="点一下复制单号">单号 ${escapeHtml(orderNo)}</button>`
+    : '';
+  const shopTag = shop
+    ? `<button class="badge copy-chip" data-copy="${escapeHtml(shop)}" title="点一下复制来源">${escapeHtml(shop)}</button>`
+    : '';
+  return `<div class="small row" style="gap:6px;margin-top:3px">${order}${shopTag}</div>`;
+}

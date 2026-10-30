@@ -42,6 +42,13 @@ export async function render(view) {
       <input type="file" id="file" accept=".xlsx,.xls,.csv">
       <label for="batchName">批次名</label>
       <input id="batchName" style="width:100%" placeholder="例如 9月20日 第12团">
+      <label>来源店铺（团员页会显示成标签，点一下就复制）</label>
+      <input id="shop" list="shop-list" placeholder="例如 骏河屋 / 骏河屋秋叶原店 / booth">
+      <datalist id="shop-list">
+        <option value="骏河屋"></option>
+        <option value="骏河屋秋叶原店"></option>
+        <option value="booth"></option>
+      </datalist>
       <label>日本订单号</label><input id="orderNo">
       <label>日本物流单号（可后补）</label><input id="japanTrackingNo">
       <label for="orderedAt">下单日期（可不填）</label>
@@ -309,6 +316,7 @@ function renderPreview(view) {
           columns: state.columnEdits,
           batchName: document.getElementById('batchName').value.trim(),
           orderedAt: document.getElementById('orderedAt').value || null,
+          shop: document.getElementById('shop').value,
           orderNo: document.getElementById('orderNo').value,
           japanTrackingNo: document.getElementById('japanTrackingNo').value,
           confirmDuplicate: Boolean(p.duplicate),

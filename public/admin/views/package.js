@@ -8,6 +8,7 @@ import {
   escapeHtml,
   money,
   openModal,
+  orderTag,
   promptBox,
   statusLabel,
   thumb,
@@ -85,7 +86,7 @@ export async function render(view, [id]) {
               (i) => `<tr data-focus-item="${i.id}">
               <td class="cell-thumb">${thumb(i)}</td>
               <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
-                <div>${codeTag(i)}</div></td>
+                <div>${codeTag(i)}</div>${orderTag(i)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
               <td class="right small">${i.weightG ? `${Number(i.weightG).toLocaleString()} g` : '—'}</td>

@@ -17,7 +17,7 @@ batchRoutes.get('/', async (c) => {
   const rows = await db
     .prepare(
       `SELECT b.id, b.name, b.ordered_at AS orderedAt, b.source_file AS sourceFile,
-              b.created_at AS createdAt, b.order_no AS orderNo, b.japan_tracking_no AS japanTrackingNo,
+              b.created_at AS createdAt, b.shop AS shop, b.order_no AS orderNo, b.japan_tracking_no AS japanTrackingNo,
               COUNT(i.id) AS itemCount,
               COUNT(DISTINCT i.customer_id) AS customerCount,
               COALESCE(SUM(i.goods_fee_jpy), 0) AS amountJpy,
@@ -79,7 +79,7 @@ batchRoutes.get('/', async (c) => {
 batchRoutes.get('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
   const batch = await c.env.DB.prepare(
-    'SELECT id, name, ordered_at AS orderedAt, source_file AS sourceFile, created_at AS createdAt,order_no AS orderNo,japan_tracking_no AS japanTrackingNo FROM batches WHERE id = ?',
+    'SELECT id, name, ordered_at AS orderedAt, source_file AS sourceFile, created_at AS createdAt,order_no AS orderNo,shop AS shop,japan_tracking_no AS japanTrackingNo FROM batches WHERE id = ?',
   )
     .bind(id)
     .first();
@@ -90,9 +90,11 @@ batchRoutes.get('/:id', async (c) => {
             i.product_url AS productUrl, i.actual_price_jpy AS actualPriceJpy,
             i.list_price_jpy AS listPriceJpy, i.goods_fee_jpy AS goodsFeeJpy, i.status,
             i.goods_paid AS goodsPaid, i.missing, i.exception_note AS exceptionNote,
-            i.row_no AS rowNo, i.package_id AS packageId
+            i.row_no AS rowNo, i.package_id AS packageId,
+            b.order_no AS orderNo, b.shop AS shop
        FROM items i
        JOIN customers c ON c.id = i.customer_id
+       JOIN batches b ON b.id = i.batch_id
       WHERE i.batch_id = ?
       ORDER BY c.nickname, i.row_no`,
   )
@@ -112,7 +114,7 @@ batchRoutes.get('/:id', async (c) => {
 
 batchRoutes.patch('/:id', async (c) => {
   const id = requireInt(c.req.param('id'), '批次 ID');
-  const body = await readJson<{ name?: string; orderedAt?: string; orderNo?: string; japanTrackingNo?: string }>(c);
+  const body = await readJson<{ name?: string; orderedAt?: string; orderNo?: string; shop?: string; japanTrackingNo?: string }>(c);
   const exists = await c.env.DB.prepare('SELECT id FROM batches WHERE id = ?').bind(id).first();
   // 以前改一个不存在的批次也回 ok，前端以为存上了
   if (!exists) throw notFound('批次不存在');
@@ -138,6 +140,11 @@ batchRoutes.patch('/:id', async (c) => {
   if (sets.length > 0)
     await c.env.DB.prepare(`UPDATE batches SET ${sets.join(', ')} WHERE id = ?`)
       .bind(...values, id)
+      .run();
+  // 店铺单独一条：这一格要能清空（填错了改回「照链接认」），COALESCE 会把空串吃掉
+  if (body.shop !== undefined)
+    await c.env.DB.prepare('UPDATE batches SET shop=? WHERE id=?')
+      .bind(bound(optionalString(body.shop), '来源店铺', 40), id)
       .run();
   return c.json({ ok: true });
 });

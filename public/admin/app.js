@@ -1,5 +1,5 @@
 import { api } from '/admin/api.js';
-import { toast } from '/admin/ui.js';
+import { copyText, toast } from '/admin/ui.js';
 import { showSearch } from '/admin/search.js';
 
 const view = document.getElementById('view');
@@ -109,6 +109,19 @@ export async function route() {
     view.innerHTML = `<div class="card"><p class="unpaid">${err.message || '出错了'}</p></div>`;
   }
 }
+
+/**
+ * 货号底下的单号 / 来源是拿去群里对货的，点一下就复制。
+ * 挂成 document 上的委托，视图重画多少次都不用重新绑。
+ */
+document.addEventListener('click', async (e) => {
+  const chip = e.target instanceof Element ? e.target.closest('[data-copy]') : null;
+  if (!chip || !view.contains(chip)) return;
+  e.preventDefault();
+  const text = chip.dataset.copy;
+  const done = await copyText(text);
+  toast(done ? `已复制 ${text}` : '这个浏览器不让网页复制，手动选中这段字拷一下', !done);
+});
 
 document.addEventListener('need-login', () => {
   loggedIn = false;

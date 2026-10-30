@@ -8,6 +8,7 @@ import {
   empty,
   escapeHtml,
   money,
+  orderTag,
   promptBox,
   statusLabel,
   thumb,
@@ -176,7 +177,7 @@ export async function render(view, [id]) {
             (i) => `<tr data-focus-item="${i.id}">
             <td class="cell-thumb">${thumb(i)}</td>
             <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
-              <div>${codeTag(i)}</div></td>
+              <div>${codeTag(i)}</div>${orderTag(i)}</td>
             <td class="small muted">${escapeHtml(i.batchName)}</td>
             <td class="right small">${yen(i.actualPriceJpy)}</td>
             <td class="right money">${yen(i.goodsFeeJpy)}</td>

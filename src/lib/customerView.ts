@@ -27,7 +27,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
               b.name AS batchName, i.package_id AS packageId, p.name AS packageName,
               i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt,
               i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen, i.intl_paid AS intlPaid, p.tracking_no AS returnTrackingNo,
-              b.order_no AS orderNo,b.japan_tracking_no AS japanTrackingNo,
+              b.order_no AS orderNo,b.shop AS shop,b.japan_tracking_no AS japanTrackingNo,
               (SELECT request_id FROM request_items ri WHERE ri.item_id=i.id) AS requestId
          FROM items i
          JOIN batches b ON b.id = i.batch_id

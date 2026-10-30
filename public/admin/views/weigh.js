@@ -8,6 +8,7 @@ import {
   itemCode,
   money,
   openModal,
+  orderTag,
   promptBox,
   thumb,
   toast,
@@ -151,6 +152,7 @@ export async function render(view, [id]) {
                    title="${escapeHtml(i.title)}">${thumb(i)}</div>
               <div class="claim-id">
                 ${codeTag(i)}
+                ${orderTag(i)}
                 ${code ? "" : `<div class="name">${escapeHtml(i.title)}</div>`}
               </div>
               <div class="claim-ctrl">
