@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>称重计费收款</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230ea5e9%22/%3E%3Cpath d=%22M9 12h14l-2 12H11z%22 fill=%22%230a2e42%22/%3E%3Ccircle cx=%2216%22 cy=%229%22 r=%223%22 fill=%22none%22 stroke=%22%230a2e42%22 stroke-width=%222%22/%3E%3C/svg%3E">
+<meta name="description" content="粘贴仓库重量表，按计费规则算出每个客户应付金额，生成汇总表和小票图片。数据只在浏览器内处理。">
+<style>
+:root{
+  /* 同 /style.css 的配色：天蓝做品牌色，正文和金额用深墨蓝，状态色都过 WCAG AA 小字 4.5:1 */
+  --bg:#eaf4fb; --panel:#fbfdff; --ink:#14222e; --muted:#5c7284; --line:#d5e6f2;
+  --accent:#0369a1; --accent-soft:#d9ecfa; --brand:#0ea5e9; --on-brand:#0a2e42;
+  --ok:#0f7a41; --warn:#96621a; --warn-soft:#fdf3d7;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1520; --panel:#15212e; --ink:#e8eff7; --muted:#93a8bb; --line:#27394b;
+    --accent:#7dd3fc; --accent-soft:rgba(14,165,233,.16);
+    --ok:#5ddc9a; --warn:#f0c26b; --warn-soft:#3a3116;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1520; --panel:#15212e; --ink:#e8eff7; --muted:#93a8bb; --line:#27394b;
+  --accent:#7dd3fc; --accent-soft:rgba(14,165,233,.16);
+  --ok:#5ddc9a; --warn:#f0c26b; --warn-soft:#3a3116;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--sans);-webkit-text-size-adjust:100%}
+header{max-width:1180px;margin:0 auto;padding:22px 16px 6px}
+header h1{margin:0;font-size:20px;letter-spacing:.02em}
+header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+main{max-width:1180px;margin:0 auto;padding:12px 16px 40px;display:grid;grid-template-columns:400px 1fr;gap:16px;align-items:start}
+/* 手机上一列：重量表 → 汇总表（主要输出）→ 计费规则 → 小票，不用先滑过一整屏规则才看到金额 */
+@media (max-width:900px){main{display:flex;flex-direction:column;gap:0}main>section{display:contents}
+  #cardInput{order:1}#cardSum{order:2}#cardRules{order:3}#cardReceipts{order:4}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 14px 16px;margin-bottom:16px}
+.card h2{font-size:14px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card h2 small{font-weight:400;color:var(--muted);font-size:12px}
+textarea{width:100%;min-height:200px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px;font:13px/1.5 var(--mono);background:var(--bg);color:var(--ink)}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+input,select{width:100%;border:1px solid var(--line);border-radius:7px;padding:7px 8px;font:14px var(--sans);background:var(--bg);color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.field{margin-bottom:10px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:10px}
+.seg button{flex:1;border:0;background:transparent;padding:7px 4px;font:13px var(--sans);color:var(--muted);cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.sub{font-size:12px;color:var(--muted);margin:2px 0 10px}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 11px;font:13px var(--sans);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand);font-weight:600}
+.btn.primary:hover{opacity:.9;color:var(--on-brand)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.hr{border-top:1px dashed var(--line);margin:12px 0}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{font-weight:600;color:var(--muted);font-size:12px}
+th:first-child,td:first-child{text-align:left}
+td.num{font-family:var(--mono)}
+td.amt{font-family:var(--mono);font-weight:700;color:var(--accent)}
+tr.total td{border-bottom:0;font-weight:700}
+tr.cust{cursor:pointer}
+tr.cust:hover td{background:var(--accent-soft)}
+tr.detail td{background:var(--bg);text-align:left;white-space:normal;font-size:12px;color:var(--muted)}
+.detail-line{font-family:var(--mono);color:var(--ink)}
+.empty{color:var(--muted);text-align:center;padding:28px 0}
+.notice{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-bottom:10px}
+.notice ul{margin:4px 0 0;padding-left:18px}
+.receipts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.rc{display:flex;flex-direction:column;gap:6px}
+.rc img{width:100%;border-radius:6px;border:1px solid var(--line);background:#fff}
+.rc .row{justify-content:space-between}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--panel);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.hint{font-size:12px;color:var(--muted)}
+.privacy{font-size:12px;color:var(--ok)}
+</style>
+</head>
+<body>
+<header>
+  <h1>称重计费收款</h1>
+  <p>粘贴仓库导出的重量表 → 按规则算出每人应付 → 复制汇总表去对账收款。<span class="privacy">数据只在本浏览器内计算，不上传、不保存表格。</span></p>
+</header>
+
+<main>
+<section>
+  <div class="card" id="cardInput">
+    <h2>重量表 <small><button class="btn" id="btnSample" type="button">填入示例</button> <button class="btn" id="btnClear" type="button">清空</button></small></h2>
+    <textarea id="input" spellcheck="false" placeholder="从 Excel 直接复制粘贴，例如：&#10;客户	运单号	毛重&#10;小A	SF1029384756	1.32&#10;小A	SF1029384757	0.48&#10;&#10;没有客户列时，单独写一行：&#10;客户：小B&#10;YT8812345678	860g"></textarea>
+    <div class="row" style="margin-top:8px;justify-content:space-between">
+      <span class="hint" id="parseInfo">表头自动识别；客户格留空会沿用上一行。</span>
+      <div style="width:130px">
+        <select id="unitDefault" title="没有标单位时按什么算">
+          <option value="auto">单位：自动</option>
+          <option value="kg">单位：kg</option>
+          <option value="g">单位：g</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="cardRules">
+    <h2>计费规则 <small>浏览器会记住</small></h2>
+
+    <label>计费方式</label>
+    <div class="seg" data-key="mode">
+      <button type="button" data-v="perkg">按 kg 单价</button>
+      <button type="button" data-v="firstadd">首重 + 续重</button>
+    </div>
+    <div id="perkgBox" class="field">
+      <label for="unitPrice">单价（每 kg，报价货币）</label>
+      <input id="unitPrice" type="number" step="0.01" min="0" inputmode="decimal">
+    </div>
+    <div id="firstaddBox">
+      <div class="grid2">
+        <div class="field"><label for="firstWeight">首重（kg）</label><input id="firstWeight" type="number" step="0.1" min="0" inputmode="decimal"></div>
+        <div class="field"><label for="firstPrice">首重价格</label><input id="firstPrice" type="number" step="0.01" min="0" inputmode="decimal"></div>
+        <div class="field"><label for="addStep">续重每（kg）</label><input id="addStep" type="number" step="0.1" min="0.01" inputmode="decimal"></div>
+        <div class="field"><label for="addPrice">续重价格</label><input id="addPrice" type="number" step="0.01" min="0" inputmode="decimal"></div>
+      </div>
+    </div>
+
+    <label>计费重量进位到</label>
+    <div class="seg" data-key="weightStep">
+      <button type="button" data-v="0.1">0.1 kg</button>
+      <button type="button" data-v="0.5">0.5 kg</button>
+      <button type="button" data-v="1">1 kg</button>
+    </div>
+
+    <div class="grid2">
+      <div class="field"><label for="minCharge">最低收费（0 = 不设）</label><input id="minCharge" type="number" step="0.01" min="0" inputmode="decimal"></div>
+      <div class="field"><label for="surcharge">每件附加费</label><input id="surcharge" type="number" step="0.01" min="0" inputmode="decimal"></div>
+    </div>
+
+    <label>同一客户多件包裹</label>
+    <div class="seg" data-key="groupMode">
+      <button type="button" data-v="item">逐件计费</button>
+      <button type="button" data-v="merge">合并称重算一次</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="grid2">
+      <div class="field"><label for="quoteCur">报价货币</label>
+        <select id="quoteCur"><option value="CNY">人民币</option><option value="JPY">日元</option></select></div>
+      <div class="field"><label for="collectCur">收款货币</label>
+        <select id="collectCur"><option value="CNY">人民币</option><option value="JPY">日元</option></select></div>
+    </div>
+    <div class="field" id="rateBox">
+      <label for="rate">汇率：1 人民币 = ? 日元</label>
+      <input id="rate" type="number" step="0.01" min="0.01" inputmode="decimal">
+    </div>
+    <div class="field">
+      <label for="finalRound">应付金额尾数（向上进位）</label>
+      <select id="finalRound"></select>
+    </div>
+
+    <div class="hr"></div>
+    <div class="field"><label for="shopName">小票抬头</label><input id="shopName" maxlength="30"></div>
+    <div class="field"><label for="footNote">小票底部备注（可空）</label><input id="footNote" maxlength="60"></div>
+  </div>
+</section>
+
+<section>
+  <div class="card" id="cardSum">
+    <h2>汇总表
+      <small class="row">
+        <button class="btn primary" id="btnCopySum" type="button">复制汇总（粘进 Excel）</button>
+        <button class="btn" id="btnCopyDetail" type="button">复制逐件明细</button>
+      </small>
+    </h2>
+    <div id="warnings"></div>
+    <div class="tablewrap"><table id="sumTable"></table></div>
+    <p class="hint" style="margin:8px 0 0">点客户行展开逐件计算。复制出的表带一列空的「方式」，收款时填。</p>
+  </div>
+
+  <div class="card" id="cardReceipts">
+    <h2>小票图片 <small>客户有疑问时发给他
+      <button class="btn" id="btnMakeReceipts" type="button">生成小票</button>
+      <button class="btn" id="btnDownloadAll" type="button" hidden>全部下载</button></small></h2>
+    <div id="receipts" class="receipts"><div class="empty" style="grid-column:1/-1">需要时点「生成小票」，每人一张。</div></div>
+  </div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+/*CORE-START*/
+const Core = (() => {
+  const EPS = 1e-9;
+  const fix = (x, d = 6) => Math.round(x * Math.pow(10, d)) / Math.pow(10, d);
+  const ceilTo = (x, step) => fix(Math.ceil(x / step - EPS) * step);
+
+  const H_CUST = /客户|客人|顾客|昵称|收件人|买家|姓名|名字|customer|name/i;
+  const H_TRACK = /运单|单号|快递|物流|追踪|tracking|waybill|no\.?$/i;
+  const H_WEIGHT = /毛重|重量|weight|实重|kg|公斤|千克|^g$|\(g\)|（g）|克/i;
+  const CUST_LINE = /^\s*(客户|客人|顾客|昵称|买家)\s*[:：]\s*(.+?)\s*$/;
+  const WEIGHT_RE = /^(\d+(?:\.\d+)?)\s*(kg|公斤|千克|g|克)?$/i;
+  const TRACK_RE = /^[A-Za-z0-9-]{6,}$/;
+
+  function headerUnit(h) {
+    if (/kg|公斤|千克/i.test(h)) return 'kg';
+    if (/\(g\)|（g）|\[g\]|克|(^|[^a-z])g$/i.test(h)) return 'g';
+    return null;
+  }
+  function splitCells(line) {
+    if (line.includes('\t')) return line.split('\t').map(s => s.trim());
+    if (line.includes(',')) return line.split(',').map(s => s.trim());
+    return line.trim().split(/\s+/);
+  }
+  function parseWeight(s) {
+    if (s == null) return null;
+    const m = String(s).replace(/\s+/g, '').match(WEIGHT_RE);
+    if (!m) return null;
+    let unit = m[2] ? m[2].toLowerCase() : null;
+    if (unit === '公斤' || unit === '千克') unit = 'kg';
+    if (unit === '克') unit = 'g';
+    return { value: parseFloat(m[1]), unit };
+  }
+  function isHeaderRow(cells) {
+    let hits = 0;
+    for (const c of cells) if (c && (H_CUST.test(c) || H_TRACK.test(c) || H_WEIGHT.test(c)) && !parseWeight(c)) hits++;
+    return hits >= 2 || (hits >= 1 && cells.every(c => !parseWeight(c)));
+  }
+
+  // returns { pieces:[{customer,tracking,value,unit,line}], warnings:[{line,text,msg}], header:bool }
+  function parse(text, unitDefault = 'auto') {
+    const lines = String(text || '').split(/\r?\n/);
+    const pieces = [], warnings = [];
+    let cols = null, hUnit = null, current = '', lastCust = '', header = false;
+
+    lines.forEach((raw, i) => {
+      const ln = i + 1;
+      if (!raw.trim()) return;
+      const cm = raw.match(CUST_LINE);
+      if (cm && !raw.includes('\t')) { current = cm[2]; lastCust = ''; return; }
+      const cells = splitCells(raw);
+
+      if (!cols && isHeaderRow(cells)) {
+        cols = { c: -1, t: -1, w: -1 };
+        cells.forEach((c, idx) => {
+          if (cols.w < 0 && /毛重/.test(c)) cols.w = idx;
+        });
+        cells.forEach((c, idx) => {
+          if (idx === cols.w) return;
+          if (cols.c < 0 && H_CUST.test(c)) cols.c = idx;
+          else if (cols.t < 0 && H_TRACK.test(c)) cols.t = idx;
+          else if (cols.w < 0 && H_WEIGHT.test(c)) cols.w = idx;
+        });
+        if (cols.w >= 0) hUnit = headerUnit(cells[cols.w]);
+        header = true;
+        if (cols.w < 0) warnings.push({ line: ln, text: raw, msg: '表头里没找到重量列，改为自动识别' });
+        if (cols.w < 0) cols = null;
+        return;
+      }
+
+      let cust = '', track = '', wcell = null;
+      if (cols) {
+        cust = cols.c >= 0 ? (cells[cols.c] || '') : '';
+        track = cols.t >= 0 ? (cells[cols.t] || '') : '';
+        wcell = cells[cols.w];
+      } else {
+        let wi = -1;
+        for (let k = cells.length - 1; k >= 0; k--) if (parseWeight(cells[k])) { wi = k; break; }
+        if (wi >= 0) wcell = cells[wi];
+        const rest = cells.filter((_, k) => k !== wi && cells[k] !== '');
+        const ti = rest.findIndex(c => TRACK_RE.test(c) && /\d{4,}/.test(c));
+        if (ti >= 0) track = rest.splice(ti, 1)[0];
+        cust = rest[0] || '';
+      }
+
+      if (cust) lastCust = cust;
+      else cust = lastCust || current;
+      const w = parseWeight(wcell);
+      if (!w) {
+        // a lone name line without weight = customer marker (e.g. merged-cell export)
+        if (!cols && cells.length === 1 && cells[0] && !TRACK_RE.test(cells[0])) { current = cells[0]; lastCust = ''; return; }
+        warnings.push({ line: ln, text: raw, msg: wcell ? `重量看不懂：${wcell}` : '没有重量' });
+        return;
+      }
+      if (!cust) { warnings.push({ line: ln, text: raw, msg: '不知道是哪个客户的（加一行「客户：昵称」）' }); return; }
+      pieces.push({ customer: cust, tracking: track, value: w.value, unit: w.unit || hUnit, line: ln });
+    });
+
+    // resolve units
+    const unresolved = pieces.filter(p => !p.unit);
+    let assumed = null;
+    if (unresolved.length) {
+      if (unitDefault === 'kg' || unitDefault === 'g') assumed = unitDefault;
+      else assumed = Math.max(...unresolved.map(p => p.value)) >= 100 ? 'g' : 'kg';
+      unresolved.forEach(p => p.unit = assumed);
+    }
+    pieces.forEach(p => { p.grossKg = p.unit === 'g' ? fix(p.value / 1000) : p.value; });
+
+    // duplicate tracking numbers
+    const seen = new Map();
+    pieces.forEach(p => {
+      if (!p.tracking) return;
+      if (seen.has(p.tracking)) warnings.push({ line: p.line, text: p.tracking, msg: `运单号重复（第 ${seen.get(p.tracking)} 行也有）` });
+      else seen.set(p.tracking, p.line);
+    });
+    pieces.forEach(p => { if (p.grossKg <= 0) warnings.push({ line: p.line, text: p.tracking || p.customer, msg: '重量为 0' }); });
+
+    return { pieces, warnings, header, assumedUnit: unitDefault === 'auto' ? assumed : null };
+  }
+
+  // price for a billable weight, in quote currency; returns {fee, formula}
+  function baseFee(bw, r, fmt) {
+    if (r.mode === 'firstadd') {
+      if (bw <= r.firstWeight + EPS) return { fee: r.firstPrice, formula: `首重 ${r.firstWeight}kg = ${fmt(r.firstPrice)}` };
+      const n = Math.ceil(fix((bw - r.firstWeight) / r.addStep) - EPS);
+      const fee = fix(r.firstPrice + n * r.addPrice);
+      return { fee, formula: `首重 ${fmt(r.firstPrice)} + 续重 ${n}×${fmt(r.addPrice)} = ${fmt(fee)}` };
+    }
+    const fee = fix(bw * r.unitPrice);
+    return { fee, formula: `${bw}kg × ${fmt(r.unitPrice)}/kg = ${fmt(fee, true)}` };
+  }
+
+  const CUR = { CNY: { suffix: '元', dec: 2 }, JPY: { suffix: '円', dec: 0 } };
+  function money(v, cur, forceDec) {
+    const c = CUR[cur];
+    const d = cur === 'JPY' ? (forceDec && Math.abs(v - Math.round(v)) > EPS ? 2 : 0) : 2;
+    return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) + c.suffix;
+  }
+
+  function compute(pieces, r) {
+    const fq = (v, f) => money(v, r.quoteCur, f);
+    const fc = (v, f) => money(v, r.collectCur, f);
+    const order = [], map = new Map();
+    pieces.forEach(p => {
+      if (!map.has(p.customer)) { map.set(p.customer, []); order.push(p.customer); }
+      map.get(p.customer).push(p);
+    });
+    const step = Number(r.weightStep);
+    const rows = order.map(name => {
+      const ps = map.get(name);
+      const gross = fix(ps.reduce((s, p) => s + p.grossKg, 0));
+      const items = [], steps = [];
+      let quoteTotal = 0, billW = 0;
+
+      if (r.groupMode === 'merge') {
+        billW = ceilTo(gross, step);
+        let { fee, formula } = baseFee(billW, r, fq);
+        steps.push(`合并 ${ps.length} 件 毛重 ${gross}kg → 计费 ${billW}kg`);
+        steps.push(formula);
+        if (r.minCharge > 0 && fee < r.minCharge - EPS) { fee = r.minCharge; steps.push(`不足最低收费，按 ${fq(r.minCharge)}`); }
+        quoteTotal = fee;
+        ps.forEach(p => items.push({ tracking: p.tracking, grossKg: p.grossKg, billKg: null, fee: null, formula: '' }));
+      } else {
+        ps.forEach(p => {
+          const bw = ceilTo(p.grossKg, step);
+          let { fee, formula } = baseFee(bw, r, fq);
+          if (r.minCharge > 0 && fee < r.minCharge - EPS) { fee = r.minCharge; formula += `，不足最低按 ${fq(r.minCharge)}`; }
+          billW = fix(billW + bw);
+          quoteTotal = fix(quoteTotal + fee);
+          items.push({ tracking: p.tracking, grossKg: p.grossKg, billKg: bw, fee, formula });
+        });
+      }
+      if (r.surcharge > 0) {
+        const s = fix(r.surcharge * ps.length);
+        steps.push(`附加费 ${ps.length}件 × ${fq(r.surcharge)} = ${fq(s)}`);
+        quoteTotal = fix(quoteTotal + s);
+      }
+      let collect = quoteTotal;
+      if (r.quoteCur !== r.collectCur) {
+        if (r.quoteCur === 'CNY') { collect = fix(quoteTotal * r.rate, 4); steps.push(`${fq(quoteTotal)} × 汇率 ${r.rate} = ${fc(collect, true)}`); }
+        else { collect = fix(quoteTotal / r.rate, 4); steps.push(`${fq(quoteTotal)} ÷ 汇率 ${r.rate} = ${fc(collect, true)}`); }
+      }
+      const rs = Number(r.finalRound) || (r.collectCur === 'JPY' ? 1 : 0.01);
+      const due = ceilTo(fix(collect, 4), rs);
+      if (Math.abs(due - collect) > 1e-6) steps.push(`尾数进位 → ${fc(due)}`);
+      return { name, count: ps.length, gross, billW, quoteTotal, due, items, steps };
+    });
+    const total = {
+      count: rows.reduce((s, x) => s + x.count, 0),
+      gross: fix(rows.reduce((s, x) => s + x.gross, 0)),
+      billW: fix(rows.reduce((s, x) => s + x.billW, 0)),
+      due: fix(rows.reduce((s, x) => s + x.due, 0), 4),
+    };
+    return { rows, total, fq, fc };
+  }
+
+  return { parse, compute, money, ceilTo, fix };
+})();
+/*CORE-END*/
+
+// ---------- UI ----------
+const $ = id => document.getElementById(id);
+const DEFAULTS = {
+  mode: 'perkg', unitPrice: 15, firstWeight: 1, firstPrice: 20, addStep: 0.5, addPrice: 8,
+  weightStep: '0.1', minCharge: 0, surcharge: 0, groupMode: 'item',
+  quoteCur: 'CNY', collectCur: 'CNY', rate: 21, roundCNY: '0.1', roundJPY: '10',
+  shopName: '集运称重账单', footNote: '', unitDefault: 'auto',
+};
+const KEY = 'weight-billing-rules-v1';
+let S = { ...DEFAULTS };
+try { const saved = JSON.parse(localStorage.getItem(KEY) || 'null'); if (saved) S = { ...DEFAULTS, ...saved }; } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+
+const NUM_FIELDS = ['unitPrice', 'firstWeight', 'firstPrice', 'addStep', 'addPrice', 'minCharge', 'surcharge', 'rate'];
+const TXT_FIELDS = ['shopName', 'footNote', 'quoteCur', 'collectCur', 'unitDefault'];
+
+function fillRoundOptions() {
+  const sel = $('finalRound');
+  const opts = S.collectCur === 'JPY'
+    ? [['1', '到 1 円'], ['10', '到 10 円'], ['100', '到 100 円']]
+    : [['0.01', '不取整（到分）'], ['0.1', '到角'], ['1', '到元']];
+  sel.innerHTML = opts.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  sel.value = S.collectCur === 'JPY' ? S.roundJPY : S.roundCNY;
+}
+function syncUI() {
+  NUM_FIELDS.forEach(k => { if (document.activeElement !== $(k)) $(k).value = S[k]; });
+  TXT_FIELDS.forEach(k => { if (document.activeElement !== $(k)) $(k).value = S[k]; });
+  document.querySelectorAll('.seg').forEach(seg => {
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', String(S[seg.dataset.key]) === b.dataset.v));
+  });
+  $('perkgBox').hidden = S.mode !== 'perkg';
+  $('firstaddBox').hidden = S.mode !== 'firstadd';
+  $('rateBox').hidden = S.quoteCur === S.collectCur;
+  fillRoundOptions();
+  // price labels show the quote currency
+  const cur = S.quoteCur === 'JPY' ? '円' : '元';
+  document.querySelector('label[for=unitPrice]').textContent = `单价（${cur}/kg）`;
+  document.querySelector('label[for=firstPrice]').textContent = `首重价格（${cur}）`;
+  document.querySelector('label[for=addPrice]').textContent = `续重价格（${cur}）`;
+  document.querySelector('label[for=minCharge]').textContent = `最低收费（${cur}，0 = 不设）`;
+  document.querySelector('label[for=surcharge]').textContent = `每件附加费（${cur}）`;
+}
+
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S[seg.dataset.key] = b.dataset.v; save(); syncUI(); render();
+}));
+NUM_FIELDS.forEach(k => $(k).addEventListener('input', () => {
+  const v = parseFloat($(k).value); S[k] = isFinite(v) && v >= 0 ? v : 0; save(); render();
+}));
+TXT_FIELDS.forEach(k => $(k).addEventListener('input', () => { S[k] = $(k).value; save(); syncUI(); render(); }));
+$('finalRound').addEventListener('change', () => {
+  if (S.collectCur === 'JPY') S.roundJPY = $('finalRound').value; else S.roundCNY = $('finalRound').value;
+  save(); render();
+});
+$('input').addEventListener('input', render);
+$('btnClear').addEventListener('click', () => { $('input').value = ''; render(); });
+$('btnSample').addEventListener('click', () => {
+  $('input').value = '客户\t运单号\t毛重\n小A\tSF1029384756\t1.32\n小A\tSF1029384757\t0.48\n\tSF1029384758\t2.05\n阿梅\tYT8812345678\t0.86\n大熊\tJD0099887766\t3.40\n大熊\tJD0099887767\t1.10';
+  render();
+});
+
+function rules() {
+  return { ...S, finalRound: S.collectCur === 'JPY' ? S.roundJPY : S.roundCNY,
+    rate: S.rate > 0 ? S.rate : 1, addStep: S.addStep > 0 ? S.addStep : 1 };
+}
+
+let LAST = null;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const kg = v => Core.fix(v, 3).toString();
+const open = new Set();
+
+function render() {
+  const parsed = Core.parse($('input').value, S.unitDefault);
+  const r = rules();
+  const res = Core.compute(parsed.pieces, r);
+  LAST = { parsed, res, r };
+
+  const n = parsed.pieces.length;
+  $('parseInfo').textContent = n
+    ? `识别 ${n} 件 · ${res.rows.length} 位客户${parsed.assumedUnit ? ` · 未标单位按 ${parsed.assumedUnit} 算` : ''}`
+    : '表头自动识别；客户格留空会沿用上一行。';
+
+  const w = parsed.warnings;
+  $('warnings').innerHTML = w.length
+    ? `<div class="notice">有 ${w.length} 处需要看一下（这些行没算进去或可能重复）：<ul>${w.slice(0, 12).map(x =>
+        `<li>第 ${x.line} 行 ${esc(x.msg)}${x.text ? `：<code>${esc(x.text.slice(0, 40))}</code>` : ''}</li>`).join('')}${w.length > 12 ? `<li>…另有 ${w.length - 12} 处</li>` : ''}</ul></div>`
+    : '';
+
+  const cur = r.collectCur === 'JPY' ? '円' : '元';
+  if (!res.rows.length) {
+    $('sumTable').innerHTML = `<tr><td class="empty" colspan="6">粘贴重量表后这里显示每人应付金额</td></tr>`;
+  } else {
+    let h = `<thead><tr><th>客户</th><th>件数</th><th>毛重 kg</th><th>计费重 kg</th><th>应付（${cur}）</th><th>方式</th></tr></thead><tbody>`;
+    res.rows.forEach((x, i) => {
+      h += `<tr class="cust" data-i="${i}"><td>${open.has(x.name) ? '▾' : '▸'} ${esc(x.name)}</td><td class="num">${x.count}</td><td class="num">${kg(x.gross)}</td><td class="num">${kg(x.billW)}</td><td class="amt">${res.fc(x.due)}</td><td></td></tr>`;
+      if (open.has(x.name)) {
+        const lines = x.items.map(it => `<div class="detail-line">${esc(it.tracking || '（无单号）')}　${kg(it.grossKg)}kg${it.billKg != null ? ` → ${it.billKg}kg　${esc(it.formula)}` : ''}</div>`).join('');
+        h += `<tr class="detail"><td colspan="6">${lines}${x.steps.map(s => `<div class="detail-line">${esc(s)}</div>`).join('')}</td></tr>`;
+      }
+    });
+    h += `<tr class="total"><td>合计</td><td class="num">${res.total.count}</td><td class="num">${kg(res.total.gross)}</td><td class="num">${kg(res.total.billW)}</td><td class="amt">${res.fc(res.total.due)}</td><td></td></tr></tbody>`;
+    $('sumTable').innerHTML = h;
+  }
+  $('btnDownloadAll').hidden = true;
+  if (receiptsShown) makeReceipts();
+}
+$('sumTable').addEventListener('click', e => {
+  const tr = e.target.closest('tr.cust'); if (!tr || !LAST) return;
+  const name = LAST.res.rows[+tr.dataset.i].name;
+  open.has(name) ? open.delete(name) : open.add(name);
+  render();
+});
+
+// ---------- copy ----------
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1800); }
+async function copyText(txt, msg) {
+  try { await navigator.clipboard.writeText(txt); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  toast(msg);
+}
+const plain = (v, cur) => cur === 'JPY' ? String(Math.round(v)) : v.toFixed(2);
+$('btnCopySum').addEventListener('click', () => {
+  if (!LAST || !LAST.res.rows.length) return toast('还没有数据');
+  const c = LAST.r.collectCur, cur = c === 'JPY' ? '円' : '元';
+  const lines = [['客户', '件数', '毛重(kg)', '计费重(kg)', `应付(${cur})`, '方式'].join('\t')];
+  LAST.res.rows.forEach(x => lines.push([x.name, x.count, kg(x.gross), kg(x.billW), plain(x.due, c), ''].join('\t')));
+  copyText(lines.join('\n'), `已复制 ${LAST.res.rows.length} 位客户，直接粘进 Excel`);
+});
+$('btnCopyDetail').addEventListener('click', () => {
+  if (!LAST || !LAST.res.rows.length) return toast('还没有数据');
+  const merge = LAST.r.groupMode === 'merge';
+  const lines = [['客户', '运单号', '毛重(kg)', merge ? '' : '计费重(kg)', merge ? '' : '运费'].filter(Boolean).join('\t')];
+  LAST.res.rows.forEach(x => x.items.forEach(it => {
+    const row = [x.name, it.tracking, kg(it.grossKg)];
+    if (!merge) row.push(it.billKg, plain(it.fee, LAST.r.quoteCur));
+    lines.push(row.join('\t'));
+  }));
+  copyText(lines.join('\n'), '已复制逐件明细');
+});
+
+// ---------- receipts (canvas) ----------
+let receiptsShown = false;
+const FONT = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif';
+const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+function wrapText(ctx, text, maxW) {
+  const out = []; let line = '';
+  for (const ch of text) {
+    if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; } else line += ch;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+function drawReceipt(row, res, r) {
+  const W = 360, P = 22, inner = W - P * 2, scale = 2;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  const ops = []; let y = 0;
+  const add = (h, fn) => { const yy = y; ops.push(() => fn(yy)); y += h; };
+  const font = (sz, w = 400, f = FONT) => `${w} ${sz}px ${f}`;
+  const dashed = () => add(14, yy => { ctx.strokeStyle = '#cbd5e1'; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(P, yy + 7); ctx.lineTo(W - P, yy + 7); ctx.stroke(); ctx.setLineDash([]); });
+  const text = (t, sz, opts = {}) => {
+    ctx.font = font(sz, opts.w || 400, opts.mono ? MONO : FONT);
+    const lines = wrapText(ctx, t, inner - (opts.indent || 0));
+    lines.forEach(l => add(sz + 6, yy => {
+      ctx.font = font(sz, opts.w || 400, opts.mono ? MONO : FONT);
+      ctx.fillStyle = opts.color || '#14222e';
+      ctx.textAlign = opts.align || 'left';
+      const x = opts.align === 'center' ? W / 2 : opts.align === 'right' ? W - P : P + (opts.indent || 0);
+      ctx.fillText(l, x, yy + sz);
+    }));
+  };
+  const lr = (l, rt, sz, opts = {}) => add(sz + 8, yy => {
+    ctx.fillStyle = opts.color || '#14222e';
+    ctx.font = font(sz, opts.w || 400, opts.monoL ? MONO : FONT); ctx.textAlign = 'left'; ctx.fillText(l, P, yy + sz);
+    ctx.font = font(sz, opts.w || 400, MONO); ctx.textAlign = 'right'; ctx.fillText(rt, W - P, yy + sz);
+  });
+
+  y = 26;
+  text(r.shopName || '称重账单', 18, { w: 700, align: 'center' });
+  const d = new Date();
+  text(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, 12, { align: 'center', color: '#5c7284' });
+  y += 6; dashed();
+  lr('客户', row.name, 14, { w: 700 });
+  lr('件数', `${row.count} 件`, 13, { color: '#4b5563' });
+  y += 2; dashed();
+
+  const merge = r.groupMode === 'merge';
+  row.items.forEach(it => {
+    lr(it.tracking || '（无单号）', merge ? `${kg(it.grossKg)}kg` : res.fq(it.fee), 13, { monoL: true });
+    if (!merge) text(`毛重 ${kg(it.grossKg)}kg → 计费 ${it.billKg}kg`, 11.5, { color: '#5c7284', indent: 8 });
+    if (!merge) text(it.formula, 11.5, { color: '#5c7284', indent: 8, mono: true });
+    y += 4;
+  });
+  if (row.steps.length) {
+    dashed();
+    row.steps.forEach(s => text(s, 11.5, { color: '#4b5563', mono: true }));
+  }
+  y += 2; dashed();
+  lr('毛重合计', `${kg(row.gross)}kg`, 13, { color: '#4b5563' });
+  lr('计费重', `${kg(row.billW)}kg`, 13, { color: '#4b5563' });
+  y += 4;
+  add(36, yy => {
+    ctx.fillStyle = '#14222e'; ctx.font = font(15, 700); ctx.textAlign = 'left'; ctx.fillText('应付', P, yy + 26);
+    ctx.fillStyle = '#0369a1'; ctx.font = font(26, 700, MONO); ctx.textAlign = 'right'; ctx.fillText(res.fc(row.due), W - P, yy + 26);
+  });
+  if (r.footNote) { y += 6; dashed(); text(r.footNote, 12, { align: 'center', color: '#5c7284' }); }
+  y += 20;
+  const H = y + 10;
+
+  c.width = W * scale; c.height = H * scale;
+  ctx.scale(scale, scale);
+  // paper with zigzag bottom
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W, 0); ctx.lineTo(W, H - 8);
+  for (let x = W; x > 0; x -= 12) { ctx.lineTo(x - 6, H); ctx.lineTo(x - 12, H - 8); }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#0ea5e9'; ctx.fillRect(0, 0, W, 4);
+  ctx.textBaseline = 'alphabetic';
+  ops.forEach(f => f());
+  return c;
+}
+
+const safeName = s => String(s).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40);
+function downloadCanvas(cv, name) {
+  const a = document.createElement('a'); a.download = name; a.href = cv.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
+}
+let canvases = [];
+function makeReceipts() {
+  receiptsShown = true;
+  const box = $('receipts');
+  if (!LAST || !LAST.res.rows.length) { box.innerHTML = '<div class="empty" style="grid-column:1/-1">先粘贴重量表</div>'; return; }
+  canvases = LAST.res.rows.map(row => ({ row, cv: drawReceipt(row, LAST.res, LAST.r) }));
+  box.innerHTML = '';
+  canvases.forEach(({ row, cv }, i) => {
+    const div = document.createElement('div'); div.className = 'rc';
+    const img = new Image(); img.src = cv.toDataURL('image/png'); img.alt = `${row.name} 的小票`;
+    const bar = document.createElement('div'); bar.className = 'row';
+    bar.innerHTML = `<span>${esc(row.name)}</span><span class="row"><button class="btn" data-a="copy" data-i="${i}" type="button">复制图片</button><button class="btn" data-a="dl" data-i="${i}" type="button">下载</button></span>`;
+    div.append(img, bar); box.append(div);
+  });
+  $('btnDownloadAll').hidden = canvases.length < 2;
+}
+$('btnMakeReceipts').addEventListener('click', makeReceipts);
+$('receipts').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const { row, cv } = canvases[+b.dataset.i];
+  if (b.dataset.a === 'dl') return downloadCanvas(cv, `小票_${safeName(row.name)}.png`);
+  try {
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    toast(`已复制 ${row.name} 的小票，可直接粘贴发送`);
+  } catch (err) { toast('这个浏览器不支持复制图片，请用「下载」或长按图片保存'); }
+});
+$('btnDownloadAll').addEventListener('click', async () => {
+  for (const { row, cv } of canvases) { downloadCanvas(cv, `小票_${safeName(row.name)}.png`); await new Promise(r => setTimeout(r, 350)); }
+});
+
+syncUI(); render();
+</script>
+</body>
+</html>
