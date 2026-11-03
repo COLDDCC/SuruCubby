@@ -6,7 +6,7 @@ import {
   confirmBox,
   escapeHtml,
   orderTag,
-  statusLabel,
+  statusBadge,
   thumb,
   yen,
   toast,
@@ -36,34 +36,40 @@ export async function render(view, [id]) {
         .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
       const hidden = g.items.filter((i) => !i.releasedAt).length;
       const sorted = g.items.filter((i) => i.sortedAt).length;
+      const pct = g.items.length ? Math.round((sorted / g.items.length) * 100) : 0;
       return `
       <div class="card">
-        <div class="row" style="justify-content:space-between">
-          <h3 style="margin:0"><a href="#/customers/${g.customerId}">${escapeHtml(g.nickname)}</a>
-            <span class="muted small">${escapeHtml(g.qq)} · ${g.items.length} 件</span>
-            ${g.shipMode === 'direct' ? '<span class="badge warn">直邮</span>' : '<span class="badge ok">拼邮</span>'}
-            ${sorted ? `<span class="badge ${sorted >= g.items.length ? 'ok' : ''}">仓库已整理 ${sorted}/${g.items.length}</span>` : ''}
+        <div class="card-head">
+          <div>
+            <h3><a href="#/customers/${g.customerId}">${escapeHtml(g.nickname)}</a>
+              ${g.shipMode === 'direct' ? '<span class="badge warn">直邮</span>' : '<span class="badge ok">拼邮</span>'}
+              ${hidden ? `<span class="badge dot">他还看不到 ${hidden} 件</span>` : '<span class="badge ok dot">他看得到</span>'}</h3>
+            <div class="sub">QQ ${escapeHtml(g.qq)} · ${g.items.length} 件 · 仓库已整理 ${sorted}/${g.items.length}</div>
+            <div class="meter${sorted >= g.items.length ? ' ok' : ''}" style="max-width:220px"><span style="width:${pct}%"></span></div>
+          </div>
+          <div class="actions">
+            <div class="right">
+              <div class="money"><b>${yen(total)}</b></div>
+              <div class="small ${unpaid ? 'unpaid' : 'paid'} money">${unpaid ? `未付 ${yen(unpaid)}` : '已付清'}</div>
+            </div>
             ${hidden
               ? `<button class="small" data-action="release" data-customer="${g.customerId}">放进他的仓库（${hidden} 件）</button>`
-              : `<span class="badge ok">他看得到</span> <button class="small plain" data-action="unrelease" data-customer="${g.customerId}">收回</button>`}</h3>
-          <div class="right">
-            <div class="money">合计 ${yen(total)}</div>
-            <div class="small ${unpaid ? 'unpaid' : 'paid'} money">${unpaid ? `未付 ${yen(unpaid)}` : '已付清'}</div>
+              : `<button class="small plain" data-action="unrelease" data-customer="${g.customerId}">收回</button>`}
           </div>
         </div>
-        <div class="scroll-x" style="margin-top:8px"><table>
+        <div class="scroll-x"><table>
           <thead><tr><th>图</th><th>行</th><th>名称</th><th class="right">实际价格</th><th class="right">应付</th><th>状态</th><th>货款</th></tr></thead>
           <tbody>${g.items
             .map(
               (i) => `<tr data-focus-item="${i.id}">
-              <td class="cell-thumb">${thumb(i)}</td>
+              <td class="cell-thumb sm">${thumb(i)}</td>
               <td class="small muted">${i.rowNo ?? ''}</td>
               <td>${i.productUrl ? `<a href="${escapeHtml(i.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(i.title)}</a>` : escapeHtml(i.title)}
                 <div>${codeTag(i)}</div>${orderTag(i)}</td>
-              <td class="right small">${yen(i.actualPriceJpy)}</td>
+              <td class="right small money">${yen(i.actualPriceJpy)}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
-              <td class="small">${escapeHtml(statusLabel(i.status))}</td>
-              <td class="small ${i.goodsPaid ? 'paid' : 'unpaid'}">${i.goodsPaid ? '已付' : '未付'}</td>
+              <td>${statusBadge(i.status)}</td>
+              <td><span class="badge ${i.goodsPaid ? 'ok' : 'danger'}">${i.goodsPaid ? '已付' : '未付'}</span></td>
             </tr>`,
             )
             .join('')}</tbody></table></div>
@@ -79,9 +85,16 @@ export async function render(view, [id]) {
   const hiddenPeople = new Set(hiddenAll.map((i) => i.customerId)).size;
   view.innerHTML = `
     <div class="card">
-      <p class="small" style="margin:0"><a href="#/batches">← 全部订单</a></p>
-      <h2>${escapeHtml(data.batch.name)}</h2>
-      <p><button data-action="orderTracking" class="small plain">来源 ${escapeHtml(data.batch.shop || '待填')} · 日本订单 ${escapeHtml(data.batch.orderNo || '待填')} · 日本单号 ${escapeHtml(data.batch.japanTrackingNo || '待填')}</button></p>
+      <p class="small" style="margin:0 0 6px"><a href="#/batches">← 全部订单</a></p>
+      <div class="card-head" style="margin-bottom:8px">
+        <h1 style="margin:0">${escapeHtml(data.batch.name)}</h1>
+        <button data-action="orderTracking" class="small plain">改来源 / 单号</button>
+      </div>
+      <div class="row small">
+        <span class="badge outline">来源 ${escapeHtml(data.batch.shop || '待填')}</span>
+        ${data.batch.orderNo ? `<button class="badge copy-chip mono" data-copy="${escapeHtml(data.batch.orderNo)}">日本订单 ${escapeHtml(data.batch.orderNo)}</button>` : '<span class="badge warn">日本订单号待填</span>'}
+        ${data.batch.japanTrackingNo ? `<button class="badge copy-chip mono" data-copy="${escapeHtml(data.batch.japanTrackingNo)}">日本单号 ${escapeHtml(data.batch.japanTrackingNo)}</button>` : '<span class="badge warn">日本单号待填</span>'}
+      </div>
       <p class="small muted">
         导入于 ${beijingTime(data.batch.createdAt)} ·
         文件 ${escapeHtml(data.batch.sourceFile || '—')} ·

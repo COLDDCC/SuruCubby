@@ -97,6 +97,13 @@ test('先下单后收钱：没放行之前客户自己的仓库里什么都没�
   const adminView = await admin('GET', `/api/admin/customers/${ctx.aId}`);
   assert.equal(adminView.items.length, 2);
   assert.ok(adminView.items.every((i) => i.releasedAt === null));
+  // 首页「待放行」里有这两个人
+  const dash = await admin('GET', '/api/admin/dashboard');
+  const mine = dash.toRelease.filter((r) => r.batchId === ctx.batchId);
+  assert.deepEqual(mine.map((r) => r.customerId).sort(), [ctx.aId, ctx.bId].sort());
+  assert.equal(mine.find((r) => r.customerId === ctx.aId).count, 2);
+  assert.equal(mine.find((r) => r.customerId === ctx.aId).amountJpy, 3600);
+  assert.ok(!dash.whBacklog.some((b) => b.batchId === ctx.batchId), '没放行的不算仓库积压');
 });
 
 test('群主点客户名字放行：只放这一个人，另一个人照旧看不到', async () => {
@@ -113,6 +120,12 @@ test('群主点客户名字放行：只放这一个人，另一个人照旧看�
   await admin('POST', '/api/admin/quick-order/release', { batchId: ctx.batchId, customerId: ctx.bId, undo: true });
   assert.equal((await bob('GET', `/api/w/${ctx.bToken}`)).items.length, 0);
   await admin('POST', '/api/admin/quick-order/release', { batchId: ctx.batchId, customerId: ctx.bId });
+  // 放行之后：从「待放行」挪到「仓库还没整理」
+  const dash = await admin('GET', '/api/admin/dashboard');
+  assert.ok(!dash.toRelease.some((r) => r.batchId === ctx.batchId));
+  const backlog = dash.whBacklog.find((b) => b.batchId === ctx.batchId);
+  assert.equal(backlog.count, 3);
+  assert.equal(backlog.customerCount, 2);
 });
 
 test('群主建仓库账号；三把钥匙互不相通', async () => {
@@ -201,6 +214,13 @@ test('放行之前：客户只知道「已打包」，单号、毛重、运费�
   assert.ok(view.items.every((i) => i.status === 'packed'));
   const photo = await alice('GET', `/api/w/${ctx.aToken}/parcels/${ctx.parcelId}/photos/1`, undefined, { raw: true });
   assert.equal(photo.status, 404);
+  // 群主首页「等单号放行」里有这个包裹，应收按售价算
+  const dash = await admin('GET', '/api/admin/dashboard');
+  const pending = dash.parcelsPending.find((x) => x.id === ctx.parcelId);
+  assert.equal(pending.customerId, ctx.aId);
+  assert.equal(pending.grossWeightG, 1234);
+  assert.equal(pending.saleFen, 9872, '1234 g × 80 元/kg');
+  assert.equal(pending.costFen, undefined, '首页清单不带仓库价');
 });
 
 test('仓库的包裹列表也没有钱；群主那边两个价都有、差价算好', async () => {
@@ -243,6 +263,7 @@ test('【单号放行】：客户看到单号、毛重、运费（只有售价�
   assert.notEqual(stranger.status, 200, '别人的平铺图看不到');
   const locked = await wh('PATCH', `/api/wh/parcels/${ctx.parcelId}`, { trackingNo: 'changed' }, { raw: true });
   assert.equal(locked.status, 400);
+  assert.ok(!(await admin('GET', '/api/admin/dashboard')).parcelsPending.some((x) => x.id === ctx.parcelId), '放行后不再是待办');
   const lockedList = await wh('GET', '/api/wh/parcels');
   assert.equal(lockedList.parcels.find((x) => x.id === ctx.parcelId).locked, true);
 });

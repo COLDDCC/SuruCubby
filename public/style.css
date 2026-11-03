@@ -1,47 +1,63 @@
-/* 手机优先的基础样式，后台和客户页共用。
-   整站一套天蓝：天蓝顶栏 + 微蓝底 + 带蓝的卡片阴影，
-   变量名不变，JS/HTML 不用动，改这一份就够了。 */
+/* SuruCubby 设计系统 v2 —— 后台、仓库、团员三端共用一份。
+   视觉照 shadcn：中性灰底、1px 细边、克制的阴影、紧凑间距；
+   布局照 Tabler：左侧分组导航、页头、KPI 卡、带圆点的状态徽章、竖向时间线、步骤条。
+   不引任何框架：所有类名沿用老的，变量名也沿用老的（JS 里有 var(--warn) 这种内联用法），
+   改这一份就够。方案见 docs/ui-redesign.md。 */
 :root {
-  /* 蓝白：深海军蓝压底、信号蓝当按钮、风蓝点缀；底色是冷白，不是米色 */
   --navy: #0e2a47;
+  --navy-2: #133559;
   --wind: #8cc8ff;
-  --bg: #f5f8fc;
+  --bg: #f6f7f9;
   --sky-wash: transparent;
   --card: #ffffff;
-  --card-2: #eef4fb;
-  --text: #0e2a47;
-  --muted: #566b82;
-  --line: #dce6f0;
-  --line-strong: #b9cadb;
+  --card-2: #f3f5f8;
+  --text: #0b1b2e;
+  --muted: #5b6b7d;
+  --line: #e4e8ee;
+  --line-strong: #cdd5df;
   --brand: #1f6feb;
   --brand-strong: #1858c4;
   --brand-ink: #1858c4;
   --brand-line: #bcd3f5;
+  --brand-ring: rgba(31, 111, 235, 0.22);
   --on-brand: #ffffff;
+  /* 状态色：ok / warn / danger 是按 WCAG AA 4.5:1 挑过的老值，别动 */
   --danger: #c0352b;
   --danger-bg: #fbe9e7;
   --ok: #0f7a41;
   --ok-bg: #dcf3e6;
   --warn: #8f5a00;
   --warn-bg: #fdf1d6;
+  --info: #1d5fd1;
+  --info-bg: #e6efff;
+  --violet: #6b3fd4;
+  --violet-bg: #efe9ff;
   --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 16px 40px -16px rgba(14, 42, 71, 0.35);
   /* 单号、货号、金额用快递面单那种窄体数字：Mac 有 DIN Alternate，Windows 有 Bahnschrift，不用下载字体 */
   --num: "DIN Alternate", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", "PingFang SC", sans-serif;
+  --sidebar-w: 232px;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0a1624;
-    --card: #10223a;
-    --card-2: #15304f;
-    --text: #e7eef7;
-    --muted: #97abc1;
-    --line: #22405f;
-    --line-strong: #345a80;
+    --navy: #0a1a2e;
+    --navy-2: #102741;
+    --bg: #0b1220;
+    --card: #111a2b;
+    --card-2: #172238;
+    --text: #e6edf6;
+    --muted: #94a3b8;
+    --line: #1f2c44;
+    --line-strong: #2e3f5e;
     --brand: #5b9bff;
     --brand-strong: #3d84f5;
     --brand-ink: #8cc8ff;
     --brand-line: rgba(91, 155, 255, 0.45);
+    --brand-ring: rgba(91, 155, 255, 0.3);
     --on-brand: #061a33;
     --danger: #ff8f86;
     --danger-bg: rgba(255, 143, 134, 0.16);
@@ -49,6 +65,13 @@
     --ok-bg: rgba(93, 220, 154, 0.16);
     --warn: #f0c26b;
     --warn-bg: #3a3116;
+    --info: #8cb8ff;
+    --info-bg: rgba(140, 184, 255, 0.16);
+    --violet: #c4a8ff;
+    --violet-bg: rgba(196, 168, 255, 0.16);
+    --shadow-sm: none;
+    --shadow: none;
+    --shadow-lg: 0 16px 40px -16px rgba(0, 0, 0, 0.7);
   }
   button.danger {
     color: #2a0f0d;
@@ -65,7 +88,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font:
-    15px/1.65 "HarmonyOS Sans SC",
+    15px/1.6 "HarmonyOS Sans SC",
     "PingFang SC",
     "Microsoft YaHei",
     -apple-system,
@@ -74,6 +97,7 @@ body {
     Arial,
     sans-serif;
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
@@ -84,20 +108,40 @@ a {
   color: var(--brand-ink);
   text-decoration: none;
 }
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 h1,
 h2,
-h3 {
+h3,
+h4 {
   margin: 0 0 12px;
   line-height: 1.3;
+  letter-spacing: -0.005em;
 }
 h1 {
-  font-size: 20px;
+  font-size: 21px;
+  font-weight: 700;
 }
 h2 {
   font-size: 17px;
+  font-weight: 650;
 }
 h3 {
   font-size: 15px;
+  font-weight: 650;
+}
+h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+code {
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--card-2);
+  border-radius: 4px;
+  padding: 0 4px;
 }
 
 .wrap {
@@ -106,7 +150,7 @@ h3 {
   padding: 16px;
 }
 
-/* 顶栏：深海军蓝一整条，白字；当前页下面一道风蓝的线，像车开过去留下的风 */
+/* ───────── 顶栏（客户页、仓库端；后台宽屏换成侧栏，见下面 .app） ───────── */
 .topbar {
   position: sticky;
   top: 0;
@@ -119,8 +163,9 @@ h3 {
   gap: 14px;
   flex-wrap: wrap;
   color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 4px 14px -10px rgba(14, 42, 71, 0.6);
 }
-.topbar .brand {
+.brand {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -128,7 +173,10 @@ h3 {
   color: #fff;
   letter-spacing: 0.01em;
 }
-.topbar .brand img {
+.brand:hover {
+  text-decoration: none;
+}
+.brand img {
   width: 30px;
   height: 30px;
   display: block;
@@ -150,6 +198,9 @@ h3 {
   border-bottom: 3px solid transparent;
   border-top: 3px solid transparent;
 }
+.topbar nav a:hover {
+  text-decoration: none;
+}
 .topbar nav a:not(.active):hover {
   color: #fff;
 }
@@ -162,28 +213,254 @@ h3 {
   outline: 2px solid var(--wind);
   outline-offset: -4px;
 }
-.topbar button.plain {
+.topbar button.plain,
+.sidebar button.plain {
   background: transparent;
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.3);
 }
-.topbar button.plain:hover:not(:disabled) {
+.topbar button.plain:hover:not(:disabled),
+.sidebar button.plain:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
   border-color: #fff;
+  color: #fff;
 }
 .topbar #who {
   color: var(--wind);
 }
 
+/* ───────── 后台外壳：宽屏左侧分组导航（Tabler vertical layout） ───────── */
+.app {
+  min-height: 100vh;
+}
+.sidebar {
+  background: var(--navy);
+  color: #fff;
+}
+.sidebar .nav-group {
+  display: none;
+}
+@media (min-width: 1024px) {
+  body.admin {
+    padding-bottom: 0;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 14px 12px;
+    gap: 6px;
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
+  }
+  .sidebar .brand {
+    padding: 4px 8px 14px;
+    font-size: 16px;
+  }
+  .sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .sidebar .nav-group {
+    display: block;
+    padding: 14px 10px 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.45);
+  }
+  .sidebar .nav-group.legacy {
+    margin-top: auto;
+  }
+  .sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    color: rgba(255, 255, 255, 0.78);
+    position: relative;
+  }
+  .sidebar nav a:hover {
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+  }
+  .sidebar nav a.active {
+    background: rgba(140, 200, 255, 0.14);
+    color: #fff;
+    font-weight: 600;
+  }
+  .sidebar nav a.active::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 7px;
+    bottom: 7px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--wind);
+  }
+  .sidebar nav a.legacy {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px;
+  }
+  .sidebar nav a:focus-visible {
+    outline: 2px solid var(--wind);
+    outline-offset: -2px;
+  }
+  .sidebar #logout {
+    margin-top: 8px;
+    width: 100%;
+  }
+  .app .shell {
+    padding: 20px 24px;
+    max-width: 1320px;
+    margin: 0;
+  }
+  .app .rail {
+    top: 20px;
+    max-height: calc(100vh - 40px);
+  }
+}
+/* 窄屏：侧栏退回成老的顶栏 + 横滑导航，手机上的操作习惯不变 */
+@media (max-width: 1023.98px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 0 16px;
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .sidebar nav {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    flex: 1;
+    align-self: stretch;
+    scrollbar-width: none;
+  }
+  .sidebar nav a {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    color: rgba(255, 255, 255, 0.72);
+    white-space: nowrap;
+    border-bottom: 3px solid transparent;
+    border-top: 3px solid transparent;
+  }
+  .sidebar nav a:hover {
+    text-decoration: none;
+    color: #fff;
+  }
+  .sidebar nav a.active {
+    color: #fff;
+    font-weight: 600;
+    border-bottom-color: var(--wind);
+  }
+}
+
+/* ───────── 页头：标题 + 一句说明 + 右边主操作 ───────── */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 2px 0 16px;
+}
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.page-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.page-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ───────── 卡片 ───────── */
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
 }
 .card > h2:first-child,
 .card > h3:first-child {
   margin-top: 0;
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.card-head h2,
+.card-head h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.card-head .sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+.card-head .actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.card.tone-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: var(--warn-bg);
+}
+.card.flush {
+  padding: 0;
+  overflow: hidden;
+}
+.card.flush > .card-head {
+  padding: 14px 16px 0;
+}
+/* 一块卡片里的分节标题：小号、加粗、带件数 */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.section-title .count {
+  font-family: var(--num);
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 13px;
 }
 
 .grid {
@@ -192,11 +469,20 @@ h3 {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+/* ───────── KPI 卡 ───────── */
 .stat {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  display: block;
+  color: inherit;
+  position: relative;
+}
+a.stat:hover {
+  text-decoration: none;
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow);
 }
 .stat .label {
   color: var(--muted);
@@ -210,6 +496,17 @@ h3 {
   margin-top: 2px;
   line-height: 1.25;
 }
+.stat .value small {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 2px;
+}
+.stat .hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
 .stat.big {
   border-color: var(--brand-line);
   background: var(--card-2);
@@ -218,23 +515,69 @@ h3 {
   font-size: 28px;
   color: var(--danger);
 }
+/* 有事要做的 KPI：左边一道色条 */
+.stat.tone-danger,
+.stat.tone-warn,
+.stat.tone-info,
+.stat.tone-ok {
+  border-left-width: 3px;
+}
+.stat.tone-danger {
+  border-left-color: var(--danger);
+}
+.stat.tone-danger .value {
+  color: var(--danger);
+}
+.stat.tone-warn {
+  border-left-color: var(--warn);
+}
+.stat.tone-info {
+  border-left-color: var(--info);
+}
+.stat.tone-ok {
+  border-left-color: var(--ok);
+}
+.stat.tone-ok .value {
+  color: var(--ok);
+}
 
+/* ───────── 按钮 ───────── */
 button,
 .btn {
   font: inherit;
   white-space: nowrap;
-  padding: 8px 15px;
-  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--brand);
   background: var(--brand);
   color: var(--on-brand);
   cursor: pointer;
   font-weight: 500;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background-color 0.12s,
+    border-color 0.12s,
+    box-shadow 0.12s,
+    transform 0.06s;
+}
+.btn:hover {
+  text-decoration: none;
 }
 button:hover:not(:disabled),
 .btn:hover {
   background: var(--brand-strong);
   border-color: var(--brand-strong);
+}
+button:active:not(:disabled),
+.btn:active {
+  transform: translateY(1px);
 }
 button:focus-visible,
 .btn:focus-visible,
@@ -245,10 +588,11 @@ a:focus-visible {
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
 }
 button.ghost,
 .btn.ghost {
-  background: transparent;
+  background: var(--card);
   color: var(--brand-ink);
   border-color: var(--brand-line);
 }
@@ -257,12 +601,14 @@ button.ghost:hover:not(:disabled),
   background: var(--card-2);
   border-color: var(--brand);
 }
-button.plain {
-  background: transparent;
-  color: var(--muted);
-  border-color: var(--line);
+button.plain,
+.btn.plain {
+  background: var(--card);
+  color: var(--text);
+  border-color: var(--line-strong);
 }
-button.plain:hover:not(:disabled) {
+button.plain:hover:not(:disabled),
+.btn.plain:hover {
   background: var(--card-2);
   color: var(--text);
   border-color: var(--line-strong);
@@ -274,36 +620,58 @@ button.danger {
 }
 button.danger:hover:not(:disabled) {
   background: var(--danger);
+  border-color: var(--danger);
   filter: brightness(0.92);
 }
-button.small {
-  padding: 4px 9px;
+button.small,
+.btn.small {
+  min-height: 28px;
+  padding: 2px 10px;
   font-size: 13px;
+  border-radius: 7px;
 }
 
+/* ───────── 表单 ───────── */
 input,
 select,
 textarea {
   font: inherit;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  font-size: 15px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   background: var(--card);
   color: var(--text);
   max-width: 100%;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  min-height: 0;
+  box-shadow: none;
+  accent-color: var(--brand);
+}
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
 }
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 1px;
+  outline: none;
   border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 label {
   display: block;
   margin: 10px 0 4px;
   color: var(--muted);
   font-size: 13px;
+  font-weight: 500;
 }
 .row {
   display: flex;
@@ -312,6 +680,7 @@ label {
   flex-wrap: wrap;
 }
 
+/* ───────── 表格 ───────── */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -320,14 +689,29 @@ table {
 th,
 td {
   text-align: left;
-  padding: 8px 6px;
+  padding: 9px 8px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
 th {
-  color: var(--brand-ink);
+  color: var(--muted);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  background: var(--card-2);
+  white-space: nowrap;
+}
+thead th:first-child {
+  border-top-left-radius: 6px;
+}
+thead th:last-child {
+  border-top-right-radius: 6px;
+}
+tbody tr:hover > td {
+  background: color-mix(in srgb, var(--card-2) 55%, transparent);
+}
+tbody tr:last-child > td {
+  border-bottom: none;
 }
 .scroll-x {
   overflow-x: auto;
@@ -338,13 +722,20 @@ th {
   min-width: 540px;
 }
 
+/* ───────── 徽章：dot 版在字前加一颗状态圆点（Tabler status-dot） ───────── */
 .badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 1px 8px;
-  border-radius: 6px;
+  border-radius: 999px;
   font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
   background: var(--card-2);
   color: var(--text);
+  border: 1px solid transparent;
+  white-space: nowrap;
 }
 .badge.ok {
   background: var(--ok-bg);
@@ -358,20 +749,48 @@ th {
   background: var(--danger-bg);
   color: var(--danger);
 }
+.badge.info {
+  background: var(--info-bg);
+  color: var(--info);
+}
+.badge.violet {
+  background: var(--violet-bg);
+  color: var(--violet);
+}
+.badge.outline {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+.badge.dot::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.badge:not(.ok):not(.warn):not(.danger):not(.info):not(.violet).dot::before {
+  background: var(--muted);
+}
 
 /* 单号和店铺是拿去群里对货的短串，排在货号底下，点一下就复制 */
 button.copy-chip {
   font: inherit;
   font-size: 12px;
   line-height: 1.5;
+  min-height: 0;
   padding: 1px 8px;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
   box-shadow: none;
+  display: inline-flex;
+  font-weight: 500;
 }
-button.copy-chip:hover {
+button.copy-chip:hover:not(:disabled) {
   border-color: var(--brand);
   border-style: solid;
   color: var(--brand-ink);
@@ -412,14 +831,16 @@ button.copy-chip.mono {
   background: var(--warn-bg);
 }
 
+/* ───────── 商品行（客户页） ───────── */
 .item {
   display: flex;
-  gap: 10px;
-  padding: 10px 0;
+  gap: 12px;
+  padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
 .item:last-child {
   border-bottom: none;
+  padding-bottom: 2px;
 }
 .item img,
 .item .noimg {
@@ -428,7 +849,7 @@ button.copy-chip.mono {
   width: 64px;
   height: 92px;
   object-fit: contain;
-  background: var(--bg);
+  background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   flex: none;
@@ -464,6 +885,9 @@ button.copy-chip.mono {
   font-weight: 600;
   word-break: break-word;
 }
+.item .title a {
+  color: var(--text);
+}
 
 /* 清单行：手机上比表格好读，左边说明右边金额 + 按钮 */
 .list-row {
@@ -474,6 +898,10 @@ button.copy-chip.mono {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
+}
+a.list-row:hover {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--card-2) 60%, transparent);
 }
 .list-row:last-child {
   border-bottom: none;
@@ -489,7 +917,7 @@ button.copy-chip.mono {
   flex: 0 0 auto;
 }
 
-/* 称重台：大图网格，方便在手机上点 */
+/* ───────── 称重台 / 仓库：大图网格，方便在手机上点 ───────── */
 .claim-grid {
   display: grid;
   gap: 12px;
@@ -501,6 +929,9 @@ button.copy-chip.mono {
   padding: 8px;
   background: var(--card);
   color: var(--text);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
 }
 .claim-photo {
   cursor: pointer;
@@ -511,7 +942,7 @@ button.copy-chip.mono {
   aspect-ratio: 1 / 1.42;
   object-fit: contain;
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--card-2);
   border: 1px solid var(--line);
   display: block;
 }
@@ -598,7 +1029,7 @@ td .code {
   width: 116px;
   height: 164px;
   object-fit: contain;
-  background: var(--bg);
+  background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: block;
@@ -609,6 +1040,15 @@ td .code {
   justify-content: center;
   font-size: 11px;
   color: var(--muted);
+}
+/* 核账用的页面（订单详情）不对货，封面收小一档，一单三十个人也不用滚半天 */
+.cell-thumb.sm {
+  width: 64px;
+}
+.cell-thumb.sm img,
+.cell-thumb.sm .noimg {
+  width: 52px;
+  height: 74px;
 }
 @media (prefers-color-scheme: dark) {
   .claim.found {
@@ -625,7 +1065,7 @@ tr.hit > td {
   background: var(--warn-bg);
 }
 
-/* 右边常驻侧栏：搜货号 */
+/* ───────── 右边常驻侧栏：搜货号 ───────── */
 .shell {
   display: flex;
   gap: 16px;
@@ -637,7 +1077,7 @@ tr.hit > td {
 .shell .wrap {
   flex: 1 1 auto;
   min-width: 0;
-  max-width: 960px;
+  max-width: 980px;
   margin: 0;
   padding: 0;
 }
@@ -651,10 +1091,13 @@ tr.hit > td {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px 12px;
+  padding: 12px;
+  box-shadow: var(--shadow-sm);
 }
 .rail label {
   margin: 0 0 6px;
+  color: var(--text);
+  font-weight: 600;
 }
 .rail input {
   width: 100%;
@@ -663,13 +1106,15 @@ tr.hit > td {
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 0;
+  padding: 8px 4px;
   border-top: 1px solid var(--line);
   color: var(--text);
   text-decoration: none;
+  border-radius: 6px;
 }
 .rail-item:hover {
   background: var(--card-2);
+  text-decoration: none;
 }
 .rail-text {
   display: flex;
@@ -677,7 +1122,7 @@ tr.hit > td {
   min-width: 0;
 }
 .rail-code {
-  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-family: var(--num);
   font-size: 15px;
   font-weight: 600;
 }
@@ -689,7 +1134,7 @@ tr.hit > td {
   width: 40px;
   height: 56px;
   object-fit: contain;
-  background: var(--bg);
+  background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 6px;
   display: block;
@@ -714,7 +1159,7 @@ tr.hit > td {
   }
 }
 
-/* 手机首屏：四个数字卡固定两列，字号收一档。
+/* 手机首屏：数字卡固定两列，字号收一档。
    28px 的「¥12,345.67」要 154px，一列卡只剩 149px，钱多一点就折成两行 */
 @media (max-width: 480px) {
   .wrap {
@@ -732,6 +1177,9 @@ tr.hit > td {
   }
   .stat.big .value {
     font-size: 24px;
+  }
+  .page-title {
+    font-size: 19px;
   }
 }
 
@@ -778,7 +1226,7 @@ body.has-shipbar {
   justify-content: space-between;
   gap: 10px;
   font-size: 13px;
-  padding: 1px 0;
+  padding: 2px 0;
 }
 .kv span {
   color: var(--muted);
@@ -802,10 +1250,29 @@ body.has-shipbar {
   flex-wrap: wrap;
 }
 
+/* 细进度条（ShipBob 拣货进度）：<div class="meter"><span style="width:40%"></span></div> */
+.meter {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width 0.3s;
+}
+.meter.ok > span {
+  background: var(--ok);
+}
+
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: var(--navy);
   color: #fff;
@@ -814,52 +1281,137 @@ body.has-shipbar {
   border-left: 4px solid var(--wind);
   max-width: 90vw;
   z-index: 100;
-  box-shadow: 0 12px 30px -12px rgba(14, 42, 71, 0.55);
+  box-shadow: var(--shadow-lg);
+  font-size: 14px;
 }
 .toast.err {
   background: var(--danger);
+  border-left-color: rgba(255, 255, 255, 0.6);
+}
+@media (prefers-color-scheme: dark) {
+  .toast {
+    background: #1b2b46;
+  }
+  .toast.err {
+    color: #2a0f0d;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 0.18s ease-out;
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 8px);
+    }
+  }
 }
 
 .modal-back {
   position: fixed;
   inset: 0;
-  background: rgba(14, 42, 71, 0.5);
+  background: rgba(11, 27, 46, 0.48);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
   z-index: 50;
+  backdrop-filter: blur(2px);
 }
 .modal {
   background: var(--card);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 18px;
   width: 100%;
   max-width: 520px;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 24px 60px -24px rgba(14, 42, 71, 0.6);
+  box-shadow: var(--shadow-lg);
 }
 
 details summary {
   cursor: pointer;
   color: var(--muted);
 }
+details summary:hover {
+  color: var(--text);
+}
 .empty {
   color: var(--muted);
-  padding: 12px 0;
+  padding: 14px 0;
+  font-size: 14px;
+}
+.empty.box {
+  text-align: center;
+  padding: 22px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-2) 50%, transparent);
 }
 
-/* 订单总览 */
-.order-filters {
-  display: flex;
+/* ───────── 分段切换（shadcn Tabs / 筛选胶囊） ───────── */
+.segmented {
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: 10px 0 4px;
+  gap: 2px;
+  padding: 3px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.segmented > button,
+.segmented > a {
+  min-height: 30px;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.segmented > button:hover:not(:disabled),
+.segmented > a:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  text-decoration: none;
+}
+.segmented > .on,
+.segmented > .on:hover:not(:disabled),
+.segmented > [aria-pressed='true'],
+.segmented > [aria-pressed='true']:hover:not(:disabled) {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.segmented .n {
+  font-family: var(--num);
+  font-size: 12px;
+  color: var(--muted);
+}
+.segmented.block {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: 100%;
+}
+
+/* ───────── 订单总览 ───────── */
+.order-filters {
+  margin: 12px 0 4px;
 }
 .order-row {
   border-top: 1px solid var(--line);
-  padding: 12px 0;
+  padding: 14px 0;
   display: grid;
   gap: 4px;
 }
@@ -877,6 +1429,9 @@ details summary {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.order-title a {
+  color: var(--text);
+}
 .order-money {
   text-align: right;
   white-space: nowrap;
@@ -887,11 +1442,12 @@ details summary {
   border-radius: 999px;
   overflow: hidden;
   background: var(--line);
-  margin: 4px 0;
+  margin: 6px 0 4px;
+  gap: 2px;
 }
 .order-bar .seg {
   background: var(--muted);
-  opacity: 0.55;
+  opacity: 0.45;
 }
 .order-bar .seg.ok {
   background: var(--ok);
@@ -899,6 +1455,14 @@ details summary {
 }
 .order-bar .seg.warn {
   background: var(--warn);
+  opacity: 1;
+}
+.order-bar .seg.info {
+  background: var(--info);
+  opacity: 1;
+}
+.order-bar .seg.violet {
+  background: var(--violet);
   opacity: 1;
 }
 .order-bar .seg.danger {
@@ -911,6 +1475,355 @@ details summary {
   justify-content: space-between;
   gap: 4px 16px;
   overflow-wrap: anywhere;
+}
+
+/* ───────── 后台首页：待办清单 ───────── */
+.todo-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  align-items: start;
+}
+.todo-grid > .card {
+  margin-bottom: 0;
+}
+.kpis {
+  margin-bottom: 16px;
+}
+.legacy-zone {
+  margin-top: 16px;
+}
+.legacy-zone > summary {
+  font-size: 14px;
+  padding: 6px 0 12px;
+}
+
+/* ───────── 团员页：进度管线（AfterShip） ───────── */
+.hero {
+  position: relative;
+  overflow: hidden;
+}
+.hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hero-top h1 {
+  margin: 0;
+}
+.hero-where {
+  margin: 12px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.hero-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(var(--steps, 4), minmax(0, 1fr));
+  margin: 18px 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.pipe-step {
+  position: relative;
+  text-align: center;
+  padding-top: 26px;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 0;
+}
+/* 线：每一步左半段和右半段，首尾各少一段 */
+.pipe-step::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--line);
+}
+.pipe-step:first-child::before {
+  left: 50%;
+}
+.pipe-step:last-child::before {
+  right: 50%;
+}
+.pipe-step.lit::before {
+  background: var(--brand);
+}
+.pipe-step.lit-left::before {
+  background: linear-gradient(90deg, var(--brand) 50%, var(--line) 50%);
+}
+/* 第一站的线只有右半段：走到这一站为止，右边那段还没走 */
+.pipe-step:first-child.lit-left::before {
+  background: var(--line);
+}
+.pipe-step .dot {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 17px;
+  height: 17px;
+  margin-left: -8.5px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 3px solid var(--line-strong);
+}
+.pipe-step.lit .dot,
+.pipe-step.lit-left .dot {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+.pipe-step.now .dot {
+  background: var(--card);
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+.pipe-step .name {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pipe-step.now .name {
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+.pipe-step .n {
+  font-family: var(--num);
+  font-size: 13px;
+}
+.pipe-step.zero .n {
+  opacity: 0.6;
+}
+
+/* ───────── 运单卡 + 步骤条（17TRACK） ───────── */
+.parcel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 12px;
+  background: var(--card);
+}
+.parcel:first-of-type {
+  margin-top: 0;
+}
+.parcel.waiting {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn-bg) 55%, var(--card));
+}
+.parcel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tracking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tracking .no {
+  font-family: var(--num);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+.tracking .lbl {
+  font-size: 12px;
+  color: var(--muted);
+  display: block;
+}
+.steps {
+  display: flex;
+  margin: 14px 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  flex: 1;
+  position: relative;
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 20px;
+  text-align: center;
+}
+.step::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--line-strong);
+}
+.step:first-child::before {
+  left: 50%;
+}
+.step:last-child::before {
+  right: 50%;
+}
+.step::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--line-strong);
+}
+.step.done {
+  color: var(--text);
+}
+.step.done::before {
+  background: var(--ok);
+}
+.step.done::after {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.step.now {
+  color: var(--text);
+  font-weight: 600;
+}
+.step.now::after {
+  border-color: var(--warn);
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-bg);
+}
+.step.now::before {
+  background: linear-gradient(90deg, var(--ok) 50%, var(--line-strong) 50%);
+}
+.step.now:first-child::before {
+  background: var(--line-strong);
+}
+.thumb-strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.thumb-strip img,
+.thumb-strip .noimg {
+  width: 40px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--muted);
+}
+.parcel-items {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.parcel-items li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.parcel-items li:last-child {
+  border-bottom: none;
+}
+.parcel-items .thumb img,
+.parcel-items .thumb .noimg {
+  width: 36px;
+  height: 50px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--muted);
+}
+.parcel-items .t {
+  flex: 1;
+  min-width: 0;
+}
+.parcel-items .t > div:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ───────── 竖向时间线（最近动态） ───────── */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tl-item {
+  position: relative;
+  padding: 0 0 14px 22px;
+}
+.tl-item::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--line);
+}
+.tl-item:last-child {
+  padding-bottom: 0;
+}
+.tl-item:last-child::before {
+  display: none;
+}
+.tl-item::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--line-strong);
+}
+.tl-item:first-child::after {
+  border-color: var(--brand);
+  background: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+.tl-time {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--num);
+}
+.tl-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
 }
 
 /* ───────── 仓库工作台：手机上拿着对货，图大、货号大 ───────── */
@@ -926,9 +1839,13 @@ details summary {
 .wh-card[data-pick] {
   cursor: pointer;
 }
-.wh-card.found {
+.wh-card[data-pick]:hover {
+  border-color: var(--line-strong);
+}
+.wh-card.found,
+.wh-card.found:hover {
   border-color: var(--brand);
-  box-shadow: 0 0 0 2px var(--brand-line);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 .wh-card.wh-off {
   opacity: 0.55;
@@ -970,20 +1887,36 @@ details summary {
   color: var(--text);
   text-decoration: none;
   background: var(--card);
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
 }
-.wh-person.on {
+.wh-person:hover {
+  text-decoration: none;
+  border-color: var(--line-strong);
+}
+.wh-person.on,
+.wh-person.on:hover {
   border-color: var(--brand);
   background: var(--card-2);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
+/* 整理完了：绿色实边 + 绿条。以前用虚线，看着反而像「没弄完」 */
 .wh-person.done {
-  border-style: dashed;
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
 }
 .wh-person.done .small {
   color: var(--ok);
 }
-.btn.wh-big {
+.wh-person .meter {
+  margin-top: 8px;
+}
+.btn.wh-big,
+button.wh-big {
   font-size: 18px;
-  padding: 12px 22px;
+  min-height: 48px;
+  padding: 10px 22px;
+  border-radius: 10px;
 }
 .wh-photo {
   display: inline-flex;
@@ -998,21 +1931,84 @@ details summary {
   border-radius: 8px;
   border: 1px solid var(--line);
 }
+/* 仓库首页：一进门就是输单号的大框 */
+.scan-card {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%);
+  color: #fff;
+  border: none;
+  padding: 20px;
+}
+.scan-card h2 {
+  color: #fff;
+}
+.scan-card p {
+  color: rgba(255, 255, 255, 0.72);
+}
+.scan-card input {
+  font-size: 20px;
+  min-height: 52px;
+  border: none;
+  font-family: var(--num);
+  letter-spacing: 0.02em;
+}
+.scan-card .btn,
+.scan-card button {
+  min-height: 52px;
+  font-size: 17px;
+  padding: 0 22px;
+}
+.scan-card #hits {
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  margin-top: 12px;
+}
+.scan-card #hits:empty {
+  display: none;
+}
+.scan-card #hits > * {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+/* 手机上的主操作贴底：一边翻大图一边能按「整理完成」「提交包裹」 */
+@media (max-width: 640px) {
+  .actionbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 7;
+    margin: 12px -16px 0 !important;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    backdrop-filter: blur(6px);
+    border-top: 1px solid var(--line);
+  }
+  .actionbar:last-child {
+    margin-bottom: -16px !important;
+    border-radius: 0 0 var(--radius) var(--radius);
+  }
+  .actionbar .btn,
+  .actionbar button {
+    width: 100%;
+  }
+}
 /* 客户页：直邮包裹的平铺图点开看大图 */
 .parcel-photos {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  margin-top: 10px;
 }
 .parcel-photos img {
   width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
   border-radius: 10px;
   border: 1px solid var(--line);
   display: block;
 }
 .wh-card .copy-chip,
 .wh-card .badge {
+  display: inline-block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1028,9 +2024,11 @@ details summary {
 
 /* ───────── 首页：一辆车一阵风 ───────── */
 .entry-hero {
-  background: var(--navy);
+  background:
+    radial-gradient(1200px 300px at 50% -80px, rgba(140, 200, 255, 0.22), transparent 70%),
+    linear-gradient(180deg, var(--navy) 0%, var(--navy-2) 100%);
   color: #fff;
-  padding: 36px 16px 64px;
+  padding: 44px 16px 76px;
   text-align: center;
 }
 .entry-hero img {
@@ -1040,31 +2038,36 @@ details summary {
   margin: 0 auto 14px;
 }
 .entry-hero h1 {
-  font-size: 22px;
+  font-size: 23px;
   margin: 0;
   letter-spacing: 0.04em;
 }
 .entry-hero p {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   color: var(--wind);
   font-size: 14px;
 }
 .entry-card {
   max-width: 440px;
-  margin: -40px auto 0;
+  margin: -48px auto 0;
+}
+.entry-card > .card {
+  padding: 20px;
+  box-shadow: var(--shadow-lg);
 }
 .entry-roles {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
-.entry-roles .btn {
-  text-align: center;
-  text-decoration: none;
-  padding: 10px 6px;
+.entry-card input {
+  width: 100%;
+  min-height: 42px;
 }
-/* 打开首页时车从左边开进来，带起的风线跟着拉长——全站只有这一处动画 */
+.entry-card button[type='submit'] {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+/* 打开首页时车从左边开进来——全站只有这一处动画 */
 @media (prefers-reduced-motion: no-preference) {
   .entry-hero img {
     animation: drive-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
@@ -1083,15 +2086,18 @@ details summary {
 
 /* 手机上顶栏放不下：品牌和退出留第一行，导航自己占第二行，横着能滑 */
 @media (max-width: 640px) {
-  .topbar {
+  .topbar,
+  .sidebar {
     padding: 0 12px;
     gap: 0 10px;
   }
-  .topbar .brand {
+  .topbar .brand,
+  .sidebar .brand {
     min-height: 48px;
     flex: 1;
   }
-  .topbar nav {
+  .topbar nav,
+  .sidebar nav {
     order: 3;
     flex: 1 0 100%;
     min-height: 40px;

@@ -14,8 +14,11 @@ function say(text, kind = 'err') {
 }
 
 function showAdmin(show) {
-  tabAdmin.className = show ? 'btn' : 'btn ghost';
-  tabUser.className = show ? 'btn ghost' : 'btn';
+  // 分段切换：当前那一格是 .on + aria-pressed，读屏也知道选的是谁
+  tabAdmin.classList.toggle('on', show);
+  tabUser.classList.toggle('on', !show);
+  tabAdmin.setAttribute('aria-pressed', String(show));
+  tabUser.setAttribute('aria-pressed', String(!show));
   formAdmin.hidden = !show;
   formUser.hidden = show;
   say('');

@@ -20,6 +20,34 @@ export function statusLabel(status) {
   return STATUS_LABELS[status] || status;
 }
 
+/**
+ * 状态 → 色调，三端统一一套（见 docs/ui-redesign.md 2.2）：
+ * 还在日本是灰、仓库分拣好是蓝、打好包是琥珀、回国路上是紫、到手是绿、取消退款是红。
+ */
+const STATUS_TONES = {
+  ordered: '',
+  jp_warehouse: '',
+  sorted: 'info',
+  packed: 'warn',
+  intl_transit: 'violet',
+  cn_arrived: 'violet',
+  cn_stock: 'ok',
+  shipped: 'ok',
+  delivered: 'ok',
+  cancelled: 'danger',
+  refunded: 'danger',
+};
+
+export function statusTone(status) {
+  return STATUS_TONES[status] ?? '';
+}
+
+/** 带圆点的状态徽章：颜色之外还有字，色弱也读得出来。 */
+export function statusBadge(status, text) {
+  const tone = statusTone(status);
+  return `<span class="badge dot${tone ? ` ${tone}` : ''}">${escapeHtml(text ?? statusLabel(status))}</span>`;
+}
+
 /** 分 → "¥12.34" */
 export function money(fen) {
   const n = Number(fen || 0);
