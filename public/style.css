@@ -2,55 +2,54 @@
    整站一套天蓝：天蓝顶栏 + 微蓝底 + 带蓝的卡片阴影，
    变量名不变，JS/HTML 不用动，改这一份就够了。 */
 :root {
-  /* 页面底色往天蓝偏一档，不再是纯灰；顶栏那层「霞光」由 --sky-wash 铺 */
-  --bg: #eaf4fb;
-  --sky-wash: #d9ecfa;
-  --card: #fbfdff;
-  /* 卡片里的第二层底（表头、统计卡渐变末端），比卡片再深一点点 */
-  --card-2: #eef6fd;
-  --text: #14222e;
-  --muted: #5c7284;
-  --line: #d5e6f2;
-  /* 天蓝底配深墨字：#0ea5e9 + 白字只有 2.7:1，看不清 */
-  --brand: #0ea5e9;
-  --brand-strong: #0284c7;
-  --brand-ink: #0369a1;
-  --brand-line: #bfdff2;
-  --on-brand: #0a2e42;
-  --danger: #c92f2f;
-  --danger-bg: #fceaea;
-  /* 状态色要压在最常出现的底色上过 WCAG 小字 4.5:1：
-     原来的 #17924f / #d93a3a / #b7791f 在白卡上只有 3.9 / 4.5 / 3.6，深色模式更只有 2.3~3.6 */
+  /* 蓝白：深海军蓝压底、信号蓝当按钮、风蓝点缀；底色是冷白，不是米色 */
+  --navy: #0e2a47;
+  --wind: #8cc8ff;
+  --bg: #f5f8fc;
+  --sky-wash: transparent;
+  --card: #ffffff;
+  --card-2: #eef4fb;
+  --text: #0e2a47;
+  --muted: #566b82;
+  --line: #dce6f0;
+  --line-strong: #b9cadb;
+  --brand: #1f6feb;
+  --brand-strong: #1858c4;
+  --brand-ink: #1858c4;
+  --brand-line: #bcd3f5;
+  --on-brand: #ffffff;
+  --danger: #c0352b;
+  --danger-bg: #fbe9e7;
   --ok: #0f7a41;
-  --ok-bg: #d8f2e3;
-  --warn: #96621a;
-  --warn-bg: #fdf3d7;
-  --radius: 14px;
+  --ok-bg: #dcf3e6;
+  --warn: #8f5a00;
+  --warn-bg: #fdf1d6;
+  --radius: 12px;
+  /* 单号、货号、金额用快递面单那种窄体数字：Mac 有 DIN Alternate，Windows 有 Bahnschrift，不用下载字体 */
+  --num: "DIN Alternate", "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Arial Narrow", "PingFang SC", sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0c1520;
-    --sky-wash: rgba(14, 165, 233, 0.1);
-    --card: #15212e;
-    --card-2: #1b2a3a;
-    --text: #e8eff7;
-    --muted: #93a8bb;
-    --line: #27394b;
-    --brand: #0ea5e9;
-    --brand-strong: #0284c7;
-    --brand-ink: #7dd3fc;
-    --brand-line: rgba(14, 165, 233, 0.45);
-    /* 深底上要换成亮色才看得清；胶囊底跟着改成同色的半透明，
-       不然浅色胶囊压在深卡上像贴了张白纸 */
-    --danger: #ff8f8f;
-    --danger-bg: rgba(255, 143, 143, 0.16);
+    --bg: #0a1624;
+    --card: #10223a;
+    --card-2: #15304f;
+    --text: #e7eef7;
+    --muted: #97abc1;
+    --line: #22405f;
+    --line-strong: #345a80;
+    --brand: #5b9bff;
+    --brand-strong: #3d84f5;
+    --brand-ink: #8cc8ff;
+    --brand-line: rgba(91, 155, 255, 0.45);
+    --on-brand: #061a33;
+    --danger: #ff8f86;
+    --danger-bg: rgba(255, 143, 134, 0.16);
     --ok: #5ddc9a;
     --ok-bg: rgba(93, 220, 154, 0.16);
     --warn: #f0c26b;
     --warn-bg: #3a3116;
   }
-  /* 危险按钮是「亮红底 + 字」，浅色那套白字压上去就没了 */
   button.danger {
     color: #2a0f0d;
   }
@@ -63,16 +62,14 @@
 body {
   margin: 0;
   padding: 0 0 48px;
-  background-color: var(--bg);
-  /* 顶上一段天蓝霞光，往下淡出成底色，页面一开就有天蓝味 */
-  background-image: linear-gradient(180deg, var(--sky-wash) 0, transparent 420px);
-  background-repeat: no-repeat;
+  background: var(--bg);
   color: var(--text);
   font:
-    15px/1.6 -apple-system,
-    BlinkMacSystemFont,
+    15px/1.65 "HarmonyOS Sans SC",
     "PingFang SC",
     "Microsoft YaHei",
+    -apple-system,
+    BlinkMacSystemFont,
     "Helvetica Neue",
     Arial,
     sans-serif;
@@ -80,7 +77,7 @@ body {
 }
 
 ::selection {
-  background: rgba(14, 165, 233, 0.28);
+  background: rgba(140, 200, 255, 0.45);
 }
 
 a {
@@ -109,62 +106,80 @@ h3 {
   padding: 16px;
 }
 
-/* 顶栏：整条天蓝渐变。白字压在天蓝上只有 2.7:1，所以字一律用深墨；
-   选中的那一项翻成白胶囊，才跳得出来 */
+/* 顶栏：深海军蓝一整条，白字；当前页下面一道风蓝的线，像车开过去留下的风 */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
-  background-color: var(--brand);
-  background-image: linear-gradient(135deg, #0ea5e9 0%, #38bdf8 100%);
-  border-bottom: 1px solid #0b98d6;
-  box-shadow: 0 8px 22px -12px rgba(3, 105, 161, 0.65);
-  padding: 10px 16px;
+  background: var(--navy);
+  padding: 0 16px;
+  min-height: 52px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
-  color: var(--on-brand);
+  color: #fff;
 }
 .topbar .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--on-brand);
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+.topbar .brand img {
+  width: 30px;
+  height: 30px;
+  display: block;
 }
 .topbar nav {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   overflow-x: auto;
   flex: 1;
+  align-self: stretch;
+  scrollbar-width: none;
 }
 .topbar nav a {
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: var(--on-brand);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.72);
   white-space: nowrap;
+  border-bottom: 3px solid transparent;
+  border-top: 3px solid transparent;
 }
 .topbar nav a:not(.active):hover {
-  background: rgba(255, 255, 255, 0.35);
+  color: #fff;
 }
 .topbar nav a.active {
-  background: #fff;
-  color: var(--brand-ink);
-  box-shadow: 0 2px 6px rgba(3, 105, 161, 0.3);
+  color: #fff;
+  font-weight: 600;
+  border-bottom-color: var(--wind);
 }
-/* 退出按钮也是深墨字 + 半白底，压在渐变上才看得见 */
+.topbar nav a:focus-visible {
+  outline: 2px solid var(--wind);
+  outline-offset: -4px;
+}
 .topbar button.plain {
-  background: rgba(255, 255, 255, 0.85);
-  color: var(--on-brand);
-  border-color: rgba(255, 255, 255, 0.9);
+  background: transparent;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.topbar button.plain:hover:not(:disabled) {
+  border-color: #fff;
+}
+.topbar #who {
+  color: var(--wind);
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 16px;
   margin-bottom: 14px;
-  box-shadow: 0 10px 26px -20px rgba(3, 105, 161, 0.5);
 }
 .card > h2:first-child,
 .card > h3:first-child {
@@ -178,23 +193,26 @@ h3 {
 }
 
 .stat {
-  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+  background: var(--card);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  box-shadow: 0 10px 26px -22px rgba(3, 105, 161, 0.55);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 .stat .label {
   color: var(--muted);
   font-size: 13px;
 }
 .stat .value {
-  font-size: 22px;
+  font-family: var(--num);
+  font-variant-numeric: tabular-nums;
+  font-size: 24px;
   font-weight: 700;
-  margin-top: 4px;
+  margin-top: 2px;
+  line-height: 1.25;
 }
 .stat.big {
   border-color: var(--brand-line);
+  background: var(--card-2);
 }
 .stat.big .value {
   font-size: 28px;
@@ -205,43 +223,58 @@ button,
 .btn {
   font: inherit;
   white-space: nowrap;
-  padding: 8px 14px;
+  padding: 8px 15px;
   border-radius: 10px;
-  border: 1px solid var(--brand-strong);
-  background-color: var(--brand);
-  background-image: linear-gradient(180deg, #29b4f0 0%, #0ea5e9 100%);
+  border: 1px solid var(--brand);
+  background: var(--brand);
   color: var(--on-brand);
   cursor: pointer;
-  box-shadow: 0 4px 12px -6px rgba(3, 105, 161, 0.6);
+  font-weight: 500;
 }
 button:hover:not(:disabled),
 .btn:hover {
-  background-image: linear-gradient(180deg, #3ac0f5 0%, #1aa9ea 100%);
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+button:focus-visible,
+.btn:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 button.ghost,
 .btn.ghost {
   background: transparent;
-  background-image: none;
   color: var(--brand-ink);
+  border-color: var(--brand-line);
+}
+button.ghost:hover:not(:disabled),
+.btn.ghost:hover {
+  background: var(--card-2);
   border-color: var(--brand);
-  box-shadow: none;
 }
 button.plain {
   background: transparent;
-  background-image: none;
   color: var(--muted);
   border-color: var(--line);
-  box-shadow: none;
+}
+button.plain:hover:not(:disabled) {
+  background: var(--card-2);
+  color: var(--text);
+  border-color: var(--line-strong);
 }
 button.danger {
-  background-color: var(--danger);
-  background-image: none;
+  background: var(--danger);
   border-color: var(--danger);
   color: #fff;
+}
+button.danger:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(0.92);
 }
 button.small {
   padding: 4px 9px;
@@ -307,10 +340,10 @@ th {
 
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
+  padding: 1px 8px;
+  border-radius: 6px;
   font-size: 12px;
-  background: var(--line);
+  background: var(--card-2);
   color: var(--text);
 }
 .badge.ok {
@@ -344,8 +377,14 @@ button.copy-chip:hover {
   color: var(--brand-ink);
   background: var(--card-2);
 }
+/* 单号胶囊做成一小张面单：左边一道海军蓝的边，窄体数字。虚线框 = 点了能复制 */
 button.copy-chip.mono {
-  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-family: var(--num);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  border-radius: 4px;
+  border-left: 3px solid var(--navy);
 }
 
 .muted {
@@ -358,7 +397,9 @@ button.copy-chip.mono {
   text-align: right;
 }
 .money {
+  font-family: var(--num);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 .unpaid {
   color: var(--danger);
@@ -523,15 +564,18 @@ button.copy-chip.mono {
   background: var(--warn-bg);
 }
 
-/* 对货用的货号：等宽、能点，称重台和列表里都要一眼认出 */
+/* 对货用的货号：一张小面单——白底、细框、左边海军蓝粗边、窄体数字，和箱子上贴的号一个样子 */
 .code {
   display: inline-block;
-  font-family: ui-monospace, Consolas, Menlo, monospace;
-  font-size: 12px;
+  font-family: var(--num);
+  font-size: 13px;
+  letter-spacing: 0.04em;
   line-height: 1.5;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: var(--warn-bg);
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--navy);
   color: var(--text);
   text-decoration: none;
   word-break: break-all;
@@ -608,7 +652,6 @@ tr.hit > td {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px 12px;
-  box-shadow: 0 10px 26px -20px rgba(3, 105, 161, 0.5);
 }
 .rail label {
   margin: 0 0 6px;
@@ -699,9 +742,8 @@ tr.hit > td {
   right: 0;
   bottom: 0;
   z-index: 8;
-  background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
+  background: var(--card);
   border-top: 2px solid var(--brand);
-  box-shadow: 0 -10px 28px -12px rgba(3, 105, 161, 0.5);
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
 }
 .shipbar-inner {
@@ -751,7 +793,7 @@ body.has-shipbar {
   position: sticky;
   top: 0;
   z-index: 9;
-  background: linear-gradient(180deg, var(--card-2) 0%, var(--card) 100%);
+  background: var(--card);
   border-bottom: 1px solid var(--line);
   padding: 8px 12px;
   font-size: 14px;
@@ -765,13 +807,14 @@ body.has-shipbar {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  background: #0b2e44;
+  background: var(--navy);
   color: #fff;
   padding: 10px 16px;
-  border-radius: 12px;
+  border-radius: 10px;
+  border-left: 4px solid var(--wind);
   max-width: 90vw;
   z-index: 100;
-  box-shadow: 0 10px 28px -8px rgba(3, 105, 161, 0.6);
+  box-shadow: 0 12px 30px -12px rgba(14, 42, 71, 0.55);
 }
 .toast.err {
   background: var(--danger);
@@ -780,7 +823,7 @@ body.has-shipbar {
 .modal-back {
   position: fixed;
   inset: 0;
-  background: rgba(4, 40, 64, 0.5);
+  background: rgba(14, 42, 71, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -795,7 +838,7 @@ body.has-shipbar {
   max-width: 520px;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 24px 60px -20px rgba(3, 105, 161, 0.6);
+  box-shadow: 0 24px 60px -24px rgba(14, 42, 71, 0.6);
 }
 
 details summary {
@@ -891,8 +934,8 @@ details summary {
   opacity: 0.55;
 }
 .wh-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 20px;
+  font-family: var(--num);
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.02em;
   margin: 6px 0 2px;
@@ -974,4 +1017,89 @@ details summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .code,
+  button.copy-chip.mono {
+    border-left-color: var(--wind);
+  }
+}
+
+/* ───────── 首页：一辆车一阵风 ───────── */
+.entry-hero {
+  background: var(--navy);
+  color: #fff;
+  padding: 36px 16px 64px;
+  text-align: center;
+}
+.entry-hero img {
+  width: 96px;
+  height: 96px;
+  display: block;
+  margin: 0 auto 14px;
+}
+.entry-hero h1 {
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+.entry-hero p {
+  margin: 6px 0 0;
+  color: var(--wind);
+  font-size: 14px;
+}
+.entry-card {
+  max-width: 440px;
+  margin: -40px auto 0;
+}
+.entry-roles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.entry-roles .btn {
+  text-align: center;
+  text-decoration: none;
+  padding: 10px 6px;
+}
+/* 打开首页时车从左边开进来，带起的风线跟着拉长——全站只有这一处动画 */
+@media (prefers-reduced-motion: no-preference) {
+  .entry-hero img {
+    animation: drive-in 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes drive-in {
+    from {
+      transform: translateX(-60px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+}
+
+/* 手机上顶栏放不下：品牌和退出留第一行，导航自己占第二行，横着能滑 */
+@media (max-width: 640px) {
+  .topbar {
+    padding: 0 12px;
+    gap: 0 10px;
+  }
+  .topbar .brand {
+    min-height: 48px;
+    flex: 1;
+  }
+  .topbar nav {
+    order: 3;
+    flex: 1 0 100%;
+    min-height: 40px;
+    margin: 0 -12px;
+    padding: 0 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .topbar #who {
+    font-size: 12px;
+  }
 }

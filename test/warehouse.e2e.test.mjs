@@ -307,3 +307,26 @@ test('设置里两个单价分开存；停用仓库账号当场掉线', async ()
   await admin('PATCH', `/api/admin/warehouse-users/${me.id}`, { disabled: true });
   assert.equal((await wh('GET', '/api/wh/batches', undefined, { raw: true })).status, 401);
 });
+
+test('清理已经走完的旧订单：预演不删，确认才删；没走完的订单一件不碰', async () => {
+  // 再录一单还没分拣的：它不该被清理
+  const open = await admin('POST', '/api/admin/quick-order', { customerId: ctx.aId, kind: 'buy', orderNo: `OPEN-${stamp}`, lines: [{ title: '还在路上' }] });
+  const bad = await admin('POST', '/api/admin/cleanup', { before: '12/01' }, { raw: true });
+  assert.equal(bad.status, 400);
+  const dry = await admin('POST', '/api/admin/cleanup', { before: '2099-01-01' });
+  assert.equal(dry.committed, false);
+  const ids = dry.batches.map((b) => b.id);
+  assert.ok(ids.includes(ctx.batch2), '直邮放行的那单走完了');
+  assert.ok(ids.includes(ctx.batchId), '第一单：甲已寄出、乙回国中，都算走完');
+  assert.ok(!ids.includes(open.batchId), '还没分拣的不碰');
+  assert.ok(dry.photoCount >= 1);
+  assert.equal((await alice('GET', `/api/w/${ctx.aToken}`)).parcels.length, 1, '预演不删');
+  const done = await admin('POST', '/api/admin/cleanup', { before: '2099-01-01', commit: true });
+  assert.equal(done.committed, true);
+  const view = await alice('GET', `/api/w/${ctx.aToken}`);
+  assert.equal(view.parcels.length, 0, '包裹和平铺图一起删掉');
+  assert.deepEqual(view.items.map((i) => i.orderNo), [`OPEN-${stamp}`].filter(() => false), '没放行的那单客户本来就看不到');
+  const adminView = await admin('GET', `/api/admin/customers/${ctx.aId}`);
+  assert.deepEqual(adminView.items.map((i) => i.orderNo), [`OPEN-${stamp}`], '只剩没走完的那单');
+  assert.equal((await admin('GET', `/api/admin/batches/${ctx.batchId}`, undefined, { raw: true })).status, 404);
+});

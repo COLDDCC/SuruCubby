@@ -1,6 +1,12 @@
 import { api } from '/admin/api.js';
 import { bindActions, escapeHtml, money, promptBox, toast } from '/admin/ui.js';
 
+/** 默认清到本月 1 号之前：11 月走完的，12 月来删 */
+function firstOfMonth() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
 export async function render(view) {
   const [data, wh] = await Promise.all([api.get('/api/admin/settings'), api.get('/api/admin/warehouse-users')]);
   view.innerHTML = `
@@ -42,6 +48,17 @@ export async function render(view) {
     </div>
 
     <div class="card">
+      <h2>清理走完的旧订单</h2>
+      <p class="small muted">只删每一件都已经寄出 / 回国 / 取消的订单，连同它们的直邮包裹和平铺图；还在路上的一件不碰。客户账号、地址、收款记录都留着。删了找不回来，先「看看会删什么」。</p>
+      <div class="row">
+        <label for="cleanBefore" style="margin:0">最后一次变动早于</label>
+        <input id="cleanBefore" type="date" value="${firstOfMonth()}">
+        <button class="plain" data-action="cleanPreview">看看会删什么</button>
+      </div>
+      <div id="cleanReport"></div>
+    </div>
+
+    <div class="card">
       <h2>老流程的设置</h2>
       <p class="small muted">「称重分摊 → 客户申请发货 → 你寄出」那套流程现在不用了，这两个数只在你还用老页面时才起作用。</p>
       <label for="fee">国内寄出每次收费（元）</label>
@@ -71,7 +88,30 @@ export async function render(view) {
     () => ({ domesticFeeYuan: document.getElementById('fee').value.trim(), intlPriceYuanPerKg: document.getElementById('price').value.trim() }),
     (r) => `已保存：国内 ${money(r.domesticFeeFen)} / 次，国际 ${money(r.intlPriceFenPerKg)} / kg`,
   );
+  const report = view.querySelector('#cleanReport');
   bindActions(view, {
+    cleanPreview: async () => {
+      const before = view.querySelector('#cleanBefore').value;
+      const r = await api.post('/api/admin/cleanup', { before });
+      if (!r.batchCount) {
+        report.innerHTML = `<p class="small">${escapeHtml(before)} 之前没有走完的订单。</p>`;
+        return;
+      }
+      report.innerHTML = `<p>会删 <b>${r.batchCount}</b> 个订单、${r.itemCount} 件东西、${r.parcelCount} 个直邮包裹、${r.photoCount} 张平铺图：</p>
+        <p class="small muted">${r.batches.map((b) => escapeHtml(b.orderNo || b.name)).join('、')}${r.batchCount > r.batches.length ? ' …' : ''}</p>
+        <button class="danger" id="cleanGo">确认删除这 ${r.batchCount} 个订单</button>`;
+      report.querySelector('#cleanGo').onclick = async (e) => {
+        e.target.disabled = true;
+        try {
+          const done = await api.post('/api/admin/cleanup', { before, commit: true });
+          toast(`删掉了 ${done.batchCount} 个订单`);
+          render(view);
+        } catch (err) {
+          e.target.disabled = false;
+          toast(err.message, true);
+        }
+      };
+    },
     add: async () => {
       await api.post('/api/admin/warehouse-users', {
         username: document.getElementById('whUser').value.trim(),

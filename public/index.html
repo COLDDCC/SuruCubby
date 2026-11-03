@@ -5,45 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>骏河屋拼团 · 个人仓库</title>
 <link rel="icon" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0e2a47">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="wrap">
+<header class="entry-hero">
+  <img src="/logo.svg" alt="">
+  <h1>骏河屋拼团 · 个人仓库</h1>
+  <p>买了什么、到哪了、单号多少，自己登进来看</p>
+</header>
+<div class="wrap entry-card">
   <div class="card">
-    <h1>骏河屋拼团 · 个人仓库</h1>
-    <p class="muted">先选一下你是谁，后面只看该看的东西。</p>
-
-    <div class="row">
+    <div class="entry-roles">
       <button id="tab-user" class="btn" type="button">我是团员</button>
       <button id="tab-admin" class="btn ghost" type="button">我是群主</button>
-      <a class="btn ghost" href="/wh/" style="text-decoration:none">我是仓库</a>
+      <a class="btn ghost" href="/wh/">我是仓库</a>
     </div>
 
     <form id="form-user">
       <label for="qq">QQ 号</label>
-      <input id="qq" name="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789">
+      <input id="qq" name="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789" style="width:100%">
       <label for="user-pw">密码</label>
-      <div class="row">
-        <input id="user-pw" type="password" autocomplete="current-password" placeholder="初始密码见群主发给你的那条">
-        <button class="btn" type="submit">进入</button>
-      </div>
-      <p class="small muted">密码忘了或者被别人改过？在群里问一声群主，他能给你重设回初始密码。</p>
+      <input id="user-pw" type="password" autocomplete="current-password" placeholder="第一次登录用群主给的初始密码" style="width:100%">
+      <p><button class="btn" type="submit" style="width:100%">进入我的仓库</button></p>
+      <p class="small muted">忘了密码就在群里找群主，他能帮你重设。</p>
     </form>
 
     <form id="form-admin" hidden>
       <label for="admin-pw">后台密码</label>
-      <div class="row">
-        <input id="admin-pw" type="password" autocomplete="current-password">
-        <button class="btn" type="submit">进入后台</button>
-      </div>
-      <p class="small muted">这个密码只有你自己知道，团员看不到后台。</p>
+      <input id="admin-pw" type="password" autocomplete="current-password" style="width:100%">
+      <p><button class="btn" type="submit" style="width:100%">进入后台</button></p>
     </form>
 
     <p id="msg" class="small" role="status" aria-live="polite" hidden></p>
-
-    <p class="small muted">仓库的同事点「我是仓库」，用群主给你的账号登录。</p>
-    <p class="small muted">以前群发的专属链接 <code>/w/xxxxxxxx</code> 照样能打开，登进去是同一个人。</p>
   </div>
+  <p class="small muted" style="text-align:center">仓库的同事点「我是仓库」，用群主给的账号登录。以前发的专属链接 <code>/w/…</code> 照样能打开。</p>
 </div>
 <script type="module" src="/entry.js"></script>
 </body>

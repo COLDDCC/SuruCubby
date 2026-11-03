@@ -21,6 +21,7 @@ import { requestAdminRoutes, requestCustomerRoutes } from './routes/admin/reques
 import { parcelRoutes } from './routes/admin/parcels.ts';
 import { warehouseUserRoutes } from './routes/admin/warehouseUsers.ts';
 import { quickOrderRoutes } from './routes/admin/quickOrder.ts';
+import { cleanupRoutes } from './routes/admin/cleanup.ts';
 import { warehouseRoutes } from './routes/warehouse.ts';
 const app = new Hono<{ Bindings: Env }>();
 app.use('/api/*', mutationGuard);
@@ -110,6 +111,7 @@ app.route('/api/admin/requests', requestAdminRoutes);
 app.route('/api/admin/parcels', parcelRoutes);
 app.route('/api/admin/warehouse-users', warehouseUserRoutes);
 app.route('/api/admin/quick-order', quickOrderRoutes);
+app.route('/api/admin/cleanup', cleanupRoutes);
 
 // 仓库工作台：自己一把钥匙，和群主、客户互不相通
 app.route('/api/wh', warehouseRoutes);
