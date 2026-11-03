@@ -58,14 +58,42 @@
 
 这一版上线后只录新订单，不需要导入以前的数据。
 
-### 升级已有部署
+## 部署到 VPS（推荐：香港 / 东京，国内能稳定打开）
 
-新增迁移 `migrations/0009_warehouse_direct.sql`。**先备份**，再 `npm run db:remote`，然后 `npm run deploy`。
-老数据的商品一律视为「早已放行」，客户页不会少东西；老的称重分摊 / 发货申请数据保留，只是导航里不再放「发货申请」。
+Cloudflare Workers 免费版在国内走海外节点，`*.workers.dev` 打不开，绑了自己的域名也时快时慢。所以正式部署用一台小 VPS：同一份代码用 Node 跑（`src/server.ts`），数据库是本机的 SQLite 文件，不需要 ICP 备案。
 
-平铺图压缩到长边 1600px 的 JPEG（一般两三百 KB）存在 D1 里，不需要 R2。注意 D1 免费版**单个数据库上限 500 MB**，大约能存一两千张平铺图；快满时可以升级 Workers 付费版（单库 10 GB），或改存 R2。
+1. 买一台香港或东京、标明大陆优化线路（CN2 GIA / 精品网）的 VPS，1 核 1 GB 够用，系统选 Ubuntu 22.04 / 24.04。先按小时计费，请国内不同省份、不同运营商的群友打开测一下速度，再包月。
+2. 在 Cloudflare 的 DNS 里给域名（比如 `cang.你的域名`）加一条 **A 记录指向 VPS 的 IP**，代理状态选 **DNS only（灰色云朵）**，流量直连你的服务器。
+3. 在 VPS 上一条命令装好（Node 24、Caddy 自动 HTTPS、开机自启、每天凌晨 4 点备份）：
 
----
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/COLDDCC/SuruCubby/HEAD/deploy/setup.sh -o setup.sh
+   sudo DOMAIN=cang.你的域名 bash setup.sh
+   ```
+
+   过程中会让你设后台密码。装完打开 `https://cang.你的域名/`。
+4. 以后更新：`sudo bash /opt/surucubby/deploy/update.sh`（拉最新代码、先备份再重启，数据库迁移启动时自动执行）。
+5. 备份在 `/var/lib/surucubby/backups/`，留 30 天；在 `/etc/surucubby.env` 里填 `BACKUP_REMOTE`（rclone 远端，比如 Cloudflare R2）就再传一份到异地。恢复：`sudo bash /opt/surucubby/deploy/restore.sh <备份文件.db.gz>`。
+
+页面不加载境外资源：SheetJS 由 `npm run vendor` 下载到本机（安装 / 更新脚本自动执行），封面图经自己服务器代理并缓存到磁盘。VPS 上平铺图同样存在数据库里，没有 D1 那 500 MB 的限制，只看硬盘大小。
+
+安全：客户登录除了按 QQ 锁（错 5 次锁 15 分钟），还按 IP 限流（同一网络 15 分钟错 30 次就锁），防止有人拿初始密码 123456 挨个试 QQ 号；所有页面禁止被别的网站用 iframe 套用。
+
+### 本地开发
+
+```bash
+npm install
+cp .dev.vars.example .env   # 填 ADMIN_PASSWORD 和 SESSION_SECRET
+npm run dev                 # http://127.0.0.1:8787，数据在 ./data/，迁移启动时自动执行
+npm run test                # 单元测试
+npm run test:e2e            # 端到端：自己起一个隔离的 Node 实例跑完关掉
+```
+
+需要 Node 22.16 以上（用 Node 自带的 `node:sqlite`），推荐 Node 24。
+
+### 仍然可以部署到 Cloudflare Workers（备用）
+
+先备份，`npm run worker:db:remote` 打迁移（新增 `0009_warehouse_direct.sql`），再 `npm run worker:deploy`。D1 免费版**单个数据库上限 500 MB**，平铺图大约能存一两千张，记得按月清理。
 
 ## 旧版说明（称重分摊 / 客户申请发货那一套，现在不用了，留作参考）
 
@@ -90,7 +118,7 @@
 
 ## 更新已有部署
 
-先备份数据库，执行 `npm run db:remote` 应用 `0002_workflow.sql`，再 `npm run deploy`。新安装也必须先建库并应用全部迁移。此仓库的 D1 ID 仍是占位符，未自动部署到生产环境。
+VPS 用 `deploy/update.sh`；Workers 用 `npm run worker:db:remote` 再 `npm run worker:deploy`。新安装也必须先建库并应用全部迁移。此仓库的 D1 ID 仍是占位符，未自动部署到生产环境。
 
 旧版按客户整摞称重生成的账目保留查看；若需要客户逐件申请发货，先在未收款、未寄出的条件下撤销旧分摊，再逐件填重量重新确认，不能直接猜每件重量。
 
@@ -121,7 +149,7 @@
 ```bash
 npm install
 cp .dev.vars.example .dev.vars     # 填上 ADMIN_PASSWORD 和 SESSION_SECRET
-npm run db:local                   # 建本地库表
+# （旧）Workers 本地：npm run worker:db:local
 npm run dev                        # http://127.0.0.1:8787
 ```
 
@@ -134,14 +162,14 @@ npm install
 npx wrangler login                          # 浏览器里授权一次 Cloudflare 账号
 
 npx wrangler d1 create surucubby            # 把返回的 database_id 填进 wrangler.toml
-npm run db:remote                           # 在线上库建表
-npm run deploy                              # 先部署，Worker 才存在
+npm run worker:db:remote                    # 在线上库建表
+npm run worker:deploy                       # 先部署，Worker 才存在
 
 npx wrangler secret put ADMIN_PASSWORD      # 后台密码
 npx wrangler secret put SESSION_SECRET      # Cookie 签名密钥，随便一串长随机字符串
 ```
 
-密码和密钥设好就立刻生效，不用再 deploy 一次。以后改代码只要 `npm run deploy`。
+密码和密钥设好就立刻生效，不用再 deploy 一次。以后改代码只要 `npm run worker:deploy`。
 
 部署完**务必绑定自己的域名**（Workers 控制台 → 该 Worker → Settings → Domains & Routes）。
 `*.workers.dev` 在国内经常打不开。

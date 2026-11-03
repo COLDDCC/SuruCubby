@@ -24,6 +24,32 @@ import { quickOrderRoutes } from './routes/admin/quickOrder.ts';
 import { cleanupRoutes } from './routes/admin/cleanup.ts';
 import { warehouseRoutes } from './routes/warehouse.ts';
 const app = new Hono<{ Bindings: Env }>();
+
+/** Workers 上用边缘缓存，Node（VPS）上用入口传进来的磁盘缓存。 */
+function imageCache(env: Env): ImageCache {
+  if (env.IMAGE_CACHE) return env.IMAGE_CACHE;
+  return (globalThis as unknown as { caches: { default: ImageCache } }).caches.default;
+}
+
+/**
+ * 所有响应都带的安全头：不许别的网站把后台 / 客户页套进 iframe（点击劫持），
+ * 不许浏览器把上传的东西猜成别的类型执行。页面里还有内联事件（图片 onerror），所以 CSP 只管框架和 base。
+ */
+const SECURITY_HEADERS: Array<[string, string]> = [
+  ['X-Content-Type-Options', 'nosniff'],
+  ['X-Frame-Options', 'DENY'],
+  ['Content-Security-Policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'"],
+];
+app.use('*', async (c, next) => {
+  await next();
+  try {
+    for (const [k, v] of SECURITY_HEADERS) c.res.headers.set(k, v);
+  } catch {
+    // 直接透传的 fetch 响应头是只读的：复制一份再加
+    c.res = new Response(c.res.body, c.res);
+    for (const [k, v] of SECURITY_HEADERS) c.res.headers.set(k, v);
+  }
+});
 app.use('/api/*', mutationGuard);
 
 app.onError((err, c) => {
@@ -43,7 +69,7 @@ app.get('/img/i/:id', async (c) => {
   const id = Number.parseInt(c.req.param('id'), 10);
   if (!Number.isInteger(id) || id <= 0) return c.text('找不到图片', 404);
 
-  const cache = caches.default;
+  const cache = imageCache(c.env);
   const cacheKey = new Request(new URL(c.req.url).toString(), { method: 'GET' });
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
