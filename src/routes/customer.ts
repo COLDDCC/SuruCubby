@@ -3,6 +3,7 @@ import type { Env } from '../lib/env.ts';
 import { badRequest, readJson } from '../lib/http.ts';
 import { nowIso } from '../lib/db.ts';
 import { buildCustomerView } from '../lib/customerView.ts';
+import { photoResponse } from '../lib/parcels.ts';
 import {
   clearCustomerSession,
   customerSession,
@@ -106,7 +107,7 @@ customerRoutes.post('/login', async (c) => {
 
   await clearFailures(c.env, key);
   await issueCustomerSession(c, customer.token, customer.id, customer.passwordHash ?? null);
-  const view = await buildCustomerView(c.env, customer.id);
+  const view = await buildCustomerView(c.env, customer.id, { forCustomer: true });
   return c.json({
     verified: true,
     token: customer.token,
@@ -148,7 +149,7 @@ customerRoutes.get('/:token', async (c) => {
     return c.json({ verified: false }, 401);
   }
 
-  const view = await buildCustomerView(c.env, me.id);
+  const view = await buildCustomerView(c.env, me.id, { forCustomer: true });
   if (!view) return c.json({ verified: false }, 401);
   return c.json({
     verified: true,
@@ -156,6 +157,19 @@ customerRoutes.get('/:token', async (c) => {
     ...view,
     serverTime: nowIso(),
   });
+});
+
+/** 直邮包裹的平铺图：只有本人、只有群主放行之后才看得到。 */
+customerRoutes.get('/:token/parcels/:pid/photos/:photoId', async (c) => {
+  const me = await customerSession(c, c.req.param('token'));
+  if (me === null) return c.json({ error: '请先登录' }, 401);
+  const parcelId = Number(c.req.param('pid'));
+  const parcel = await c.env.DB.prepare('SELECT customer_id AS customerId, released_at AS releasedAt FROM parcels WHERE id = ?')
+    .bind(Number.isSafeInteger(parcelId) ? parcelId : 0)
+    .first<{ customerId: number; releasedAt: string | null }>();
+  if (!parcel || parcel.customerId !== me.id || !parcel.releasedAt) return c.json({ error: '没有这张图' }, 404);
+  const res = await photoResponse(c.env, parcelId, Number(c.req.param('photoId')) || 0);
+  return res ?? c.json({ error: '没有这张图' }, 404);
 });
 
 customerRoutes.post('/:token/logout', (c) => {

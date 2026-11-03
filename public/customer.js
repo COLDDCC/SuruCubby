@@ -8,22 +8,13 @@ const app = document.getElementById('app');
 const keep = { selected: new Set(), scrollY: 0 };
 
 const GROUPS = [
-  {
-    title: '可发货',
-    statuses: ['cn_stock'],
-    note: '勾选要寄的商品，选择地址后提交申请。扫码转账后由群主确认。',
-  },
-  { title: '在日本', statuses: ['ordered', 'jp_warehouse'], note: '' },
-  { title: '运输中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
+  { title: '已下单，等仓库收货', statuses: ['ordered', 'jp_warehouse'], note: '' },
+  { title: '仓库已分拣', statuses: ['sorted'], note: '仓库已经收到并找齐了，接下来打包。' },
+  { title: '已打包，等付运费', statuses: ['packed'], note: '' },
+  { title: '回国中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
+  { title: '到了，找群主拿', statuses: ['cn_stock'], note: '东西已经在群主手上，发货在群里找群主。' },
   { title: '已寄出 / 已签收', statuses: ['shipped', 'delivered'], note: '' },
 ];
-
-const REQUEST_LABEL = {
-  pending: '待群主确认收款',
-  paid: '已收款，等群主寄出',
-  shipped: '已寄出',
-  cancelled: '已取消',
-};
 
 async function api(path, options) {
   const res = await fetch(path, { credentials: 'same-origin', ...options });
@@ -129,14 +120,6 @@ function renderMustChange(data) {
   document.getElementById('peek').onclick = () => render(data);
 }
 
-/**
- * 能勾去发货的件，和后端 `POST /:token/requests` 查的一模一样：
- * 可发货、没标缺件、运费已经拆到这一件上。少一条就是点了必被拦，别摆出来让人白点。
- */
-function shippableOf(item) {
-  return item.status === 'cn_stock' && !item.missing && item.intlFeeFen !== null;
-}
-
 function itemCard(item) {
   // 汇总卡按后端口径把取消/退款的件剔掉了，件上就不该再显示「未付」，不然上下两个数对不上
   const dead = item.status === 'cancelled' || item.status === 'refunded';
@@ -144,7 +127,9 @@ function itemCard(item) {
     ? ''
     : item.goodsPaid
       ? '<span class="badge ok">货款已付</span>'
-      : '<span class="badge danger">货款未付</span>';
+      : item.goodsFeeJpy
+        ? '<span class="badge danger">货款未付</span>'
+        : '';
   const missing = item.missing ? '<span class="badge warn">缺件</span>' : '';
   const title = item.productUrl
     ? `<a href="${escapeHtml(item.productUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a>`
@@ -152,294 +137,102 @@ function itemCard(item) {
   const note = item.exceptionNote
     ? `<div class="small" style="color:var(--warn)">${escapeHtml(item.exceptionNote)}</div>`
     : '';
-  const selectable = shippableOf(item);
-  // 已经报过申请的、群主标了缺件的、运费还没拆到这件的都勾不了，得说清楚为什么勾不了
-  const picker = selectable
-    ? `<label class="pick"><input type="checkbox" data-ship-item="${item.id}" ${item.requestId ? 'disabled' : ''}>${
-        item.requestId ? '已申请' : '发货'
-      }</label>`
-    : '';
-  const noFee =
-    item.status === 'cn_stock' && !item.missing && item.intlFeeFen === null
-      ? '<div class="small muted">这一摞的运费还没拆到这一件上，在群里说一声，群主重算一次分摊就能勾。</div>'
-      : '';
+  const done = ['sorted', 'packed', 'intl_transit', 'cn_arrived', 'cn_stock', 'shipped', 'delivered'].includes(item.status);
   return `
     <div class="item">
-      ${picker}
       ${thumb(item)}
       <div class="body">
         <div class="title">${title}</div>
         <div class="small row" style="gap:6px;margin-top:2px">
           ${codeTag(item)}
-          <span class="muted">${escapeHtml(item.packageName || item.batchName || '')}</span>
+          <span class="muted">${escapeHtml(item.batchName || '')}</span>
         </div>
         ${orderTag(item)}
-        <div class="small muted">
-          实际价格 ${yen(item.actualPriceJpy)} ·
-          应付 <span class="money">${yen(item.goodsFeeJpy)}</span>
-        </div>
+        ${item.goodsFeeJpy ? `<div class="small muted">应付 <span class="money">${yen(item.goodsFeeJpy)}</span></div>` : ''}
         <div class="small row" style="gap:6px;margin-top:4px">
-          <span class="badge ${item.status==='cn_stock' ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}${missing}
+          <span class="badge ${done ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}${missing}
         </div>
-        ${item.returnTrackingNo ? `<div class="small">回国单号：<span>${escapeHtml(item.returnTrackingNo)}</span> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button></div>` : ''}
-        ${item.intlFeeFen === null || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
-        ${item.missing ? '<div class="small muted">这件东西没到齐，发货的时候不会带上它。</div>' : ''}
-        ${noFee}
+        ${item.returnTrackingNo ? `<div class="small">回国单号：<b>${escapeHtml(item.returnTrackingNo)}</b> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button>${item.returnedAt ? ` <span class="muted">· ${escapeHtml(item.returnedAt)} 回国</span>` : ''}</div>` : ''}
+        ${item.intlFeeFen === null || item.intlFeeFen === undefined || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
+        ${item.missing ? '<div class="small muted">这件东西没到齐。</div>' : ''}
         ${note}
       </div>
     </div>`;
 }
 
-/**
- * 一摞的运费：件上的数加起来就是这一摞（分摊确认时是同一份数）。
- * 老账里有的摞只记了摞的钱、没拆到件上，那种就照摞说。
- */
-function stackFee(group, items) {
-  const live = items.filter(
-    (i) => i.weighGroupId === group.id && i.status !== 'cancelled' && i.status !== 'refunded',
-  );
-  const withFee = live.filter((i) => i.intlFeeFen !== null);
-  if (!withFee.length) {
-    const total = Number(group.intlFeeFen ?? 0);
-    return { total, unpaid: group.feePaid ? 0 : total };
-  }
-  return {
-    total: withFee.reduce((s, i) => s + i.intlFeeFen, 0),
-    unpaid: withFee.filter((i) => !i.intlPaid).reduce((s, i) => s + i.intlFeeFen, 0),
-  };
-}
-
-function addressForm(count) {
-  if (count >= 3) return '<p class="small muted">地址最多 3 个。要换就先删掉一个再填新的。</p>';
-  return `
-    <label for="recipient">收件人</label>
-    <input id="recipient" maxlength="100" placeholder="收件人姓名">
-    <label for="phone">电话</label>
-    <input id="phone" maxlength="40" inputmode="tel" placeholder="手机号">
-    <label for="detail">详细地址</label>
-    <input id="detail" maxlength="500" placeholder="省市区 + 小区门牌，写全一点">
-    <p><button id="add-address">保存地址</button></p>`;
-}
-
-/** 勾了东西才给提交；一件都勾不了的时候别杵着一个死按钮。 */
-function shipPanel(data) {
-  const addresses = data.addresses || [];
-  const items = data.items || [];
-  // 群主标了「这一批你自己带回国 / 另找转运」：这一栏整个就不归我们管了，摆着只会让人瞎勾
-  if (data.customer?.selfReturn) {
-    return `
-    <div class="card">
-      <h2>发货</h2>
-      <p class="small">群主把你这一批标成了「不拼邮」，后面的称重、国际运费和国内快递都不走我们这条线，货款照旧按下单表算。
-        要是改主意要跟群里一起拼回来，在群里说一声，群主在后台改回来这里就恢复了。</p>
-      ${
-        addresses.length
-          ? `<p class="small muted" style="margin:0 0 4px">已经存过的收货地址</p>
-             ${addresses
-               .map(
-                 (a) =>
-                   `<p class="small" style="margin:2px 0">${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</p>`,
-               )
-               .join('')}`
-          : ''
-      }
+/** 直邮包裹：放行之前只说「打好包了」，放行之后单号、毛重、运费、平铺图、每件来自哪个订单都摆出来。 */
+function parcelCard(p) {
+  const list = `<ul class="small" style="margin:6px 0 0;padding-left:18px">${p.items
+    .map((i) => {
+      const code = codeTag(i);
+      return `<li>${code || ''} ${escapeHtml(i.title)}${i.orderNo ? ` <button class="badge copy-chip mono" data-copy="${escapeHtml(i.orderNo)}">订单 ${escapeHtml(i.orderNo)}</button>` : ` <span class="muted">${escapeHtml(i.batchName)}</span>`}</li>`;
+    })
+    .join('')}</ul>`;
+  if (!p.released) {
+    return `<div class="item" style="display:block">
+      <div class="row" style="justify-content:space-between"><strong>仓库已经打好包 · ${p.itemCount} 件</strong><span class="badge warn">等付运费</span></div>
+      <p class="small muted" style="margin:4px 0">${escapeHtml(p.submitDay)} 打包。群主会找你说运费，付完之后这里会出现快递单号和平铺图。</p>
+      ${list}
     </div>`;
   }
-  const shippable = items.filter(shippableOf);
-  const open = shippable.filter((i) => !i.requestId);
-
-  // 初始密码下后端拦住一切写操作，填地址、提交都会撞 403 —— 那就别放按钮，只指上面那条横幅
-  if (data.mustChange) {
-    return `
-    <div class="card">
-      <h2>申请发货</h2>
-      <p class="small">先把上面那个共用的初始密码改成你自己的，这一栏才让填地址、勾商品。</p>
-      ${
-        addresses.length
-          ? `<p class="small muted" style="margin:0 0 4px">已经存过的收货地址</p>
-             ${addresses
-               .map(
-                 (a) =>
-                   `<p class="small" style="margin:2px 0">${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</p>`,
-               )
-               .join('')}`
-          : ''
-      }
-    </div>`;
-  }
-
-  // 一件东西都还没有的新客户：给他地址表单只会让人瞎填
-  if (!items.length && !addresses.length) return '';
-
-  const rows = addresses.map(
-    (a) => `<label class="row">
-      <input name="ship-address" type="radio" value="${a.id}" ${addresses.length === 1 ? 'checked' : ''}>
-      <span>${escapeHtml(a.recipient)} · ${escapeHtml(a.phone)} · ${escapeHtml(a.detail)}</span>
-      <button class="small plain" data-delete-address="${a.id}">删除</button>
-    </label>`,
-  );
-  let hint = '';
-  if (!open.length) {
-    hint = shippable.length
-      ? '<p class="small muted">能发的几件都已经报过申请了，等群主确认收款。</p>'
-      : items.length
-        ? '<p class="small muted">现在还没有能发的商品。东西到国内、群主算完运费，这里就会让你勾。</p>'
-        : '<p class="small muted">群主还没把你买的东西录进仓库。录进来这一页自己会更新，不用你做什么。</p>';
-  } else if (!rows.length) {
-    hint = '<p class="small muted">还没有收货地址，填一个保存后勾选的商品才提交得了。</p>';
-  }
-  return `
-    <div class="card">
-      <h2>申请发货</h2>
-      <p class="small muted" style="margin:0 0 4px">收货地址（最多 3 个）</p>
-      ${rows.join('')}
-      ${addressForm(addresses.length)}
-      ${hint}
-    </div>`;
-}
-
-/**
- * 底部常驻的结算条：手机上要翻着勾几十件，合计和提交按钮得一直看得见，
- * 藏在面板里就得来回滚（抄的 ShipLocker / fish-groupbuy-order 那套底部条做法）。
- * 勾不了件、或者还没地址时不出现——不摆点不动的按钮。
- */
-function shipBar(data) {
-  if (data.mustChange || data.customer?.selfReturn) return '';
-  const items = data.items || [];
-  const open = items.filter((i) => shippableOf(i) && !i.requestId);
-  if (!open.length || !(data.addresses || []).length) return '';
-  return `
-    <div class="shipbar">
-      <div class="shipbar-inner">
-        <div class="total" id="shipping-total">勾上要寄的商品</div>
-        <button id="request-shipping" disabled>提交发货申请</button>
-      </div>
-    </div>`;
+  const photos = (p.photoIds || [])
+    .map((pid) => {
+      const src = `/api/w/${encodeURIComponent(token)}/parcels/${p.id}/photos/${pid}`;
+      return `<a href="${src}" target="_blank"><img src="${src}" alt="平铺图" loading="lazy"></a>`;
+    })
+    .join('');
+  return `<div class="item" style="display:block">
+    <div class="row" style="justify-content:space-between">
+      <strong>${escapeHtml(p.trackingNo)} <button class="small plain" data-copy="${escapeHtml(p.trackingNo)}">复制单号</button></strong>
+      <span class="badge ok">已寄出</span>
+    </div>
+    <div class="kv"><span>毛重</span><b>${Number(p.grossWeightG).toLocaleString()} g</b></div>
+    <div class="kv"><span>运费</span><b class="money">${money(p.feeFen)}</b></div>
+    <div class="kv"><span>里面有</span><b>${p.itemCount} 件</b></div>
+    ${list}
+    ${photos ? `<div class="parcel-photos">${photos}</div>` : ''}
+  </div>`;
 }
 
 function render(data) {
-  // 增删地址会整页重画，勾过的商品和滚到的位置得留住
   keep.scrollY = window.scrollY;
-  keep.selected = new Set(
-    [...app.querySelectorAll('[data-ship-item]:checked')].map((el) => Number(el.dataset.shipItem)),
-  );
-
   const s = data.summary;
   const items = data.items || [];
+  const parcels = data.parcels || [];
+  const direct = data.customer.shipMode === 'direct';
   const shownStatuses = new Set(GROUPS.flatMap((g) => g.statuses));
   const closed = items.filter((i) => !shownStatuses.has(i.status));
 
-  // 「可发货」那一组紧贴着发货面板，勾完就能提交；别让它被其它组隔开
-  const stockGroup = GROUPS.find((g) => g.statuses.includes('cn_stock'));
-  const stockHtml = (() => {
-    const list = items.filter((i) => stockGroup.statuses.includes(i.status));
+  const groupsHtml = GROUPS.map((group) => {
+    const list = items.filter((i) => group.statuses.includes(i.status));
     if (list.length === 0) return '';
     return `
-      <div class="card">
-        <h2>${stockGroup.title}<span class="muted small"> · ${list.length} 件</span></h2>
-        ${stockGroup.note ? `<p class="small muted">${stockGroup.note}</p>` : ''}
-        ${list.map(itemCard).join('')}
-      </div>`;
-  })();
-  const groupsHtml = GROUPS.filter((g) => g !== stockGroup)
-    .map((group) => {
-      const list = items.filter((i) => group.statuses.includes(i.status));
-      if (list.length === 0) return '';
-      return `
       <div class="card">
         <h2>${group.title}<span class="muted small"> · ${list.length} 件</span></h2>
         ${group.note ? `<p class="small muted">${group.note}</p>` : ''}
         ${list.map(itemCard).join('')}
       </div>`;
-    })
-    .join('');
+  }).join('');
 
+  const parcelHtml = parcels.length
+    ? `<div class="card">
+        <h2>我的直邮包裹</h2>
+        ${parcels.map(parcelCard).join('')}
+      </div>`
+    : '';
+
+  // 老流程（称重分摊 / 寄出）留下的记录：有才显示
   const intlHtml = (data.weighGroups || []).length
-    ? `<div class="card">
-        <h2>国际运费</h2>
+    ? `<div class="card"><details><summary>以前的国际运费记录</summary>
         ${data.weighGroups
-          .map((g) => {
-            const fee = stackFee(g, items);
-            // 整摞都没付时别再写两遍一样的数
-            const shown = fee.unpaid
-              ? fee.unpaid === fee.total
-                ? `${money(fee.total)} 待付`
-                : `${money(fee.total)} 待付 ${money(fee.unpaid)}`
-              : `${money(fee.total)} 已付`;
-            return `
-          <div class="item" style="display:block">
-            <div class="row" style="justify-content:space-between">
-              <strong>${escapeHtml(g.packageName)}</strong>
-            </div>
-            <div class="kv"><span>你这一摞重量</span><b>${Number(g.weightG || 0).toLocaleString()} g</b></div>
-            <div class="kv"><span>件数</span><b>${g.items.length} 件</b></div>
-            <div class="kv"><span>这一摞国际运费</span><b class="${fee.unpaid ? 'unpaid' : 'paid'} money">${shown}</b></div>
-            <details class="small"><summary>看看是哪些东西</summary>
-              <ul>${g.items.map((i) => `<li>${escapeHtml(i.title)}</li>`).join('')}</ul>
-            </details>
-          </div>`;
-          })
-          .join('')}
-       </div>`
+          .map((g) => `<div class="kv"><span>${escapeHtml(g.packageName)} · ${Number(g.weightG || 0).toLocaleString()} g</span><b class="${g.feePaid ? 'paid' : 'unpaid'} money">${money(g.intlFeeFen)} ${g.feePaid ? '已付' : '待付'}</b></div>`)
+          .join('')}</details></div>`
     : '';
-
   const shipHtml = (data.shipments || []).length
-    ? `<div class="card">
-        <h2>寄出记录</h2>
+    ? `<div class="card"><details><summary>以前的寄出记录</summary>
         ${data.shipments
-          .map(
-            (s2) => `
-          <div class="item" style="display:block">
-            <div class="row" style="justify-content:space-between">
-              <strong>${
-                s2.trackingNo
-                  ? `${escapeHtml(s2.trackingNo)} <button class="small plain" data-copy="${escapeHtml(s2.trackingNo)}">复制</button>`
-                  : '单号待填'
-              }</strong>
-              <span class="${s2.feePaid ? 'paid' : 'unpaid'} money">${money(s2.feeFen)} ${s2.feePaid ? '已付' : '未付'}</span>
-            </div>
-            <div class="small muted">${s2.items.length} 件 · ${beijingTime(s2.shippedAt || s2.createdAt)}</div>
-            <details class="small"><summary>看看寄了哪些</summary>
-              <ul>${s2.items.map((i) => `<li>${escapeHtml(i.title)}</li>`).join('')}</ul>
-            </details>
-          </div>`,
-          )
-          .join('')}
-       </div>`
-    : '';
-
-  const requestsHtml = (data.requests || []).length
-    ? `<div class="card">
-        <h2>发货申请</h2>
-        ${data.requests
-          .map((r) => {
-            let to = '';
-            try {
-              const a = JSON.parse(r.addressSnapshot);
-              if (a && a.recipient) to = `${a.recipient} ${a.phone || ''} ${a.detail || ''}`;
-            } catch {
-              /* 快照不是 JSON 就别让整页白屏 */
-            }
-            const list = items.filter((i) => i.requestId === r.id);
-            return `<div class="item" style="display:block">
-              <div class="row" style="justify-content:space-between">
-                <strong>#${r.id} · ${r.itemCount} 件 · ${escapeHtml(REQUEST_LABEL[r.status] || r.status)}</strong>
-                <span class="money">${money(r.domesticFeeFen)} 国内运费</span>
-              </div>
-              <div class="small muted">${beijingTime(r.createdAt)}${to ? ` · 寄到 ${escapeHtml(to)}` : ''}</div>
-              ${list.length ? `<details class="small"><summary>看看申请了哪些</summary><ul>${list
-                .map((i) => `<li>${escapeHtml(i.title)}${
-                  i.intlPaid || i.status === 'cancelled' || i.status === 'refunded'
-                    ? ''
-                    : ` · 国际运费 ${money(i.intlFeeFen ?? 0)} 待付`
-                }</li>`)
-                .join('')}</ul></details>` : ''}
-              ${r.status === 'pending' ? `<p><button class="small plain" data-cancel-request="${r.id}">取消申请</button></p>` : ''}
-            </div>`;
-          })
-          .join('')}
-        <p class="small muted">国际运费在上面「国际运费」那一摞里一起算，这里只列国内运费。</p>
-       </div>`
+          .map((s2) => `<div class="kv"><span>${s2.trackingNo ? `${escapeHtml(s2.trackingNo)} <button class="small plain" data-copy="${escapeHtml(s2.trackingNo)}">复制</button>` : '单号待填'} · ${s2.items.length} 件</span><b class="${s2.feePaid ? 'paid' : 'unpaid'} money">${money(s2.feeFen)}</b></div>`)
+          .join('')}</details></div>`
     : '';
 
   const closedHtml = closed.length
@@ -470,55 +263,44 @@ function render(data) {
   const pwNotice = data.mustChange
     ? `<div class="card" style="border-color:var(--warn);background:var(--warn-bg)">
         <h2>密码还是大家共用的那个初始密码</h2>
-        <p class="small">谁都知道这个密码，别人填你的 QQ 就能登进来。改成只有你知道的才能下单、填地址（改完要重新登一次）。</p>
+        <p class="small">谁都知道这个密码，别人填你的 QQ 就能登进来，改成只有你知道的（改完要重新登一次）。</p>
         <button id="change-pw">改密码</button>
        </div>`
     : '';
 
-  const barHtml = shipBar(data);
+  const shipped = parcels.filter((p) => p.released).length;
+  const where = !items.length
+    ? '群主还没把你买的东西放进来。付完货款、群主放行之后，这一页自己会更新。'
+    : s.parcelsWaiting
+      ? `仓库给你打好了 ${s.parcelsWaiting} 个包裹，等你付运费；付完群主放行，这里就有单号和平铺图。`
+      : s.sortedCount
+        ? `仓库已经分拣好 ${s.sortedCount} 件${direct ? '，下一步打包直邮给你' : '，下一步装进拼邮箱回国'}。`
+        : '';
 
   app.innerHTML = `
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <h1 style="margin:0">${escapeHtml(data.customer.nickname)} 的仓库</h1>
-        <span class="row small muted">${items.length} 件 <button id="logout" class="small plain">退出登录</button></span>
+        <span class="row small muted">${direct ? '<span class="badge warn">直邮</span>' : '<span class="badge ok">拼邮</span>'} ${items.length} 件 <button id="logout" class="small plain">退出登录</button></span>
       </div>
       <div class="grid" style="margin-top:12px">
         <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
-        <div class="stat"><div class="label">国际运费待付</div><div class="value money">${money(s.intlUnpaidFen)}</div></div>
-        <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
-        <div class="stat big"><div class="label">运费待付</div><div class="value money" ${
-          s.freightUnpaidFen ? '' : 'style="color:var(--ok)"'
-        }>${money(s.freightUnpaidFen)}</div></div>
+        <div class="stat"><div class="label">已分拣</div><div class="value">${s.sortedCount} 件</div></div>
+        <div class="stat"><div class="label">等付运费的包裹</div><div class="value ${s.parcelsWaiting ? 'unpaid' : ''}">${s.parcelsWaiting} 个</div></div>
+        <div class="stat"><div class="label">已寄出的包裹</div><div class="value">${shipped} 个</div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">货款是日元，转账当天按汇率折成人民币给群主；运费是人民币。${
-        s.stockCount
-          ? `可发货 ${s.stockCount} 件，随时可以要求发货。`
-          : items.length
-            ? '现在还没有能发的商品——东西回到国内、群主把运费算好，这一页就会让你勾。'
-            : '群主还没把你买的东西录进仓库，录进来之后这一页自己会更新。'
-      }</p>
+      <p class="small muted" style="margin-bottom:0">${where}${direct ? '' : ' 拼邮的东西跟群主一个箱子回国，回国单号在每件东西下面，可以复制去查。'}</p>
     </div>
     ${pwNotice}
-    ${stockHtml}
-    ${shipPanel(data)}
-    ${requestsHtml}
+    ${parcelHtml}
     ${groupsHtml}
     ${intlHtml}
     ${shipHtml}
     ${closedHtml}
     ${timelineHtml}
-    <p class="small muted">金额有疑问就在群里问一声。页面刷新后更新。</p>
-    ${barHtml}`;
+    <p class="small muted">有疑问就在群里问一声。页面刷新后更新。</p>`;
   bindWarehouse(data);
-  document.body.classList.toggle('has-shipbar', barHtml !== '');
-
-  app.querySelectorAll('[data-ship-item]').forEach((el) => {
-    if (!el.disabled && keep.selected.has(Number(el.dataset.shipItem))) el.checked = true;
-  });
-  keep.selected = new Set(
-    [...app.querySelectorAll('[data-ship-item]:checked')].map((el) => Number(el.dataset.shipItem)),
-  );
+  document.body.classList.remove('has-shipbar');
   if (keep.scrollY) window.scrollTo(0, keep.scrollY);
 }
 

@@ -10,6 +10,7 @@ export async function render(view, params, query = '') {
         <h2 style="margin:0">客户</h2>
         <div class="row">
           <button class="small plain" data-action="roster">导入名单</button>
+          <button class="small plain" data-action="directRoster">导入直邮名单</button>
           <button class="small" data-action="new">新建客户</button>
         </div>
       </div>
@@ -28,7 +29,9 @@ export async function render(view, params, query = '') {
             <div class="main">
               <a href="#/customers/${c.id}">${escapeHtml(c.nickname)}</a>${
                 c.realName ? `<span class="small muted">（${escapeHtml(c.realName)}）</span>` : ''
-              }${c.selfReturn ? ' <span class="badge">不拼邮</span>' : ''}
+              }${c.selfReturn ? ' <span class="badge">不拼邮</span>' : ''}${c.shipMode === 'direct' ? ' <span class="badge warn">直邮</span>' : ''}${
+                c.unreleasedCount ? ` <span class="badge danger">${c.unreleasedCount} 件没放行</span>` : ''
+              }
               <div class="small muted">QQ ${escapeHtml(c.qq)} · ${c.itemCount} 件 · 可发货 ${c.stockCount}${
                 c.passwordInitial ? ' · <span class="unpaid">还在用初始密码</span>' : ''
               }</div>
@@ -89,6 +92,69 @@ export async function render(view, params, query = '') {
       });
     },
     roster: () => rosterModal(view, params, query),
+    directRoster: () => directRosterModal(view, params, query),
+  });
+}
+
+/** 直邮名单：名字 / QQ 认人，收件人 + 电话 + 地址拼成一行给仓库看。先预演，确认才写库。 */
+function directRosterModal(view, params, query) {
+  openModal((box, close) => {
+    box.innerHTML = `
+      <h3>导入直邮名单</h3>
+      <p class="small muted">表里一行一个直邮的人。认人用「名字」或「QQ」（有 QQ 更准）；地址可以是一整列，也可以分成收件人 / 电话 / 地址三列，会拼成一行给仓库看。只认已经在客户名单里的人。</p>
+      <input type="file" id="drFile" accept=".xlsx,.xls,.csv">
+      <div id="drMap" style="display:none">
+        ${['名字', 'QQ', '收件人', '电话', '地址'].map((t, i) => `<label>${t}在哪一列</label><select data-col="${i}" style="width:100%"></select>`).join('')}
+      </div>
+      <div id="drReport"></div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button class="plain" data-close>关掉</button>
+        <button class="plain" data-check disabled>先看结果</button>
+        <button data-yes disabled>确认导入</button>
+      </div>`;
+    const file = box.querySelector('#drFile');
+    const report = box.querySelector('#drReport');
+    const check = box.querySelector('[data-check]');
+    const yes = box.querySelector('[data-yes]');
+    const selects = [...box.querySelectorAll('[data-col]')];
+    box.querySelector('[data-close]').onclick = close;
+    let sheet = null;
+    const words = [['名字', '昵称', 'cn', '称呼'], ['qq'], ['收件人', '姓名', '收货人'], ['电话', '手机'], ['地址']];
+    const text = (v) => (v === null || v === undefined ? '' : typeof v === 'number' ? String(Math.round(v)) : String(v).trim());
+    file.onchange = async () => {
+      try {
+        sheet = await readSheet(file.files[0]);
+        box.querySelector('#drMap').style.display = '';
+        selects.forEach((el, i) => {
+          const hit = sheet.headers.findIndex((h) => words[i].some((w) => h.toLowerCase().includes(w)));
+          el.innerHTML = '<option value="-1">— 不用这列 —</option>' + sheet.headers.map((h, j) => `<option value="${j}" ${j === hit ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('');
+        });
+        report.innerHTML = `<p class="small">读到 ${sheet.rows.length} 行</p>`;
+        check.disabled = false;
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    const rows = () =>
+      sheet.rows.map((r) => {
+        const v = selects.map((el) => (Number(el.value) >= 0 ? text(r[Number(el.value)]) : ''));
+        return { name: v[0], qq: v[1], address: [v[2], v[3], v[4]].filter(Boolean).join(' ') };
+      });
+    const run = async (commit) => {
+      const r = await api.post('/api/admin/quick-order/direct-roster', { rows: rows(), commit });
+      report.innerHTML = `<p>${commit ? '已导入' : '预演'}：认出 <b>${r.matched}</b> 人${r.problems ? `，<span class="unpaid">${r.problems} 行有问题</span>` : ''}</p>
+        <div style="max-height:240px;overflow:auto"><table class="small"><tbody>${r.rows
+          .map((x) => `<tr><td>${x.row}</td><td>${escapeHtml(x.name || x.qq)}</td><td>${x.problem ? `<span class="unpaid">${escapeHtml(x.problem)}</span>` : `→ ${escapeHtml(x.nickname)}`}</td><td class="muted">${escapeHtml(x.address)}</td></tr>`)
+          .join('')}</tbody></table></div>`;
+      yes.disabled = commit || !r.matched;
+      if (commit) {
+        toast(`${r.matched} 人标成直邮`);
+        close();
+        render(view, params, query);
+      }
+    };
+    check.onclick = () => run(false).catch((e) => toast(e.message, true));
+    yes.onclick = () => run(true).catch((e) => toast(e.message, true));
   });
 }
 

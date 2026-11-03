@@ -51,6 +51,8 @@ interface CommitBody extends PreviewBody {
   packageName?: string;
   confirmDuplicate?: boolean;
   assignments?: Assignment[];
+  /** 导入后直接放进客户仓库（默认 false：群主收完钱再在订单页逐人放行） */
+  release?: boolean;
 }
 
 function requireSheet(body: PreviewBody): RawSheet {
@@ -288,8 +290,8 @@ importRoutes.post('/commit', async (c) => {
   let itemId = await nextId(db, 'items');
   const insertItem = db.prepare(
     `INSERT INTO items (id, batch_id, customer_id, package_id, row_no, title, image_url, product_url,
-                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?)`,
+                        list_price_jpy, actual_price_jpy, goods_fee_jpy, status, goods_paid, released_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ordered', 0, ?, ?, ?)`,
   );
   const insertLog = db.prepare('INSERT INTO status_logs (item_id, from_status, to_status, at) VALUES (?, NULL, ?, ?)');
 
@@ -310,6 +312,8 @@ importRoutes.post('/commit', async (c) => {
         row.listPriceJpy,
         row.actualPriceJpy,
         row.goodsFeeJpy,
+        // 默认不放行：先下单后收钱，群主在订单页点客户名字，东西才出现在客户自己的仓库里
+        body.release === true ? now : null,
         now,
         now,
       ),

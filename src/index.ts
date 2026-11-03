@@ -18,6 +18,10 @@ import { KEY_PATTERN, isHttpUrl, proxyImage } from './lib/images.ts';
 
 import { mutationGuard } from './lib/mutations.ts';
 import { requestAdminRoutes, requestCustomerRoutes } from './routes/admin/requests.ts';
+import { parcelRoutes } from './routes/admin/parcels.ts';
+import { warehouseUserRoutes } from './routes/admin/warehouseUsers.ts';
+import { quickOrderRoutes } from './routes/admin/quickOrder.ts';
+import { warehouseRoutes } from './routes/warehouse.ts';
 const app = new Hono<{ Bindings: Env }>();
 app.use('/api/*', mutationGuard);
 
@@ -103,6 +107,12 @@ app.route('/api/admin/shipments', shipmentRoutes);
 app.route('/api/admin/payments', paymentRoutes);
 app.route('/api/admin/settings', settingsRoutes);
 app.route('/api/admin/requests', requestAdminRoutes);
+app.route('/api/admin/parcels', parcelRoutes);
+app.route('/api/admin/warehouse-users', warehouseUserRoutes);
+app.route('/api/admin/quick-order', quickOrderRoutes);
+
+// 仓库工作台：自己一把钥匙，和群主、客户互不相通
+app.route('/api/wh', warehouseRoutes);
 
 app.route('/api/w', customerRoutes);
 app.route('/api/w', requestCustomerRoutes);
@@ -158,6 +168,9 @@ app.notFound(async (c) => {
   // 统一入口：客户输 QQ 号 + 密码自己进，不用群主挨个发链接
   if (clean === '/login' || clean === '/me' || clean === '/w' || clean.startsWith('/w/')) {
     return serveAsset(c.env, url, '/customer.html');
+  }
+  if (clean === '/wh' || clean.startsWith('/wh/')) {
+    return serveAsset(c.env, url, '/warehouse.html');
   }
   const assets = await c.env.ASSETS.fetch(c.req.raw);
   // 静态资源找不到时返回的是空正文 404，手机上就是一整片白，这里换成有话说的页面

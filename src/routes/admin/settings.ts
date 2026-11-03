@@ -3,6 +3,7 @@ import type { Env } from '../../lib/env.ts';
 import { domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
 import { toFenStrict } from '../../lib/money.ts';
+import { directSaleFenPerKg, whCostFenPerKg } from '../../lib/parcels.ts';
 
 export const settingsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -10,6 +11,8 @@ settingsRoutes.get('/', async (c) =>
   c.json({
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    whCostFenPerKg: await whCostFenPerKg(c.env),
+    directSaleFenPerKg: await directSaleFenPerKg(c.env),
   }),
 );
 
@@ -52,12 +55,30 @@ settingsRoutes.post('/', async (c) => {
     domesticFeeFen?: unknown;
     intlPriceYuanPerKg?: unknown;
     intlPriceFenPerKg?: unknown;
+    whCostYuanPerKg?: unknown;
+    directSaleYuanPerKg?: unknown;
   }>(c);
 
-  const out: { domesticFeeFen: number; intlPriceFenPerKg: number } = {
+  const out: { domesticFeeFen: number; intlPriceFenPerKg: number; whCostFenPerKg: number; directSaleFenPerKg: number } = {
     domesticFeeFen: await domesticFeeFen(c.env),
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
+    whCostFenPerKg: await whCostFenPerKg(c.env),
+    directSaleFenPerKg: await directSaleFenPerKg(c.env),
   };
+
+  // 直邮的两个单价：仓库收你的（只有你看得到），你收客户的（新包裹默认用它，单个包裹还能再改）
+  let hasDirect = false;
+  for (const [field, key, label] of [
+    ['whCostYuanPerKg', 'wh_cost_fen_per_kg', '仓库单价'],
+    ['directSaleYuanPerKg', 'direct_sale_fen_per_kg', '收客户的直邮单价'],
+  ] as const) {
+    if (body[field] === undefined) continue;
+    const fen = requirePositiveFen(capFen(yuanToFenValue(body[field], label), label, MAX_INTL_PRICE_FEN), label);
+    await setSetting(c.env, key, String(fen));
+    if (field === 'whCostYuanPerKg') out.whCostFenPerKg = fen;
+    else out.directSaleFenPerKg = fen;
+    hasDirect = true;
+  }
 
   const hasDomestic =
     (body.domesticFeeFen !== undefined && body.domesticFeeFen !== null) ||
@@ -90,6 +111,6 @@ settingsRoutes.post('/', async (c) => {
     out.intlPriceFenPerKg = fen;
   }
 
-  if (!hasDomestic && !hasIntl) throw badRequest('没有要保存的内容');
+  if (!hasDomestic && !hasIntl && !hasDirect) throw badRequest('没有要保存的内容');
   return c.json(out);
 });

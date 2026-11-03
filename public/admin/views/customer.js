@@ -1,5 +1,6 @@
 import { api } from '/admin/api.js';
 import { createShipment } from './shipments.js';
+import { renderExtra } from './customer-extra.js';
 import {
   beijingTime,
   bindActions,
@@ -63,6 +64,7 @@ export async function render(view, [id]) {
         data.passwordInitial ? '还是初始密码 123456（他下次进去会被要求改成自己的）' : '已经改成自己的了'
       } <button class="small plain" data-action="password">改密码</button></p>
     </div>
+    <div id="extra"></div>
 
     <div class="card">
       <h3>按批次的货款</h3>
@@ -369,4 +371,5 @@ export async function render(view, [id]) {
       reload();
     },
   });
+  await renderExtra(view.querySelector('#extra'), data, id, () => render(view, [id]));
 }

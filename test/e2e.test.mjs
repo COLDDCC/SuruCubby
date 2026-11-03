@@ -101,6 +101,7 @@ test('导入：建客户、建批次、自动建同名包裹', async () => {
     fileName: `团购-${stamp}.xlsx`,
     fileHash: `hash-${stamp}`,
     sheet: SHEET,
+    release: true,
     batchName: `9月20日 第${stamp % 100}团`,
     assignments: NAMES.map((cn, i) => ({
       cn,
@@ -474,6 +475,7 @@ test('整箱一次到国内：一键全部认领，整摞称一个数就能摊�
   const box = `整箱均摊${stamp}`;
   const people = [`${box}甲`, `${box}乙`, `${box}丙`];
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: box,
     fileHash: box,
     sheet: {
@@ -593,6 +595,7 @@ test('称完一摞先算一摞：不用等全箱几十个人都称完', async ()
   const box = `分批分摊${stamp}`;
   const people = [`${box}甲`, `${box}乙`, `${box}丙`];
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: box,
     fileHash: box,
     sheet: {
@@ -734,6 +737,7 @@ test('不拼邮的人：认领、称重、分摊、寄出这条链整段都不�
   const box = `不拼邮${stamp}`;
   const people = [`${box}甲`, `${box}乙`, `${box}丙`];
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: box,
     fileHash: box,
     sheet: {
@@ -901,6 +905,7 @@ test('已经寄出 / 签收的件不在这台秤上：改回拼邮也不能再�
   const box = `回秤${stamp}`;
   const people = [`${box}甲`, `${box}乙`];
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: box,
     fileHash: box,
     sheet: {
@@ -1271,6 +1276,7 @@ test('已寄出的能标已签收，可发货和已寄出不许从外面硬设',
   // 没称过重、也没寄出过的件：这两个状态只能由称重确认 / 寄出流程写出来
   const box = `裸状态${stamp}`;
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: box,
     fileHash: box,
     sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['还没称的一件', box, 100]] },
@@ -1309,6 +1315,7 @@ test('计费后禁止直接砍单；未计费取消件和已付退款清单仍�
   assert.equal(blocked.status, 400);
   const name = `退款${stamp}`;
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: name,
     fileHash: name,
     sheet: {
@@ -1404,6 +1411,7 @@ test('图片：=IMAGE("...") 公式认得出来，抓下来存进 R2，之后只
     const cn = `图片测试${stamp}`;
     const imported = await call('POST', '/api/admin/import/commit', {
       fileHash: `hash-${stamp}-img`,
+      release: true,
       batchName: `图片批次 ${stamp}`,
       sheet: {
         headers: HEADERS,
@@ -1524,6 +1532,7 @@ test('改过昵称的客户，表里写新名字、旧名字、带空格都还�
   assert.equal(preview.totals.unmatched, 0, '三个写法都不用人工指认');
 
   const committed = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: `别名${stamp}`,
     sheet,
   });
@@ -1561,6 +1570,7 @@ test('名字撞在好几个人身上时不许瞎猜，要给新 QQ 建重名人�
     'POST',
     '/api/admin/import/commit',
     {
+      release: true,
       batchName: `撞名${stamp}`,
       sheet: {
         headers: ['名称', 'cn', '实际价格'],
@@ -1582,6 +1592,7 @@ test('名字撞在好几个人身上时不许瞎猜，要给新 QQ 建重名人�
   assert.match(clash.data.error, /已经是客户/);
 
   const picked = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: `选定${stamp}`,
     sheet,
     assignments: [{ cn: `双  ${stamp}`, customerId: a.id }],
@@ -1599,6 +1610,7 @@ test('自动认错了人：管理员改指认后，货跟着指认走，名字�
   assert.equal(before.groups[0].customer.id, wrong.id, '表里的名字默认自动认成第一位');
 
   const committed = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: `纠正${stamp}`,
     sheet,
     assignments: [{ cn: `认错${stamp}`, customerId: right.id }],
@@ -1688,6 +1700,7 @@ test('后台找货：只输货号尾巴就能定位到这一件，跳过去该�
   // 每次跑都造一个没见过的编号；带字母是为了让编号的尾巴不会撞进客户名的数字里
   const code = `ZH${`${stamp}`.slice(-6)}Q7`;
   const imported = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: `找货批次${stamp}`,
     fileHash: `hash-${stamp}-search`,
     sheet: {
@@ -1791,6 +1804,7 @@ test('脏输入不能变成钱，也不能悄悄存进去：单价上限、超�
     fileName: `护栏-${stamp}.xlsx`,
     fileHash: `guard-${stamp}`,
     sheet: { headers: HEADERS, rows: [['护栏这件', null, null, null, 700, `护栏客${stamp}`, '700']] },
+    release: true,
     batchName: `护栏团${stamp}`,
     assignments: [{ cn: `护栏客${stamp}`, newCustomer: { qq: `${stamp + 402}`.slice(-9), nickname: `护栏客${stamp}` } }],
   });
@@ -1828,11 +1842,12 @@ test('脏输入不能变成钱，也不能悄悄存进去：单价上限、超�
 test('订单总览：每一单都列出来，带单号、人数、各状态件数、包裹', async () => {
   const name = `总览${stamp}`;
   const added = await call('POST', '/api/admin/import/commit', {
+    release: true,
     batchName: name,
     fileHash: name,
     orderNo: `JP-${stamp}`,
     sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['一件', name, 100], ['两件', name, 200]] },
-    assignments: [{ cn: name, newCustomer: { qq: `${stamp + 41}`.slice(-9), nickname: name } }],
+    assignments: [{ cn: name, newCustomer: { qq: `${stamp + 61}`.slice(-9), nickname: name } }],
   });
   const { batches } = await call('GET', '/api/admin/batches');
   const row = batches.find((b) => b.id === added.batchId);
@@ -1861,6 +1876,7 @@ test('订单总览：每一单都列出来，带单号、人数、各状态件�
     'POST',
     '/api/admin/import/commit',
     {
+      release: true,
       batchName: 'y'.repeat(61),
       fileHash: `${name}-long`,
       sheet: { headers: ['名称', 'cn', '实际价格'], rows: [['一件', name, 100]] },

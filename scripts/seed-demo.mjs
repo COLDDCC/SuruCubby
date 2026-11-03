@@ -68,6 +68,7 @@ await call('POST', '/api/admin/login', { password: PASSWORD });
 const imported = await call('POST', '/api/admin/import/commit', {
   fileName: '9月18日第12团.xlsx',
   fileHash: `demo-${Date.now()}`,
+  release: true,
   batchName: '9月18日 第12团',
   orderedAt: new Date().toISOString().slice(0, 10),
   sheet,

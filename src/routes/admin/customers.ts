@@ -28,8 +28,9 @@ customerRoutes.get('/', async (c) => {
   const q = c.req.query('q')?.trim() ?? '';
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(
-    `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.self_return AS selfReturn, c.created_at AS createdAt,
+    `SELECT c.id, c.qq, c.nickname, c.real_name AS realName, c.token, c.note, c.self_return AS selfReturn, c.ship_mode AS shipMode, c.direct_address AS directAddress, c.created_at AS createdAt,
             c.password_hash IS NULL AS passwordInitial,
+            (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.released_at IS NULL) AS unreleasedCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id) AS itemCount,
             (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.status = 'cn_stock') AS stockCount,
             (SELECT COALESCE(SUM(i.goods_fee_jpy), 0) FROM items i
@@ -294,6 +295,8 @@ customerRoutes.patch('/:id', async (c) => {
     realName?: string;
     note?: string;
     selfReturn?: boolean;
+    shipMode?: string;
+    directAddress?: string;
   }>(c);
   const qq = optionalString(body.qq);
   if (qq !== null && !/^\d{5,15}$/.test(qq)) throw badRequest('QQ 号格式不对');
@@ -362,6 +365,14 @@ customerRoutes.patch('/:id', async (c) => {
         ]
       : []),
   ]);
+  // 直邮 / 拼邮、直邮地址：仓库工作台按这个分组，直邮的地址给仓库看
+  if (body.shipMode !== undefined) {
+    if (body.shipMode !== 'direct' && body.shipMode !== 'group') throw badRequest('shipMode 只能是 direct 或 group');
+    await db.prepare('UPDATE customers SET ship_mode = ? WHERE id = ?').bind(body.shipMode, id).run();
+  }
+  if (body.directAddress !== undefined) {
+    await db.prepare('UPDATE customers SET direct_address = ? WHERE id = ?').bind(bound(optionalString(body.directAddress), '直邮地址', 300), id).run();
+  }
   return c.json({ ok: true, selfReturn: selfReturn === null ? undefined : selfReturn === 1 });
 });
 

@@ -3,6 +3,8 @@
 export const STATUS_LABELS = {
   ordered: '已下单',
   jp_warehouse: '已到日本仓',
+  sorted: '已分拣',
+  packed: '已打包',
   intl_transit: '回国中',
   cn_arrived: '回国中',
   cn_stock: '可发货',

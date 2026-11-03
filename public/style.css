@@ -869,3 +869,109 @@ details summary {
   gap: 4px 16px;
   overflow-wrap: anywhere;
 }
+
+/* ───────── 仓库工作台：手机上拿着对货，图大、货号大 ───────── */
+.wh-grid {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+@media (max-width: 480px) {
+  .wh-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+.wh-card[data-pick] {
+  cursor: pointer;
+}
+.wh-card.found {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand-line);
+}
+.wh-card.wh-off {
+  opacity: 0.55;
+}
+.wh-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 6px 0 2px;
+  word-break: break-all;
+}
+.wh-count {
+  display: inline-block;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 18px;
+}
+.wh-title {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+.wh-people {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  margin-top: 12px;
+}
+.wh-person {
+  display: block;
+  padding: 10px 12px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--card);
+}
+.wh-person.on {
+  border-color: var(--brand);
+  background: var(--card-2);
+}
+.wh-person.done {
+  border-style: dashed;
+}
+.wh-person.done .small {
+  color: var(--ok);
+}
+.btn.wh-big {
+  font-size: 18px;
+  padding: 12px 22px;
+}
+.wh-photo {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.wh-photo img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+/* 客户页：直邮包裹的平铺图点开看大图 */
+.parcel-photos {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-top: 8px;
+}
+.parcel-photos img {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: block;
+}
+.wh-card .copy-chip,
+.wh-card .badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

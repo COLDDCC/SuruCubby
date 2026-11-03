@@ -91,6 +91,7 @@ batchRoutes.get('/:id', async (c) => {
             i.list_price_jpy AS listPriceJpy, i.goods_fee_jpy AS goodsFeeJpy, i.status,
             i.goods_paid AS goodsPaid, i.missing, i.exception_note AS exceptionNote,
             i.row_no AS rowNo, i.package_id AS packageId,
+            i.released_at AS releasedAt, i.sorted_at AS sortedAt, i.parcel_id AS parcelId, c.ship_mode AS shipMode,
             b.order_no AS orderNo, b.shop AS shop
        FROM items i
        JOIN customers c ON c.id = i.customer_id

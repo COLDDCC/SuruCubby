@@ -1,11 +1,21 @@
 import type { Env } from './env.ts';
+import { feeFen, parcelItems, photoIds } from './parcels.ts';
 
-/** 客户仓库视图：客户专属页和后台「客户详情」共用同一份数据。 */
-export async function buildCustomerView(env: Env, customerId: number) {
+/**
+ * 客户仓库视图：客户专属页和后台「客户详情」共用同一份数据。
+ *
+ * forCustomer = true 时是客户自己看：
+ *   - 只看得到群主已经放行（released_at 有值）的东西——先下单后收钱，没放行的不出现；
+ *   - 直邮包裹在群主点【单号放行】之前只知道「已打包」，看不到单号、毛重、运费、平铺图；
+ *   - 运费只给群主收客户的那个数，仓库单价一个字段都不出现。
+ */
+export async function buildCustomerView(env: Env, customerId: number, opts: { forCustomer?: boolean } = {}) {
   const db = env.DB;
+  const forCustomer = !!opts.forCustomer;
+  const visible = forCustomer ? 'AND i.released_at IS NOT NULL' : '';
 
   const customer = await db
-    .prepare('SELECT id, qq, nickname, note, token, self_return AS selfReturn, created_at AS createdAt FROM customers WHERE id = ?')
+    .prepare('SELECT id, qq, nickname, note, token, self_return AS selfReturn, ship_mode AS shipMode, direct_address AS directAddress, created_at AS createdAt FROM customers WHERE id = ?')
     .bind(customerId)
     .first<{
       id: number;
@@ -14,6 +24,8 @@ export async function buildCustomerView(env: Env, customerId: number) {
       note: string | null;
       token: string;
       selfReturn: number;
+      shipMode: string;
+      directAddress: string | null;
       createdAt: string;
     }>();
   if (!customer) return null;
@@ -28,11 +40,13 @@ export async function buildCustomerView(env: Env, customerId: number) {
               i.weigh_group_id AS weighGroupId, i.shipment_id AS shipmentId, i.updated_at AS updatedAt,
               i.weight_g AS weightG, i.intl_fee_fen AS intlFeeFen, i.intl_paid AS intlPaid, p.tracking_no AS returnTrackingNo,
               b.order_no AS orderNo,b.shop AS shop,b.japan_tracking_no AS japanTrackingNo,
+              b.ordered_at AS orderedAt, p.returned_at AS returnedAt, p.kind AS packageKind,
+              i.sorted_at AS sortedAt, i.parcel_id AS parcelId, i.released_at AS releasedAt,
               (SELECT request_id FROM request_items ri WHERE ri.item_id=i.id) AS requestId
          FROM items i
          JOIN batches b ON b.id = i.batch_id
          LEFT JOIN packages p ON p.id = i.package_id
-        WHERE i.customer_id = ?
+        WHERE i.customer_id = ? ${visible}
         ORDER BY i.id DESC`,
     )
     .bind(customerId)
@@ -75,7 +89,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
               l.to_status AS toStatus, l.at
          FROM status_logs l
          JOIN items i ON i.id = l.item_id
-        WHERE i.customer_id = ?
+        WHERE i.customer_id = ? ${visible}
         ORDER BY l.at DESC, l.id DESC
         LIMIT 30`,
     )
@@ -90,7 +104,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
                        THEN i.goods_fee_jpy ELSE 0 END) AS unpaidJpy
          FROM items i
          JOIN batches b ON b.id = i.batch_id
-        WHERE i.customer_id = ?
+        WHERE i.customer_id = ? ${visible}
         GROUP BY i.batch_id
         ORDER BY i.batch_id DESC`,
     )
@@ -106,7 +120,7 @@ export async function buildCustomerView(env: Env, customerId: number) {
   const goodsUnpaidJpy = itemRows
     .filter((i) => !i.goodsPaid && i.status !== 'cancelled' && i.status !== 'refunded')
     .reduce((sum, i) => sum + i.goodsFeeJpy, 0);
-  const unitFees=await db.prepare(`SELECT COALESCE(SUM(intl_fee_fen),0) AS n FROM items WHERE customer_id=? AND intl_paid=0 AND intl_fee_fen IS NOT NULL AND status NOT IN ('cancelled','refunded')`).bind(customerId).first<{n:number}>();
+  const unitFees=await db.prepare(`SELECT COALESCE(SUM(intl_fee_fen),0) AS n FROM items i WHERE customer_id=? ${visible} AND intl_paid=0 AND intl_fee_fen IS NOT NULL AND status NOT IN ('cancelled','refunded')`).bind(customerId).first<{n:number}>();
   const intlUnpaidFen=(unitFees?.n??0)+weighGroups.results.filter(g=>!g.feePaid && !(items.results as any[]).some(i=>i.weighGroupId===g.id && i.intlFeeFen!==null)).reduce((s,g)=>s+(g.intlFeeFen??0),0);
   const shipmentRows = shipments.results as Array<{ feePaid: number; feeFen: number }>;
   const pendingDomestic=await db.prepare("SELECT COALESCE(SUM(domestic_fee_fen),0) AS n FROM shipping_requests WHERE customer_id=? AND status='pending'").bind(customerId).first<{n:number}>();
@@ -131,12 +145,63 @@ export async function buildCustomerView(env: Env, customerId: number) {
     shipmentItems.set(item.shipmentId, list);
   }
 
+  // 直邮包裹
+  const parcelRows = await db
+    .prepare(
+      `SELECT id, tracking_no AS trackingNo, gross_weight_g AS grossWeightG, sale_fen_per_kg AS saleFenPerKg,
+              cost_fen_per_kg AS costFenPerKg, submit_day AS submitDay, released_at AS releasedAt, created_at AS createdAt
+         FROM parcels WHERE customer_id = ? ORDER BY id DESC`,
+    )
+    .bind(customerId)
+    .all<{ id: number; trackingNo: string; grossWeightG: number; saleFenPerKg: number; costFenPerKg: number; submitDay: string; releasedAt: string | null; createdAt: string }>();
+  const pIds = parcelRows.results.map((p) => p.id);
+  const pItems = await parcelItems(env, pIds);
+  const pPhotos = await photoIds(env, pIds);
+  const visibleIds = new Set((items.results as Array<{ id: number }>).map((i) => i.id));
+  const parcels = parcelRows.results
+    .map((p) => {
+      const contents = (pItems.get(p.id) ?? [])
+        .filter((i) => visibleIds.has(i.id))
+        .map(({ id, title, imageUrl, productUrl, orderNo, shop, batchName, japanTrackingNo }) => ({ id, title, imageUrl, productUrl, orderNo, shop, batchName, japanTrackingNo }));
+      const saleFen = feeFen(p.grossWeightG, p.saleFenPerKg);
+      if (forCustomer && !p.releasedAt) {
+        // 放行之前：只知道仓库打好包了，单号 / 毛重 / 运费 / 平铺图一概不给
+        return { id: p.id, released: false, submitDay: p.submitDay, itemCount: contents.length, items: contents };
+      }
+      const base = {
+        id: p.id,
+        released: !!p.releasedAt,
+        releasedAt: p.releasedAt,
+        submitDay: p.submitDay,
+        trackingNo: p.trackingNo,
+        grossWeightG: p.grossWeightG,
+        saleFenPerKg: p.saleFenPerKg,
+        feeFen: saleFen,
+        photoIds: pPhotos.get(p.id) ?? [],
+        itemCount: contents.length,
+        items: contents,
+      };
+      if (forCustomer) return base;
+      const costFen = feeFen(p.grossWeightG, p.costFenPerKg);
+      return { ...base, costFenPerKg: p.costFenPerKg, costFen, marginFen: saleFen - costFen };
+    })
+    .filter((p) => !forCustomer || p.itemCount > 0);
+
   const addresses = await db.prepare('SELECT id,recipient,phone,detail FROM addresses WHERE customer_id=? ORDER BY id').bind(customerId).all();
   const requests = await db.prepare('SELECT id,address_snapshot AS addressSnapshot,domestic_fee_fen AS domesticFeeFen,status,created_at AS createdAt, (SELECT COUNT(*) FROM request_items ri WHERE ri.request_id=shipping_requests.id) AS itemCount FROM shipping_requests WHERE customer_id=? ORDER BY id DESC').bind(customerId).all();
   return {
     domesticFeeFen: Number((await db.prepare("SELECT value FROM settings WHERE key='domestic_fee_fen'").first<{value:string}>())?.value ?? 1000),
     addresses: addresses.results, requests: requests.results,
-    customer: { id: customer.id, qq: customer.qq, nickname: customer.nickname, selfReturn: !!customer.selfReturn, createdAt: customer.createdAt },
+    customer: {
+      id: customer.id,
+      qq: customer.qq,
+      nickname: customer.nickname,
+      selfReturn: !!customer.selfReturn,
+      shipMode: customer.shipMode === 'direct' ? 'direct' : 'group',
+      directAddress: customer.directAddress,
+      createdAt: customer.createdAt,
+    },
+    parcels,
     summary: {
       goodsUnpaidJpy,
       intlUnpaidFen,
@@ -145,6 +210,8 @@ export async function buildCustomerView(env: Env, customerId: number) {
       freightUnpaidFen: intlUnpaidFen + domesticUnpaidFen,
       stockCount,
       itemCount: itemRows.length,
+      sortedCount: itemRows.filter((i) => i.status === 'sorted').length,
+      parcelsWaiting: parcels.filter((p) => !p.released).length,
     },
     batches: batches.results,
     items: items.results,

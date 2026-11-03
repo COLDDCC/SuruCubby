@@ -53,6 +53,8 @@ export async function render(view) {
       <label>日本物流单号（可后补）</label><input id="japanTrackingNo">
       <label for="orderedAt">下单日期（可不填）</label>
       <input id="orderedAt" type="date">
+      <label style="margin-top:10px"><input type="checkbox" id="releaseNow"> 导入后直接放进每个人的仓库</label>
+      <p class="small muted" style="margin-top:2px">默认不勾：先下单后收钱，导入后客户还看不到，收完谁的钱就去订单页点他名字放行。</p>
       <p id="status" class="small muted"></p>
     </div>
     <div id="preview"></div>`;
@@ -320,6 +322,7 @@ function renderPreview(view) {
           orderNo: document.getElementById('orderNo').value,
           japanTrackingNo: document.getElementById('japanTrackingNo').value,
           confirmDuplicate: Boolean(p.duplicate),
+          release: document.getElementById('releaseNow').checked,
           assignments: [...state.assignments.entries()].map(([cn, a]) => ({
             cn,
             customerId: a.customerId,

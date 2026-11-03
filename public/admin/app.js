@@ -19,6 +19,7 @@ const routes = [
   { pattern: /^\/shipments$/, module: () => import('/admin/views/shipments.js') },
   { pattern: /^\/payments$/, module: () => import('/admin/views/payments.js') },
   { pattern: /^\/settings$/, module: () => import('/admin/views/settings.js') },
+  { pattern: /^\/parcels$/, module: () => import('/admin/views/parcels.js') },
 ];
 
 function currentPath() {
