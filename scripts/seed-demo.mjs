@@ -1,16 +1,16 @@
 /**
- * 灌一份演示数据，用来看页面长什么样（预览、截图、录屏都靠它）。
+ * 演示数据：照新流程（群主放行 → 仓库分拣 → 直邮打包 / 拼邮装箱 → 单号放行）铺好一半，剩下的自己点。
  *
  *   npm run seed          # 自己起一个隔离实例（8790 + 单独的库），演示数据不会进你正在用的仓库
  *
- * 图片用内联 SVG，不依赖外网。
+ * 三种身份的账号最后会打印出来。
  */
 const BASE = process.env.SEED_BASE || die();
 function die() {
   console.error('演示数据不往 8787 那个正经仓库里灌。用 npm run seed，或者自己指定 SEED_BASE。');
   process.exit(1);
 }
-const PASSWORD = process.env.SEED_PASSWORD || 'test-admin-pw';
+const PASSWORD = process.env.SEED_PASSWORD || process.env.E2E_PASSWORD || 'test-admin-pw';
 
 const jar = new Map();
 async function call(method, path, body) {
@@ -32,117 +32,76 @@ async function call(method, path, body) {
   return data;
 }
 
-const KINDS = ['figure', 'kit', 'book', 'prize'];
-
+// 名称、骏河屋货号、日元、cn
 const ITEMS = [
-  ['海洋堂 山口式 EVA 初号机', 0, 4800, 2980, '阿狸', 520],
-  ['GSC 粘土人 后藤ひとり', 0, 3500, 2200, '阿狸', 340],
-  ['一番赏 五等分的新娘 中野二乃', 3, 2000, 1400, '阿狸', 380],
-  ['BANDAI MG 强袭自由高达 Ver.Ka', 1, 6800, 4500, '团子', 1600],
-  ['周刊少年 JUMP 1998 合订本', 2, 1200, 800, '团子', 450],
-  ['寿屋 ARTFX 初音未来', 0, 5600, 3800, '小K', 1500],
-  ['龙珠 一番赏 孙悟空', 3, 1800, 1100, '小K', null],
-  ['灌篮高手 完全版 全31卷', 2, 8000, 5200, '小K', null],
-  ['Q posket 鬼灭之刃 祢豆子', 3, 1500, 900, '芋圆', 430],
-  ['S.H.Figuarts 假面骑士 空我', 0, 4200, 2900, '芋圆', 550],
-  ['一番赏 链锯人 玛奇玛', 3, 2500, 1600, '喵酱', 400],
-  ['POP UP PARADE 雷姆', 0, 3200, 2100, '喵酱', 620],
+  ['寿屋 ARTFX 初音未来', '602170001', 3800, '小鱼'],
+  ['寿屋 ARTFX 初音未来', '602170001', 3800, '小鱼'],
+  ['吧唧 链锯人 玛奇玛', 'ZHOTI678913', 500, '小鱼'],
+  ['GSC 粘土人 后藤ひとり', '608001234', 2200, '阿狸'],
+  ['镭射票 孤独摇滚', '128000111', 900, '阿狸'],
+  ['灌篮高手 完全版 第1卷', '102003456', 800, '团子'],
+  ['一番赏 五等分的新娘', '605009999', 1400, '团子'],
+  ['POP UP PARADE 雷姆', '412000777', 2100, '饭团'],
 ];
-
-const QQ = { 阿狸: '123456789', 团子: '234567891', 小K: '345678912', 芋圆: '456789123', 喵酱: '567891234' };
-
-const sheet = {
-  headers: ['名称', '图片', '商品链接', '平时价格', '实际价格', 'cn'],
-  rows: ITEMS.map(([title, kind, list, actual, cn], i) => [
-    title,
-    `https://images.suruga-ya.jp/database/pics/${KINDS[kind]}/DEMO${1001 + i}.jpg`,
-    `https://www.suruga-ya.jp/product/detail/DEMO${1001 + i}`,
-    list,
-    actual,
-    cn,
-  ]),
-};
+const QQ = { 小鱼: '123456789', 阿狸: '234567891', 团子: '345678912', 饭团: '456789123' };
 
 await call('POST', '/api/admin/login', { password: PASSWORD });
 
 const imported = await call('POST', '/api/admin/import/commit', {
-  fileName: '9月18日第12团.xlsx',
+  fileName: '11月第13团.xlsx',
   fileHash: `demo-${Date.now()}`,
-  release: true,
-  batchName: '9月18日 第12团',
-  orderedAt: new Date().toISOString().slice(0, 10),
-  sheet,
+  batchName: '11月1日 第13团',
+  orderNo: 'SG-20261101-0042',
+  japanTrackingNo: '4912-3456-7788',
+  shop: '骏河屋',
+  orderedAt: '2026-11-01',
+  sheet: {
+    headers: ['名称', '商品链接', '应付日元金额', 'cn'],
+    rows: ITEMS.map(([title, code, jpy, cn]) => [title, `https://www.suruga-ya.jp/product/detail/${code}`, String(jpy), cn]),
+  },
   assignments: Object.entries(QQ).map(([cn, qq]) => ({ cn, newCustomer: { qq, nickname: cn } })),
 });
-console.log(`导入 ${imported.itemCount} 件，批次 #${imported.batchId}，包裹 #${imported.packageId}`);
+const byName = Object.fromEntries((await call('GET', '/api/admin/customers')).customers.map((c) => [c.nickname, c]));
 
-const packageId = imported.packageId;
-for (const status of ['jp_warehouse', 'intl_transit', 'cn_arrived']) {
-  await call('POST', `/api/admin/packages/${packageId}/status`, { status });
+// 收了钱的三个人放行；饭团还没付，留给你在订单页点「放进他的仓库」
+for (const name of ['小鱼', '阿狸', '团子']) {
+  await call('POST', '/api/admin/quick-order/release', { batchId: imported.batchId, customerId: byName[name].id });
 }
 
-const customers = (await call('GET', '/api/admin/customers')).customers;
-const byName = Object.fromEntries(customers.map((c) => [c.nickname, c]));
+// 小鱼、饭团走直邮，地址给仓库看；阿狸、团子拼邮
+await call('PATCH', `/api/admin/customers/${byName['小鱼'].id}`, { shipMode: 'direct', directAddress: '王小鱼 138-0000-1234 上海市徐汇区漕溪北路 88 号 1203' });
+await call('PATCH', `/api/admin/customers/${byName['饭团'].id}`, { shipMode: 'direct', directAddress: '陈饭团 139-1111-2222 杭州市西湖区文三路 9 号' });
 
-// 喵酱这次自己带回国：标「不拼邮」，货款照记，但称重、摊运费、发快递这一条链都不算她。
-// 标了之后这一箱的「整箱弄完了」不会被她那两件未认领的卡住，下面的实收总额照样能填。
-await call('PATCH', `/api/admin/customers/${byName['喵酱'].id}`, { selfReturn: true });
+// 小鱼另外单独下了一单（演示「两单合成一个直邮包裹」）
+const solo = await call('POST', '/api/admin/quick-order', {
+  customerId: byName['小鱼'].id,
+  kind: 'buy',
+  orderNo: 'SG-20261028-0007',
+  release: true,
+  lines: [{ url: 'https://www.suruga-ya.jp/product/detail/601234567', title: '景品 手办 鬼灭之刃 祢豆子', priceJpy: 2300 }],
+});
 
-// 小K：有一件被骏河屋砍单，货款已经付过了 → 进待退款
-// 必须在称重分摊之前做：砍单要趁物品还没计费，已计费的后端会挡住
-const k = await call('GET', `/api/admin/customers/${byName['小K'].id}`);
-const cancelled = k.items.find((i) => i.title.startsWith('龙珠'));
-await call('POST', '/api/admin/payments', { customerId: k.customer.id, kind: 'goods', itemIds: [cancelled.id] });
-await call('PATCH', `/api/admin/items/${cancelled.id}`, { status: 'cancelled', exceptionNote: '骏河屋砍单' });
+// 阿狸有一件朋友转运来的（不是群主买的）
+await call('POST', '/api/admin/quick-order', {
+  customerId: byName['阿狸'].id,
+  kind: 'forward',
+  japanTrackingNo: 'FWD-7788-0001',
+  lines: [{ title: '朋友从东京寄来的同人本' }],
+});
 
-// 称重：逐件填克数（旧版整摞填一次的话，每件商品的重量和运费都会是空的）
-// 砍单件不会出现在称重台上，灌篮高手标成缺件，其余全部认领
-const weightByTitle = new Map(ITEMS.map(([title, , , , , weightG]) => [title, weightG]));
-const weigh = await call('GET', `/api/admin/packages/${packageId}/weigh`);
-for (const customer of weigh.customers) {
-  // 不拼邮的那位根本不进称重台的操作范围，点她的封面会被后端拦住
-  if (customer.selfReturn) continue;
-  for (const item of customer.items) {
-    await call('POST', `/api/admin/packages/${packageId}/weigh/claim`, { itemId: item.id, claimed: true });
-    if (item.title.startsWith('灌篮高手')) {
-      await call('POST', `/api/admin/packages/${packageId}/weigh/missing`, {
-        itemId: item.id,
-        missing: true,
-        note: '骏河屋漏发，已联系补寄',
-      });
-      continue;
-    }
-    await call('POST', `/api/admin/packages/${packageId}/weigh/item`, {
-      itemId: item.id,
-      weightG: weightByTitle.get(item.title),
-    });
-  }
+await call('POST', '/api/admin/warehouse-users', { username: 'cang', displayName: '仓库小王', password: 'cang1234' });
+
+const line = (s) => console.log(s);
+line('\n演示数据铺好了。三种身份分别用三个浏览器窗口（或一个普通窗口 + 无痕窗口 + 手机）打开：');
+line(`\n  首页     ${BASE}/`);
+line(`  群主     选「我是群主」，密码 ${PASSWORD}`);
+line('  仓库     选「我是仓库」，账号 cang  密码 cang1234');
+line('  团员     选「我是团员」，QQ 见下，初始密码 123456（进去会让改，可以先点「先随便看看」）');
+for (const [name, qq] of Object.entries(QQ)) {
+  const c = byName[name];
+  const lane = c && ['小鱼', '饭团'].includes(name) ? '直邮' : '拼邮';
+  line(`           ${name}  QQ ${qq}  ${lane}${name === '饭团' ? '  ← 还没放行，他现在什么都看不到' : ''}`);
 }
-const allocated = await call('POST', `/api/admin/packages/${packageId}/allocate/commit`, {
-  totalFeeYuan: '238.00',
-  totalWeightG: 6000,
-});
-console.log(`分摊完成，尾差 ${allocated.diffFen} 分，${allocated.itemsMovedToStock} 件变为可发货`);
-
-// 阿狸：货款、国际运费都付了，已经寄出一次，国内运费还没收
-const ali = await call('GET', `/api/admin/customers/${byName['阿狸'].id}`);
-await call('POST', '/api/admin/payments', { customerId: ali.customer.id, kind: 'goods', batchId: imported.batchId });
-await call('POST', '/api/admin/payments', {
-  customerId: ali.customer.id,
-  kind: 'intl',
-  weighGroupId: ali.weighGroups[0].id,
-});
-const shipment = await call('POST', '/api/admin/shipments', {
-  customerId: ali.customer.id,
-  itemIds: ali.items.filter((i) => i.status === 'cn_stock').slice(0, 2).map((i) => i.id),
-});
-await call('PATCH', `/api/admin/shipments/${shipment.id}`, { trackingNo: 'SF1234567890' });
-
-console.log('\n演示客户登录（统一入口 /login，或点下面的专属链接）：');
-for (const c of (await call('GET', '/api/admin/customers')).customers) {
-  console.log(
-    `  ${c.nickname.padEnd(4)} QQ ${c.qq}  密码 123456  ${BASE}/w/${c.token}${
-      c.selfReturn ? '  ← 这一位不拼邮，后面的运费和快递都不算她' : ''
-    }`,
-  );
-}
+line(`\n  仓库进门用的单号：SG-20261101-0042（第13团）、SG-20261028-0007（小鱼单独下的）、FWD-7788-0001（阿狸的转运）`);
+line(`  第13团订单页：${BASE}/admin/#/batches/${imported.batchId}`);
+void solo;

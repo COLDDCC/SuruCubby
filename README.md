@@ -87,6 +87,7 @@ cp .dev.vars.example .env   # 填 ADMIN_PASSWORD 和 SESSION_SECRET
 npm run dev                 # http://127.0.0.1:8787，数据在 ./data/，迁移启动时自动执行
 npm run test                # 单元测试
 npm run test:e2e            # 端到端：自己起一个隔离的 Node 实例跑完关掉
+npm run seed                # 另起 8790 + 演示数据，三种身份的账号会打印出来，不碰你自己的数据
 ```
 
 需要 Node 22.16 以上（用 Node 自带的 `node:sqlite`），推荐 Node 24。
