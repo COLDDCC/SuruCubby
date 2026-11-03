@@ -102,16 +102,17 @@ function renderLogin(message = '') {
 async function renderHome() {
   const recent = await api('GET', '/api/wh/batches');
   view.innerHTML = `
-    <div class="card">
-      <h2>输日本订单号或日本运单号</h2>
+    <div class="card scan-card">
+      <h2 style="margin:0 0 4px">货到了？输单号进门</h2>
+      <p class="small" style="margin:0 0 12px">日本订单号或日本运单号，输后几位也行</p>
       <form id="find" class="row">
-        <input id="q" placeholder="订单号 / 运单号，输后几位也行" style="flex:1;min-width:200px;font-size:18px" autocomplete="off">
+        <input id="q" placeholder="例如 0042 或 7788" style="flex:1;min-width:200px" autocomplete="off" enterkeyhint="go">
         <button class="btn" type="submit">进入</button>
       </form>
       <div id="hits"></div>
     </div>
     <div class="card">
-      <h3>最近的订单</h3>
+      <h2 class="section-title">最近的订单</h2>
       ${batchList(recent.batches)}
     </div>`;
   const q = document.getElementById('q');
@@ -131,6 +132,12 @@ async function renderHome() {
   };
 }
 
+/** 细进度条：整理了几件 / 一共几件 */
+function meter(done, total) {
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return `<div class="meter${total && done >= total ? ' ok' : ''}" style="width:100%"><span style="width:${pct}%"></span></div>`;
+}
+
 function batchList(batches) {
   if (!batches.length) return '<p class="empty">还没有订单</p>';
   return batches
@@ -138,8 +145,9 @@ function batchList(batches) {
       (b) => `<a class="list-row" href="#/order/${b.id}" style="display:flex;justify-content:space-between;gap:8px;text-decoration:none;color:inherit">
         <div class="main"><b>${escapeHtml(b.orderNo || b.name)}</b>
           <div class="small muted">${escapeHtml(b.name)}${b.japanTrackingNo ? ` · 运单 ${escapeHtml(b.japanTrackingNo)}` : ''}${b.shop ? ` · ${escapeHtml(b.shop)}` : ''}</div></div>
-        <div class="side small right">${b.customerCount} 人 · ${b.itemCount} 件<br>
-          <span class="${b.sortedCount >= b.itemCount && b.itemCount ? 'paid' : 'muted'}">已整理 ${b.sortedCount}/${b.itemCount}</span></div>
+        <div class="side small right" style="flex-direction:column;align-items:flex-end;gap:0;min-width:120px">${b.customerCount} 人 · ${b.itemCount} 件
+          <span class="${b.sortedCount >= b.itemCount && b.itemCount ? 'paid' : 'muted'}">已整理 ${b.sortedCount}/${b.itemCount}</span>
+          ${meter(b.sortedCount, b.itemCount)}</div>
       </a>`,
     )
     .join('');
@@ -154,7 +162,7 @@ async function renderOrder(id, openCustomer) {
     .map((c) => {
       const done = c.sortedCount >= c.itemCount;
       return `<a href="#/order/${id}/${c.id}" class="wh-person${current?.id === c.id ? ' on' : ''}${done ? ' done' : ''}">
-        <b>${escapeHtml(c.nickname)}</b> ${LANE[c.lane]}<br><span class="small">${done ? '✓ 已整理' : `${c.sortedCount}/${c.itemCount}`} · ${c.itemCount} 件</span></a>`;
+        <b>${escapeHtml(c.nickname)}</b> ${LANE[c.lane]}<br><span class="small">${done ? '✓ 已整理' : `已整理 ${c.sortedCount}/${c.itemCount}`}</span>${meter(c.sortedCount, c.itemCount)}</a>`;
     })
     .join('');
   let panel = '<p class="muted">点上面的名字，这位客户这一单买的东西会全部列出来。</p>';
@@ -166,15 +174,18 @@ async function renderOrder(id, openCustomer) {
         <div>
           <h2 style="margin:0">${escapeHtml(current.nickname)} ${LANE[current.lane]}</h2>
           <p class="small muted" style="margin:4px 0">这一单 ${current.itemCount} 件 · 已整理 ${current.sortedCount} 件</p>
+          <div style="max-width:240px">${meter(current.sortedCount, current.itemCount)}</div>
           ${current.lane === 'direct' && current.directAddress ? `<p class="small">寄到：<button class="badge copy-chip" data-copy="${escapeHtml(current.directAddress)}">${escapeHtml(current.directAddress)}</button></p>` : ''}
         </div>
-        <div class="row">
-          ${done ? '<button class="plain small" data-act="unsort">撤回整理</button>' : '<button class="btn wh-big" data-act="sort">整理完成</button>'}
-          ${done && current.lane === 'direct' ? `<a class="btn" href="#/customer/${current.id}">去打包直邮 →</a>` : ''}
-          ${done && current.lane === 'group' ? '<a class="btn" href="#/boxes">装进拼邮箱 →</a>' : ''}
-        </div>
+        ${done ? '<button class="plain small" data-act="unsort">撤回整理</button>' : ''}
       </div>
-      <div class="claim-grid wh-grid" style="margin-top:12px">${groups.map((g) => card(g)).join('')}</div>`;
+      <div class="claim-grid wh-grid" style="margin-top:12px">${groups.map((g) => card(g)).join('')}</div>
+      <div class="actionbar row" style="margin-top:12px">
+        ${done ? '' : `<button class="btn wh-big" data-act="sort">整理完成（${current.itemCount - current.sortedCount} 件）</button>`}
+        ${done && current.lane === 'direct' ? `<a class="btn wh-big" href="#/customer/${current.id}">去打包直邮 →</a>` : ''}
+        ${done && current.lane === 'group' ? '<a class="btn wh-big" href="#/boxes">装进拼邮箱 →</a>' : ''}
+        ${done && current.lane === 'self' ? '<span class="small muted">这位自己带回，整理完就放着</span>' : ''}
+      </div>`;
   }
   view.innerHTML = `
     <div class="card">
@@ -236,9 +247,9 @@ function photoStrip(parcel, removable) {
 function parcelCard(p, { showCustomer = false } = {}) {
   return `
     <div class="card wh-parcel" data-parcel="${p.id}">
-      <div class="row" style="justify-content:space-between">
-        <b>#${p.id} ${showCustomer ? `<a href="#/customer/${p.customerId}">${escapeHtml(p.nickname)}</a>` : ''}</b>
-        ${p.locked ? '<span class="badge">已锁定</span>' : '<span class="badge warn">可修改</span>'}
+      <div class="card-head" style="margin-bottom:6px">
+        <h3>#${p.id} ${showCustomer ? `<a href="#/customer/${p.customerId}">${escapeHtml(p.nickname)}</a>` : ''}</h3>
+        ${p.locked ? '<span class="badge ok dot">群主已放行 · 锁定</span>' : '<span class="badge warn dot">等群主放行 · 还能改</span>'}
       </div>
       <p style="margin:6px 0">单号 <button class="badge copy-chip mono" data-copy="${escapeHtml(p.trackingNo)}">${escapeHtml(p.trackingNo)}</button>
         · 毛重 <b>${p.grossWeightG.toLocaleString()} g</b> · ${p.items.length} 件
@@ -348,7 +359,7 @@ async function renderCustomer(id) {
           <label>平铺图（可以先不传，打完包再补）</label>
           <label class="btn ghost" style="display:inline-block">拍照 / 选图<input id="ph" type="file" accept="image/*" multiple hidden></label>
           <span id="phn" class="small muted">${photos.length ? `已选 ${photos.length} 张` : ''}</span>
-          <p><button class="btn wh-big" type="submit">提交包裹（${picked.size} 件）</button></p>
+          <div class="actionbar" style="margin-top:12px"><button class="btn wh-big" type="submit">提交包裹（${picked.size} 件）</button></div>
           <p class="small muted">提交后客户那边显示「已打包」，单号要等群主放行后客户才看得到。放行之前你都还能改。</p>
         </form>` : ''}
       </div>` : ''}
@@ -489,7 +500,7 @@ async function renderBox(id) {
               <div class="claim-grid wh-grid">${groupSame(list).map((g) => card(g, { selectable: true, selected: g.ids.every((x) => picked.has(x)) })).join('')}</div>`,
           )
           .join('') || '<p class="empty">没有等着装箱的</p>'}
-        ${data.waiting.length ? `<p><button class="btn wh-big" id="add" ${picked.size ? '' : 'disabled'}>装进这个箱子（${picked.size} 件）</button></p>` : ''}
+        ${data.waiting.length ? `<div class="actionbar" style="margin-top:12px"><button class="btn wh-big" id="add" ${picked.size ? '' : 'disabled'}>装进这个箱子（${picked.size} 件）</button></div>` : ''}
       </div>`;
     const reload = () => renderBox(id);
     const act = (fn) => async (e) => {

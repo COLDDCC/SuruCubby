@@ -1,4 +1,4 @@
-import { beijingTime, codeTag, copyText, escapeHtml, money, orderTag, statusLabel, thumb, toast, yen } from '/shared.js';
+import { beijingTime, codeTag, copyText, escapeHtml, money, orderTag, statusBadge, thumb, toast, yen } from '/shared.js';
 
 const pathToken = (location.pathname.match(/^\/w\/([^/?#]+)/) || [])[1] ?? '';
 let token = pathToken ? decodeURIComponent(pathToken) : '';
@@ -120,6 +120,42 @@ function renderMustChange(data) {
   document.getElementById('peek').onclick = () => render(data);
 }
 
+/**
+ * 进度管线的几站（AfterShip 那种一条线）。直邮和拼邮第三、四站不一样。
+ * 每一站下面写这一站现在有几件，比一句「部分已寄出」清楚。
+ */
+const PIPES = {
+  direct: [
+    { name: '已下单', statuses: ['ordered', 'jp_warehouse'] },
+    { name: '已分拣', statuses: ['sorted'] },
+    { name: '已打包', statuses: ['packed'] },
+    { name: '已寄出', statuses: ['shipped', 'delivered'] },
+  ],
+  group: [
+    { name: '已下单', statuses: ['ordered', 'jp_warehouse'] },
+    { name: '已分拣', statuses: ['sorted', 'packed'] },
+    { name: '回国中', statuses: ['intl_transit', 'cn_arrived'] },
+    { name: '到群主手上', statuses: ['cn_stock', 'shipped', 'delivered'] },
+  ],
+};
+
+function pipeline(items, direct) {
+  const steps = PIPES[direct ? 'direct' : 'group'].map((st) => ({ ...st, n: items.filter((i) => st.statuses.includes(i.status)).length }));
+  if (!steps.some((st) => st.n)) return '';
+  // 走得最远的那一件到了哪一站：这一站和之前的线都点亮
+  let far = 0;
+  steps.forEach((st, k) => {
+    if (st.n) far = k;
+  });
+  const last = steps.length - 1;
+  return `<ol class="pipeline" style="--steps:${steps.length}" aria-label="进度">${steps
+    .map((st, k) => {
+      const cls = k < far ? 'lit' : k === far ? `${k === last ? 'lit' : 'lit-left'} now` : '';
+      return `<li class="pipe-step ${cls}${st.n ? '' : ' zero'}"><span class="dot"></span><span class="name">${st.name}</span><span class="n">${st.n} 件</span></li>`;
+    })
+    .join('')}</ol>`;
+}
+
 function itemCard(item) {
   // 汇总卡按后端口径把取消/退款的件剔掉了，件上就不该再显示「未付」，不然上下两个数对不上
   const dead = item.status === 'cancelled' || item.status === 'refunded';
@@ -137,22 +173,21 @@ function itemCard(item) {
   const note = item.exceptionNote
     ? `<div class="small" style="color:var(--warn)">${escapeHtml(item.exceptionNote)}</div>`
     : '';
-  const done = ['sorted', 'packed', 'intl_transit', 'cn_arrived', 'cn_stock', 'shipped', 'delivered'].includes(item.status);
   return `
     <div class="item">
       ${thumb(item)}
       <div class="body">
         <div class="title">${title}</div>
-        <div class="small row" style="gap:6px;margin-top:2px">
+        <div class="small row" style="gap:6px;margin-top:4px">
           ${codeTag(item)}
           <span class="muted">${escapeHtml(item.batchName || '')}</span>
         </div>
         ${orderTag(item)}
-        ${item.goodsFeeJpy ? `<div class="small muted">应付 <span class="money">${yen(item.goodsFeeJpy)}</span></div>` : ''}
-        <div class="small row" style="gap:6px;margin-top:4px">
-          <span class="badge ${done ? 'ok' : ''}">${escapeHtml(statusLabel(item.status))}</span>${paid}${missing}
+        <div class="small row" style="gap:6px;margin-top:6px">
+          ${statusBadge(item.status)}${paid}${missing}
+          ${item.goodsFeeJpy ? `<span class="muted">应付 <span class="money">${yen(item.goodsFeeJpy)}</span></span>` : ''}
         </div>
-        ${item.returnTrackingNo ? `<div class="small">回国单号：<b>${escapeHtml(item.returnTrackingNo)}</b> <button class="small plain" data-copy="${escapeHtml(item.returnTrackingNo)}">复制</button>${item.returnedAt ? ` <span class="muted">· ${escapeHtml(item.returnedAt)} 回国</span>` : ''}</div>` : ''}
+        ${item.returnTrackingNo ? `<div class="small" style="margin-top:6px">回国单号 <button class="badge copy-chip mono" data-copy="${escapeHtml(item.returnTrackingNo)}">${escapeHtml(item.returnTrackingNo)}</button>${item.returnedAt ? ` <span class="muted">· ${escapeHtml(item.returnedAt)} 回国</span>` : ''}</div>` : ''}
         ${item.intlFeeFen === null || item.intlFeeFen === undefined || dead ? '' : `<div class="small muted">${item.weightG ? `${item.weightG} g` : '整摞均摊'} · 国际运费 ${money(item.intlFeeFen)} ${item.intlPaid ? '已付' : '待付'}</div>`}
         ${item.missing ? '<div class="small muted">这件东西没到齐。</div>' : ''}
         ${note}
@@ -160,18 +195,24 @@ function itemCard(item) {
     </div>`;
 }
 
-/** 直邮包裹：放行之前只说「打好包了」，放行之后单号、毛重、运费、平铺图、每件来自哪个订单都摆出来。 */
+/** 运单卡（17TRACK 那种）：放行之前只说「打好包了」，放行之后单号、毛重、运费、平铺图、每件来自哪个订单都摆出来。 */
 function parcelCard(p) {
-  const list = `<ul class="small" style="margin:6px 0 0;padding-left:18px">${p.items
-    .map((i) => {
-      const code = codeTag(i);
-      return `<li>${code || ''} ${escapeHtml(i.title)}${i.orderNo ? ` <button class="badge copy-chip mono" data-copy="${escapeHtml(i.orderNo)}">订单 ${escapeHtml(i.orderNo)}</button>` : ` <span class="muted">${escapeHtml(i.batchName)}</span>`}</li>`;
-    })
+  const list = `<ul class="parcel-items">${p.items
+    .map(
+      (i) => `<li><span class="thumb">${thumb(i)}</span>
+        <div class="t"><div>${escapeHtml(i.title)}</div>
+          <div class="row" style="gap:6px;margin-top:2px">${codeTag(i) || ''}${i.orderNo ? `<button class="badge copy-chip mono" data-copy="${escapeHtml(i.orderNo)}">订单 ${escapeHtml(i.orderNo)}</button>` : `<span class="muted">${escapeHtml(i.batchName)}</span>`}</div></div></li>`,
+    )
     .join('')}</ul>`;
   if (!p.released) {
-    return `<div class="item" style="display:block">
-      <div class="row" style="justify-content:space-between"><strong>仓库已经打好包 · ${p.itemCount} 件</strong><span class="badge warn">等付运费</span></div>
-      <p class="small muted" style="margin:4px 0">${escapeHtml(p.submitDay)} 打包。群主会找你说运费，付完之后这里会出现快递单号和平铺图。</p>
+    return `<div class="parcel waiting">
+      <div class="parcel-head">
+        <div><span class="tracking"><b style="font-size:16px">仓库已经打好包 · ${p.itemCount} 件</b></span>
+          <div class="small muted">${escapeHtml(p.submitDay)} 打包</div></div>
+        <span class="badge warn dot">等付运费</span>
+      </div>
+      <ol class="steps"><li class="step done">仓库打包</li><li class="step now">付运费</li><li class="step">寄出</li></ol>
+      <p class="small muted" style="margin:0">群主会找你说运费，付完之后这里会出现快递单号和平铺图。</p>
       ${list}
     </div>`;
   }
@@ -181,17 +222,28 @@ function parcelCard(p) {
       return `<a href="${src}" target="_blank"><img src="${src}" alt="平铺图" loading="lazy"></a>`;
     })
     .join('');
-  return `<div class="item" style="display:block">
-    <div class="row" style="justify-content:space-between">
-      <strong>${escapeHtml(p.trackingNo)} <button class="small plain" data-copy="${escapeHtml(p.trackingNo)}">复制单号</button></strong>
-      <span class="badge ok">已寄出</span>
+  return `<div class="parcel">
+    <div class="parcel-head">
+      <div class="tracking">
+        <div><span class="lbl">快递单号</span><span class="no">${escapeHtml(p.trackingNo)}</span></div>
+        <button class="small ghost" data-copy="${escapeHtml(p.trackingNo)}">复制单号</button>
+      </div>
+      <span class="badge ok dot">已寄出</span>
     </div>
+    <ol class="steps"><li class="step done">仓库打包</li><li class="step done">付运费</li><li class="step done">寄出</li></ol>
     <div class="kv"><span>毛重</span><b>${Number(p.grossWeightG).toLocaleString()} g</b></div>
     <div class="kv"><span>运费</span><b class="money">${money(p.feeFen)}</b></div>
     <div class="kv"><span>里面有</span><b>${p.itemCount} 件</b></div>
-    ${list}
     ${photos ? `<div class="parcel-photos">${photos}</div>` : ''}
+    ${list}
   </div>`;
+}
+
+function timelineItem(t) {
+  return `<li class="tl-item">
+    <div class="tl-time">${beijingTime(t.at)}</div>
+    <div class="tl-body"><span>${escapeHtml(t.title)}</span>${statusBadge(t.toStatus)}</div>
+  </li>`;
 }
 
 function render(data) {
@@ -208,15 +260,15 @@ function render(data) {
     if (list.length === 0) return '';
     return `
       <div class="card">
-        <h2>${group.title}<span class="muted small"> · ${list.length} 件</span></h2>
-        ${group.note ? `<p class="small muted">${group.note}</p>` : ''}
+        <h2 class="section-title">${group.title}<span class="count">${list.length} 件</span></h2>
+        ${group.note ? `<p class="small muted" style="margin:0 0 4px">${group.note}</p>` : ''}
         ${list.map(itemCard).join('')}
       </div>`;
   }).join('');
 
   const parcelHtml = parcels.length
     ? `<div class="card">
-        <h2>我的直邮包裹</h2>
+        <h2 class="section-title">我的直邮包裹<span class="count">${parcels.length} 个</span></h2>
         ${parcels.map(parcelCard).join('')}
       </div>`
     : '';
@@ -245,51 +297,44 @@ function render(data) {
 
   const timelineHtml = (data.timeline || []).length
     ? `<div class="card">
-        <h2>最近动态</h2>
-        <table><tbody>
-        ${data.timeline
-          .map(
-            (t) => `<tr>
-              <td class="small muted" style="white-space:nowrap">${beijingTime(t.at)}</td>
-              <td class="small">${escapeHtml(t.title)}</td>
-              <td class="small">${escapeHtml(statusLabel(t.toStatus))}</td>
-            </tr>`,
-          )
-          .join('')}
-        </tbody></table>
+        <h2 class="section-title">最近动态</h2>
+        <ol class="timeline">${data.timeline.slice(0, 8).map(timelineItem).join('')}</ol>
+        ${data.timeline.length > 8 ? `<details><summary class="small" style="margin-top:10px">再看 ${data.timeline.length - 8} 条更早的</summary><ol class="timeline" style="margin-top:10px">${data.timeline.slice(8).map(timelineItem).join('')}</ol></details>` : ''}
        </div>`
     : '';
 
   const pwNotice = data.mustChange
-    ? `<div class="card" style="border-color:var(--warn);background:var(--warn-bg)">
-        <h2>密码还是大家共用的那个初始密码</h2>
-        <p class="small">谁都知道这个密码，别人填你的 QQ 就能登进来，改成只有你知道的（改完要重新登一次）。</p>
-        <button id="change-pw">改密码</button>
+    ? `<div class="card tone-warn">
+        <div class="card-head" style="margin:0">
+          <div><h2 style="margin:0">密码还是大家共用的那个初始密码</h2>
+            <p class="small" style="margin:4px 0 0">谁都知道这个密码，别人填你的 QQ 就能登进来，改成只有你知道的（改完要重新登一次）。</p></div>
+          <button id="change-pw">改密码</button>
+        </div>
        </div>`
     : '';
 
-  const shipped = parcels.filter((p) => p.released).length;
   const where = !items.length
     ? '群主还没把你买的东西放进来。付完货款、群主放行之后，这一页自己会更新。'
     : s.parcelsWaiting
       ? `仓库给你打好了 ${s.parcelsWaiting} 个包裹，等你付运费；付完群主放行，这里就有单号和平铺图。`
       : s.sortedCount
         ? `仓库已经分拣好 ${s.sortedCount} 件${direct ? '，下一步打包直邮给你' : '，下一步装进拼邮箱回国'}。`
-        : '';
+        : '东西都在路上，有变化这一页会跟着变。';
 
+  const live = items.filter((i) => i.status !== 'cancelled' && i.status !== 'refunded');
   app.innerHTML = `
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <h1 style="margin:0">${escapeHtml(data.customer.nickname)} 的仓库</h1>
+    <div class="card hero">
+      <div class="hero-top">
+        <h1>${escapeHtml(data.customer.nickname)} 的仓库</h1>
         <span class="row small muted">${direct ? '<span class="badge warn">直邮</span>' : '<span class="badge ok">拼邮</span>'} ${items.length} 件 <button id="logout" class="small plain">退出登录</button></span>
       </div>
-      <div class="grid" style="margin-top:12px">
-        <div class="stat"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
-        <div class="stat"><div class="label">已分拣</div><div class="value">${s.sortedCount} 件</div></div>
-        <div class="stat"><div class="label">等付运费的包裹</div><div class="value ${s.parcelsWaiting ? 'unpaid' : ''}">${s.parcelsWaiting} 个</div></div>
-        <div class="stat"><div class="label">已寄出的包裹</div><div class="value">${shipped} 个</div></div>
+      <p class="hero-where">${where}</p>
+      ${pipeline(live, direct)}
+      <div class="grid" style="margin-top:14px">
+        <div class="stat${s.goodsUnpaidJpy ? ' tone-danger' : ' tone-ok'}"><div class="label">货款待付（日元）</div><div class="value money">${yen(s.goodsUnpaidJpy)}</div></div>
+        <div class="stat${s.parcelsWaiting ? ' tone-warn' : ''}"><div class="label">等付运费的包裹</div><div class="value">${s.parcelsWaiting}<small>个</small></div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">${where}${direct ? '' : ' 拼邮的东西跟群主一个箱子回国，回国单号在每件东西下面，可以复制去查。'}</p>
+      ${direct ? '' : '<p class="hero-note">拼邮的东西跟群主一个箱子回国，回国单号在每件东西下面，可以复制去查。</p>'}
     </div>
     ${pwNotice}
     ${parcelHtml}
@@ -298,7 +343,7 @@ function render(data) {
     ${shipHtml}
     ${closedHtml}
     ${timelineHtml}
-    <p class="small muted">有疑问就在群里问一声。页面刷新后更新。</p>`;
+    <p class="small muted" style="text-align:center">有疑问就在群里问一声。页面刷新后更新。</p>`;
   bindWarehouse(data);
   document.body.classList.remove('has-shipbar');
   if (keep.scrollY) window.scrollTo(0, keep.scrollY);

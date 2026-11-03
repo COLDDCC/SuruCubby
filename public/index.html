@@ -17,25 +17,25 @@
 </header>
 <div class="wrap entry-card">
   <div class="card">
-    <div class="entry-roles">
-      <button id="tab-user" class="btn" type="button">我是团员</button>
-      <button id="tab-admin" class="btn ghost" type="button">我是群主</button>
-      <a class="btn ghost" href="/wh/">我是仓库</a>
+    <div class="entry-roles segmented block" role="group" aria-label="选身份">
+      <button id="tab-user" class="on" type="button" aria-pressed="true">我是团员</button>
+      <button id="tab-admin" type="button" aria-pressed="false">我是群主</button>
+      <a href="/wh/">我是仓库</a>
     </div>
 
     <form id="form-user">
       <label for="qq">QQ 号</label>
-      <input id="qq" name="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789" style="width:100%">
+      <input id="qq" name="qq" inputmode="numeric" autocomplete="username" placeholder="例如 123456789">
       <label for="user-pw">密码</label>
-      <input id="user-pw" type="password" autocomplete="current-password" placeholder="第一次登录用群主给的初始密码" style="width:100%">
-      <p><button class="btn" type="submit" style="width:100%">进入我的仓库</button></p>
+      <input id="user-pw" type="password" autocomplete="current-password" placeholder="第一次登录用群主给的初始密码">
+      <p><button class="btn" type="submit">进入我的仓库</button></p>
       <p class="small muted">忘了密码就在群里找群主，他能帮你重设。</p>
     </form>
 
     <form id="form-admin" hidden>
       <label for="admin-pw">后台密码</label>
-      <input id="admin-pw" type="password" autocomplete="current-password" style="width:100%">
-      <p><button class="btn" type="submit" style="width:100%">进入后台</button></p>
+      <input id="admin-pw" type="password" autocomplete="current-password">
+      <p><button class="btn" type="submit">进入后台</button></p>
     </form>
 
     <p id="msg" class="small" role="status" aria-live="polite" hidden></p>

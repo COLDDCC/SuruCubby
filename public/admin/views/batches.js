@@ -11,7 +11,10 @@ import { beijingTime, empty, escapeHtml, statusLabel, yen } from '/admin/ui.js';
 const STAGES = [
   { key: 'ordered', cls: '' },
   { key: 'jp_warehouse', cls: '' },
-  { key: 'intl_transit', cls: 'warn', merge: ['intl_transit', 'cn_arrived'] },
+  // 新流程：仓库分拣 → 直邮打包；以前漏了这两段，进度条上它们算不进去
+  { key: 'sorted', cls: 'info' },
+  { key: 'packed', cls: 'warn' },
+  { key: 'intl_transit', cls: 'violet', merge: ['intl_transit', 'cn_arrived'] },
   { key: 'cn_stock', cls: 'ok' },
   { key: 'shipped', cls: '' },
   { key: 'delivered', cls: '' },
@@ -73,7 +76,7 @@ function orderRow(b) {
         .join('')}</div>`
     : '';
   const badges = stages
-    .map((s) => `<span class="badge ${s.cls}">${escapeHtml(statusLabel(s.key))} ${s.count}</span>`)
+    .map((s) => `<span class="badge dot ${s.cls}">${escapeHtml(statusLabel(s.key))} ${s.count}</span>`)
     .join(' ');
   const people =
     b.customers.length > 4
@@ -130,20 +133,25 @@ export async function render(view) {
   };
 
   view.innerHTML = `
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <h2 style="margin:0">我的订单</h2>
-        <a class="btn small" href="#/import">录入新订单</a>
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">订单</h1>
+        <p class="page-sub">每一张 Excel / 每一次单独下单 = 一个日本订单</p>
       </div>
-      <p class="small muted" style="margin:6px 0 0">
-        共 ${orders.length} 单 · ${totals.active} 单进行中 · ${totals.items} 件 · 货款 ${yen(totals.amount)}
-        ${totals.unpaid ? ` · <span class="unpaid">未收 ${yen(totals.unpaid)}</span>` : ''}
-      </p>
+      <div class="page-actions"><a class="btn" href="#/import">录入新订单</a></div>
+    </div>
+    <div class="grid kpis">
+      <div class="stat"><div class="label">订单</div><div class="value">${orders.length}<small>单</small></div><div class="hint">${totals.active} 单进行中</div></div>
+      <div class="stat"><div class="label">商品</div><div class="value">${totals.items}<small>件</small></div><div class="hint">全部订单合计</div></div>
+      <div class="stat"><div class="label">货款</div><div class="value money">${yen(totals.amount).replace('円', '')}<small>円</small></div><div class="hint">按导入表记</div></div>
+      <div class="stat${totals.unpaid ? ' tone-danger' : ' tone-ok'}"><div class="label">未收货款</div><div class="value money">${yen(totals.unpaid).replace('円', '')}<small>円</small></div><div class="hint">${totals.unpaid ? '去订单里收' : '都收齐了'}</div></div>
+    </div>
+    <div class="card">
       ${
         orders.length
           ? `<input id="order-q" inputmode="search" autocomplete="off" style="width:100%;margin-top:12px"
                placeholder="搜日本订单号 / 物流单号 / 订单名 / 客户名 / 包裹名">
-             <div class="order-filters" id="order-filters"></div>
+             <div class="order-filters segmented" id="order-filters"></div>
              <div id="order-list"></div>`
           : empty('还没有订单，先去录入一张 Excel')
       }
@@ -159,7 +167,7 @@ export async function render(view) {
     const matched = orders.filter((b) => words.every((w) => b._q.includes(w)));
     filtersEl.innerHTML = FILTERS.map((f) => {
       const n = matched.filter(f.test).length;
-      return `<button class="small ${f.key === filter ? '' : 'plain'}" data-filter="${f.key}">${f.label} ${n}</button>`;
+      return `<button class="${f.key === filter ? 'on' : ''}" aria-pressed="${f.key === filter}" data-filter="${f.key}">${f.label} <span class="n">${n}</span></button>`;
     }).join('');
     const shown = matched.filter(FILTERS.find((f) => f.key === filter).test);
     listEl.innerHTML = shown.length ? shown.map(orderRow).join('') : empty('没有符合条件的订单');
