@@ -23,13 +23,9 @@ import { warehouseUserRoutes } from './routes/admin/warehouseUsers.ts';
 import { quickOrderRoutes } from './routes/admin/quickOrder.ts';
 import { cleanupRoutes } from './routes/admin/cleanup.ts';
 import { warehouseRoutes } from './routes/warehouse.ts';
+import { imageCache } from './lib/imageCache.ts';
 const app = new Hono<{ Bindings: Env }>();
 
-/** Workers 上用边缘缓存，Node（VPS）上用入口传进来的磁盘缓存。 */
-function imageCache(env: Env): ImageCache {
-  if (env.IMAGE_CACHE) return env.IMAGE_CACHE;
-  return (globalThis as unknown as { caches: { default: ImageCache } }).caches.default;
-}
 
 /**
  * 所有响应都带的安全头：不许别的网站把后台 / 客户页套进 iframe（点击劫持），

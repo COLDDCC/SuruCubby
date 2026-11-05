@@ -269,6 +269,33 @@ warehouseRoutes.get('/customers/:id', async (c) => {
   });
 });
 
+/**
+ * 仓库改客户的走法：拼邮 ⇄ 直邮。客户临时不想拼邮了，仓库当场改，以后的单也默认直邮。
+ * 仓库看不到拼邮客户的地址，改成直邮后要等群主在后台补地址（群主首页会出现待办），补好才能打包。
+ * 已经装进拼邮箱的东西不动，要改走直邮先从箱子里拿出来。
+ */
+warehouseRoutes.post('/customers/:id/lane', async (c) => {
+  const id = requireInt(c.req.param('id'), '客户 ID');
+  const body = await readJson<{ lane?: unknown }>(c);
+  if (body.lane !== 'direct' && body.lane !== 'group') throw badRequest('只能改成直邮或拼邮');
+  const db = c.env.DB;
+  const cu = await db
+    .prepare('SELECT id, ship_mode AS shipMode, self_return AS selfReturn, direct_address AS directAddress FROM customers WHERE id = ?')
+    .bind(id)
+    .first<{ id: number; shipMode: string; selfReturn: number; directAddress: string | null }>();
+  if (!cu) throw notFound('没有这个客户');
+  if (cu.selfReturn) throw badRequest('这位自己带回，找群主改');
+  if (body.lane === 'group') {
+    const open = await db
+      .prepare('SELECT COUNT(*) AS n FROM parcels WHERE customer_id = ? AND released_at IS NULL')
+      .bind(id)
+      .first<{ n: number }>();
+    if (open?.n) throw badRequest('他还有没放行的直邮包裹，先作废那个包裹再改回拼邮');
+  }
+  await db.prepare('UPDATE customers SET ship_mode = ? WHERE id = ?').bind(body.lane, id).run();
+  return c.json({ ok: true, lane: body.lane, needAddress: body.lane === 'direct' && !cu.directAddress });
+});
+
 /** 仓库看到的包裹：单号、毛重、几件、平铺图；看不到任何钱，也只知道「锁没锁」，不知道为什么锁。 */
 async function listParcels(env: Env, where: string, binds: unknown[]) {
   const rows = await env.DB.prepare(
@@ -310,15 +337,17 @@ async function lockedParcel(env: Env, id: number) {
 /** 检查一组物品都能装进这位直邮客户的包裹：是他的、已分拣、还没进别的包裹。 */
 async function packableItems(env: Env, customerId: number, itemIds: number[], parcelId: number | null) {
   const rows = await env.DB.prepare(
-    `SELECT id, customer_id AS customerId, status, parcel_id AS parcelId FROM items WHERE id IN (${placeholders(itemIds.length)})`,
+    `SELECT i.id, i.customer_id AS customerId, i.status, i.parcel_id AS parcelId, COALESCE(p.kind, '') AS packageKind
+       FROM items i LEFT JOIN packages p ON p.id = i.package_id WHERE i.id IN (${placeholders(itemIds.length)})`,
   )
     .bind(...itemIds)
-    .all<{ id: number; customerId: number; status: string; parcelId: number | null }>();
+    .all<{ id: number; customerId: number; status: string; parcelId: number | null; packageKind: string }>();
   if (rows.results.length !== new Set(itemIds).size) throw badRequest('有的东西不存在，刷新一下');
   for (const r of rows.results) {
     if (r.customerId !== customerId) throw badRequest('勾进来的东西不全是这位客户的');
     if (r.parcelId !== null && r.parcelId !== parcelId) throw badRequest('有的东西已经在别的包裹里了');
     if (r.parcelId === null && r.status !== 'sorted') throw badRequest('只有点过【整理完成】的东西才能打包');
+    if (r.parcelId === null && r.packageKind === 'group') throw badRequest('有的东西还在拼邮箱里，先从箱子里拿出来');
   }
   return rows.results;
 }
@@ -341,6 +370,7 @@ warehouseRoutes.post('/parcels', async (c) => {
     .first<{ shipMode: string; selfReturn: number; directAddress: string | null }>();
   if (!cu) throw notFound('没有这个客户');
   if (laneOf(cu) !== 'direct') throw badRequest('这位客户不是直邮，他的东西走拼邮箱');
+  if (!cu.directAddress) throw badRequest('群主还没填这位的地址，等地址出来再打包');
   const rows = await packableItems(c.env, customerId, itemIds, null);
   const at = nowIso();
   const id = await nextId(db, 'parcels');

@@ -62,6 +62,7 @@ interface Fetcher {
 interface ImageCache {
   match(request: Request): Promise<Response | undefined>;
   put(request: Request, response: Response): Promise<void>;
+  delete?(request: Request): Promise<boolean>;
 }
 
 interface ExecutionContext {

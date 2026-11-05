@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { startInBackground } from '../../lib/imageJobs.ts';
 import type { Env } from '../../lib/env.ts';
 import { badRequest, bound, intList, notFound, optionalString, placeholders, readJson, requireInt } from '../../lib/http.ts';
 import { nextId, nowIso } from '../../lib/db.ts';
@@ -110,6 +111,7 @@ quickOrderRoutes.post('/', async (c) => {
     itemId += 1;
   });
   await db.batch(stmts);
+  startInBackground(c, batchId);
   return c.json({ ok: true, batchId, packageId, itemCount: rows.length, released: release, withImage: rows.filter((r) => r.imageUrl).length });
 });
 

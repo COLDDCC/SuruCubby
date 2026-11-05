@@ -71,11 +71,9 @@ export async function render(view, [id]) {
         <h2 style="margin:0">${escapeHtml(pkg.name)} · 称重台</h2>
         <a class="btn small ghost" href="#/packages/${pkg.id}">包裹详情</a>
       </div>
-      <p class="small muted">对货看大图和货号就够：点图片＝这件找到了，货号能点开商品页核对。称重有两种填法——整摞放秤上填一个总重（摞内按件数均摊），或者一件一件填重量（按各件轻重摊）。<strong>不用等全箱称完</strong>：哪一摞称好了就先「算分摊」那一摞，那个人马上就能申请发货，剩下的人称好了再算一次，账各记各的。已经算过运费的那几摞要改，得先「撤销分摊」。<strong>已经寄出或签收的件不在这台秤上</strong>（进度、认领、分摊都不算它们），改回拼邮也不会再收一次运费。</p>
       ${
         p.unclaimedItems > 0
-          ? `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button>
-             <span class="small muted">货全到了就点这个，一件件都不用点；确实没收到的请在下面标「缺件」</span></p>`
+          ? `<p><button class="small" data-action="claimAll">整箱全部认领（还差 ${p.unclaimedItems} 件）</button></p>`
           : ""
       }
       ${
@@ -88,8 +86,7 @@ export async function render(view, [id]) {
               unpaidGroups.length
                 ? `<p><button class="small" data-action="payAllIntl">这个包裹运费全收（${unpaidGroups.length} 人 · ${money(
                     unpaidIntl,
-                  )}）</button>
-                    <span class="small muted">点一次给每个人都记一笔；谁其实没付，去他页面撤销那一笔</span></p>`
+                  )}）</button></p>`
                 : '<p class="small paid">这个包裹的运费都记完了。</p>'
             }`
           : ""
@@ -104,10 +101,7 @@ export async function render(view, [id]) {
             <span class="muted small">${c.items.length} 件</span></h3>
           <button class="small plain" data-action="backToGroup" data-customer="${c.customerId}" data-nickname="${escapeHtml(c.nickname)}">改回拼邮</button>
         </div>
-        <p class="small muted">这批货他自己带回国／另找转运，后面不再走我们这条链：不认领、不称重、不摊国际运费、不能申请发货、也不发国内快递。
-          货款照旧按表里记的算，一分没多一分没少。要恢复就点右边「改回拼邮」，还没交接的件会重新回到「待认领」里；
-          已经点过「当面给他了」的那几件已经算签收，不会再回这台秤上，也不会再收一次运费。
-          <a href="#/customers/${c.customerId}">他的详情页</a>那儿有「这几件已经当面给他了」，货交接完在那儿结掉就行。</p>
+        <p class="small"><a href="#/customers/${c.customerId}">他的详情页</a></p>
       </div>`,
       )
       .join("")}
@@ -183,7 +177,7 @@ export async function render(view, [id]) {
           readyStacks.length ? `（称好的 ${readyStacks.length} 摞）` : ""
         }</button>
       </div>
-      <p class="small muted">单价 × 各摞重量之和就是这一箱运费，每人摊多少当场出来；点「算分摊」只把<strong>称好的那几摞</strong>入账，没称的照旧不动。包装箱重量按比例摊给所有人，尾差算需求方的。转运仓那天收得不一样，预览里可以直接改总额再确认——但手填实收总额得整箱都称完认领完才行，不然这笔钱会全压在已经称好的那几个人头上。${
+      <p class="small muted">${
         offList.length
           ? `<strong>标了「不拼邮」的 ${offList.length} 个人不参与这一箱的分摊</strong>，凑「整箱」也不把他们算进去。`
           : ""

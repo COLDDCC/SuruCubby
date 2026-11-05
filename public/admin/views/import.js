@@ -37,12 +37,17 @@ export async function render(view) {
   };
   view.innerHTML = `
     <div class="card">
-      <h2>导入 Excel</h2>
-      <p class="small muted">一张表 = 一个日本订单。必需：名称、cn。货款一律按日元记，不折人民币：有「实际价格」就按它算，也可以把某一列指认成「应付日元金额」。国际/国内运费仍然是人民币。</p>
+      <h2>导入订单表</h2>
+      <label for="feishuUrl">飞书表格链接</label>
+      <form id="feishuForm" class="row">
+        <input id="feishuUrl" style="flex:1;min-width:240px" placeholder="https://xxx.feishu.cn/sheets/…" autocomplete="off">
+        <button type="submit">读取</button>
+      </form>
+      <label for="file">或者选 Excel 文件</label>
       <input type="file" id="file" accept=".xlsx,.xls,.csv">
       <label for="batchName">批次名</label>
       <input id="batchName" style="width:100%" placeholder="例如 9月20日 第12团">
-      <label>来源店铺（团员页会显示成标签，点一下就复制）</label>
+      <label>来源店铺</label>
       <input id="shop" list="shop-list" placeholder="例如 骏河屋 / 骏河屋秋叶原店 / booth">
       <datalist id="shop-list">
         <option value="骏河屋"></option>
@@ -54,12 +59,38 @@ export async function render(view) {
       <label for="orderedAt">下单日期（可不填）</label>
       <input id="orderedAt" type="date">
       <label style="margin-top:10px"><input type="checkbox" id="releaseNow"> 导入后直接放进每个人的仓库</label>
-      <p class="small muted" style="margin-top:2px">默认不勾：先下单后收钱，导入后客户还看不到，收完谁的钱就去订单页点他名字放行。</p>
       <p id="status" class="small muted"></p>
     </div>
     <div id="preview"></div>`;
 
   document.getElementById('file').addEventListener('change', (e) => handleFile(e.target.files[0], view));
+  document.getElementById('feishuForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleFeishu(document.getElementById('feishuUrl').value.trim(), view, e.submitter);
+  });
+}
+
+async function handleFeishu(url, view, button) {
+  if (!url) return toast('先贴飞书表格链接', true);
+  const status = document.getElementById('status');
+  status.textContent = '正在读飞书表格（有图片的话要多等一会儿）…';
+  if (button) button.disabled = true;
+  try {
+    const r = await api.post('/api/admin/import/feishu', { url });
+    state.sheet = { headers: r.headers, rows: r.rows, urls: r.urls };
+    state.fileName = `飞书：${r.title || '表格'}${r.sheetTitle ? ` / ${r.sheetTitle}` : ''}`;
+    state.fileHash = r.fileHash;
+    state.columnEdits = {};
+    const nameInput = document.getElementById('batchName');
+    if (!nameInput.value.trim()) nameInput.value = r.title || r.sheetTitle || '';
+    status.textContent = `${r.sheetTitle || '表格'}：${r.rows.length} 行${r.images.found ? ` · 图片 ${r.images.stored}/${r.images.found} 张已存好` : ''}`;
+    await loadPreview(view);
+  } catch (err) {
+    status.textContent = '';
+    toast(err.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function handleFile(file, view) {
@@ -131,7 +162,6 @@ function columnsCard(p) {
     ].join('');
   return `<div class="card">
     <h3>列对应关系</h3>
-    <p class="small muted">程序按表头猜的，猜错了直接在下面改。表头写着「数量」但底下是 1500、4230 这种数，就把这列改成「平时价格」。</p>
     <div class="scroll-x"><table>
       <thead><tr><th>Excel 列</th><th>当作</th><th>第一个值</th></tr></thead>
       <tbody>${p.columns
@@ -249,7 +279,7 @@ function renderPreview(view) {
       <div class="row" style="margin-top:12px">
         <button data-action="commit" ${p.errors.length || unmatched.length ? 'disabled' : ''}>确认导入</button>
         <span class="small muted">${
-          unmatched.length ? '还有黄色行没处理' : p.errors.length ? '先修掉问题行' : '会自动建一个同名包裹'
+          unmatched.length ? '还有黄色行没处理' : p.errors.length ? '先修掉问题行' : ''
         }</span>
       </div>
     </div>`;
@@ -336,7 +366,6 @@ function renderPreview(view) {
             .join('\n');
           box.innerHTML = `<div class="card"><h3>新建了这些客户，把链接发给他们</h3>
             <textarea style="width:100%;height:140px">${escapeHtml(lines)}</textarea>
-            <p class="small muted">不想挨个发链接也行：让他们打开 ${escapeHtml(location.origin)}/login，账号是自己的 QQ 号，初始密码 123456，进去先改成自己的。</p>
             <p><a class="btn" href="#/batches/${result.batchId}">查看这一批</a></p></div>`;
         } else {
           location.hash = `#/batches/${result.batchId}`;

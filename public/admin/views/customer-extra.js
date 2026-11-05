@@ -63,7 +63,6 @@ export async function renderExtra(box, data, id, reload) {
         <label style="margin:0" id="qRelWrap"><input type="checkbox" id="qRelease"> 已经收过钱，录完直接放进他的仓库</label>
         <button data-action="quick">录进去</button>
       </div>
-      <p class="small muted">每次录入算一个独立的订单，仓库拿订单号或运单号就能找到。没给图片时会按骏河屋货号自动找图。</p>
     </div>
 
     <div class="card">

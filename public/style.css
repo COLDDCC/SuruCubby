@@ -655,6 +655,31 @@ input[type='radio'] {
   box-shadow: none;
   accent-color: var(--brand);
 }
+input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  vertical-align: middle;
+  cursor: pointer;
+  flex: none;
+}
+/* 收款勾选：比普通勾选框再大一号 */
+.pay-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pay-check input {
+  width: 30px;
+  height: 30px;
+}
+/* 表格里「勾选框 + 缩略图」一格 */
+.cell-pick {
+  width: 40px;
+}
 input::placeholder,
 textarea::placeholder {
   color: color-mix(in srgb, var(--muted) 75%, transparent);
@@ -1850,6 +1875,37 @@ details summary:hover {
 .wh-card.wh-off {
   opacity: 0.55;
 }
+/* 大勾选框：压在图片左上角，手指一按就中 */
+.claim-photo {
+  position: relative;
+}
+.pick-box {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 3px solid #fff;
+  background: rgba(15, 23, 42, 0.35);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.pick-box.on {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.pick-box.on::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 2px;
+  width: 9px;
+  height: 18px;
+  border: solid #fff;
+  border-width: 0 4px 4px 0;
+  transform: rotate(45deg);
+}
 .wh-code {
   font-family: var(--num);
   font-size: 22px;
@@ -2108,4 +2164,29 @@ button.wh-big {
   .topbar #who {
     font-size: 12px;
   }
+}
+
+/* 订单页：收款进度 */
+.pay-progress {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-2);
+}
+.pay-progress .meter {
+  margin-top: 8px;
+}
+/* 换图弹窗里的粘贴区 */
+.paste-zone {
+  margin: 10px 0;
+  padding: 22px 12px;
+  border: 2px dashed var(--line-strong);
+  border-radius: 10px;
+  text-align: center;
+  color: var(--muted);
+  outline: none;
+}
+.paste-zone:focus {
+  border-color: var(--brand);
 }

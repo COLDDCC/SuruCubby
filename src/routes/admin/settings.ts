@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../lib/env.ts';
-import { domesticFeeFen, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
+import { domesticFeeFen, getSetting, intlPriceFenPerKg, setSetting } from '../../lib/db.ts';
+import { FeishuError, testFeishu } from '../../lib/feishu.ts';
 import { badRequest, readJson } from '../../lib/http.ts';
 import { toFenStrict } from '../../lib/money.ts';
 import { directSaleFenPerKg, whCostFenPerKg } from '../../lib/parcels.ts';
@@ -13,8 +14,34 @@ settingsRoutes.get('/', async (c) =>
     intlPriceFenPerKg: await intlPriceFenPerKg(c.env),
     whCostFenPerKg: await whCostFenPerKg(c.env),
     directSaleFenPerKg: await directSaleFenPerKg(c.env),
+    // Secret 只告诉前端填没填，不回传本身
+    feishuAppId: await getSetting(c.env, 'feishu_app_id', ''),
+    feishuHasSecret: (await getSetting(c.env, 'feishu_app_secret', '')) !== '',
   }),
 );
+
+/**
+ * 飞书应用凭据：先拿去换一次 token，换成功才保存，填错当场就知道。
+ * appSecret 不传（或传空）表示沿用已保存的。
+ */
+settingsRoutes.post('/feishu', async (c) => {
+  const body = await readJson<{ appId?: unknown; appSecret?: unknown }>(c);
+  const appId = typeof body.appId === 'string' ? body.appId.trim() : '';
+  if (!/^cli_[A-Za-z0-9]{6,40}$/.test(appId)) throw badRequest('App ID 应该是 cli_ 开头的一串');
+  const given = typeof body.appSecret === 'string' ? body.appSecret.trim() : '';
+  const appSecret = given || (await getSetting(c.env, 'feishu_app_secret', ''));
+  if (!appSecret) throw badRequest('App Secret 没填');
+  if (appSecret === appId) throw badRequest('App Secret 和 App ID 填成一样的了：Secret 在飞书开放平台「凭证与基础信息」里，是另一串');
+  try {
+    await testFeishu(appId, appSecret);
+  } catch (err) {
+    if (err instanceof FeishuError) throw badRequest(err.message);
+    throw err;
+  }
+  await setSetting(c.env, 'feishu_app_id', appId);
+  await setSetting(c.env, 'feishu_app_secret', appSecret);
+  return c.json({ ok: true });
+});
 
 /**
  * 这两个数会乘进所有人的运费：单价 × 重量 ÷ 1000。

@@ -140,6 +140,20 @@ dashboardRoutes.get('/', async (c) => {
     )
     .all();
 
+  // ⑤ 走直邮、但还没填地址、手上还有没寄的东西（多半是仓库刚改成直邮的）
+  const needAddress = await db
+    .prepare(
+      `SELECT c.id AS customerId, c.nickname,
+              (SELECT COUNT(*) FROM items i WHERE i.customer_id = c.id AND i.parcel_id IS NULL
+                 AND i.status IN ('ordered','jp_warehouse','sorted')) AS count
+         FROM customers c
+        WHERE c.ship_mode = 'direct' AND c.self_return = 0 AND COALESCE(TRIM(c.direct_address), '') = ''
+          AND EXISTS (SELECT 1 FROM items i WHERE i.customer_id = c.id AND i.parcel_id IS NULL
+                        AND i.status IN ('ordered','jp_warehouse','sorted'))
+        ORDER BY c.nickname`,
+    )
+    .all();
+
   const now = Date.now();
   const domesticStock = stockRows.results
     .map((row) => ({
@@ -158,5 +172,6 @@ dashboardRoutes.get('/', async (c) => {
     parcelsPending,
     whBacklog: whBacklog.results,
     openBoxes: openBoxes.results,
+    needAddress: needAddress.results,
   });
 });
