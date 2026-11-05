@@ -1867,41 +1867,43 @@ details summary:hover {
 .wh-card[data-pick]:hover {
   border-color: var(--line-strong);
 }
+/* 选中：右上角绿色打勾 + 卡片淡绿底，一眼看得出哪些勾上了 */
 .wh-card.found,
 .wh-card.found:hover {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-ring);
+  border-color: var(--ok);
+  background: var(--ok-bg);
 }
 .wh-card.wh-off {
   opacity: 0.55;
 }
-/* 大勾选框：压在图片左上角，手指一按就中 */
 .claim-photo {
   position: relative;
 }
+/* 方形勾选框：压在图片右上角，白底灰边，在什么颜色的封面上都看得见 */
 .pick-box {
   position: absolute;
+  z-index: 1;
   top: 8px;
-  left: 8px;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 3px solid #fff;
-  background: rgba(15, 23, 42, 0.35);
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid #94a3b8;
+  background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   pointer-events: none;
 }
 .pick-box.on {
-  background: var(--brand);
-  border-color: var(--brand);
+  background: #16a34a;
+  border-color: #16a34a;
 }
 .pick-box.on::after {
   content: '';
   position: absolute;
   left: 9px;
-  top: 2px;
-  width: 9px;
-  height: 18px;
+  top: 3px;
+  width: 8px;
+  height: 16px;
   border: solid #fff;
   border-width: 0 4px 4px 0;
   transform: rotate(45deg);

@@ -87,7 +87,8 @@ paymentRoutes.post('/', async (c) => {
     ];
     for (const item of items.results) {
       statements.push(
-        db.prepare('UPDATE items SET goods_paid = 1, updated_at = ? WHERE id = ?').bind(at, item.id),
+        // 收完货款就放进他的仓库，和订单页勾「已收款」一个口径（以前这里漏了，客户那边一直是空的）
+        db.prepare('UPDATE items SET goods_paid = 1, released_at = COALESCE(released_at, ?), updated_at = ? WHERE id = ?').bind(at, at, item.id),
         db.prepare('INSERT OR IGNORE INTO payment_items (payment_id, item_id) VALUES (?, ?)').bind(paymentId, item.id),
       );
     }
