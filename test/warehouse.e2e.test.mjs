@@ -279,11 +279,30 @@ test('拼邮箱：装进乙的东西、填回国单号、发出 → 乙看到回
   const early = await wh('POST', `/api/wh/boxes/${box.id}/ship`, {}, { raw: true });
   assert.equal(early.status, 400, '没填回国单号不能发出');
   await wh('PATCH', `/api/wh/boxes/${box.id}`, { trackingNo: `EMS${stamp}` });
+  // 箱子还没发出：乙已经能看到自己那件装进了拼邮箱、带着回国单号（客户页显示「已装箱」）
+  const boxed = await bob('GET', `/api/w/${ctx.bToken}`);
+  assert.equal(boxed.items[0].packageKind, 'group');
+  assert.equal(boxed.items[0].status, 'sorted');
+  assert.equal(boxed.items[0].returnTrackingNo, `EMS${stamp}`);
   await wh('POST', `/api/wh/boxes/${box.id}/ship`, { returnedAt: '2026-11-03' });
   const view = await bob('GET', `/api/w/${ctx.bToken}`);
   assert.equal(view.items[0].returnTrackingNo, `EMS${stamp}`);
   assert.equal(view.items[0].returnedAt, '2026-11-03');
   assert.equal(view.items[0].status, 'intl_transit');
+});
+
+test('在客户详情页收货款（不经过订单页勾选）也会放行，客户当场看得到', async () => {
+  const r = await admin('POST', '/api/admin/import/commit', {
+    batchName: `详情页收款 ${stamp}`,
+    fileHash: `wh-pay-${stamp}`,
+    sheet: { headers: ['名称', 'cn', '应付日元金额'], rows: [['乙的第二单', B, '700']] },
+    assignments: [{ cn: B, customerId: ctx.bId }],
+  });
+  const before = (await bob('GET', `/api/w/${ctx.bToken}`)).items.length;
+  await admin('POST', '/api/admin/payments', { customerId: ctx.bId, kind: 'goods', batchId: r.batchId });
+  const view = await bob('GET', `/api/w/${ctx.bToken}`);
+  assert.equal(view.items.length, before + 1, '收完钱就该出现在他的仓库里');
+  assert.ok(view.items.some((i) => i.title === '乙的第二单' && i.goodsPaid));
 });
 
 test('转运来的东西（不是群主买的）：只录名称 / 图 + 单号，货款 0，录进来就放行', async () => {

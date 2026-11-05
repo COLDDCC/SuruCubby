@@ -7,9 +7,18 @@ const app = document.getElementById('app');
 /** 重新渲染后要留下的东西：勾过的商品和滚到的位置 */
 const keep = { selected: new Set(), scrollY: 0 };
 
+/**
+ * 客户看到的「这一步」。拼邮的东西装进拼邮箱后，后端状态还是 sorted（等箱子发出才变回国中），
+ * 但对客户来说已经是新的一步：装箱了、有回国单号了。这里单独拆成 boxed。
+ */
+function stageOf(item) {
+  return item.status === 'sorted' && item.packageKind === 'group' ? 'boxed' : item.status;
+}
+
 const GROUPS = [
   { title: '已下单，等仓库收货', statuses: ['ordered', 'jp_warehouse'], note: '' },
   { title: '仓库已分拣', statuses: ['sorted'], note: '仓库已经收到并找齐了，接下来打包。' },
+  { title: '已装进拼邮箱', statuses: ['boxed'], note: '仓库已经装箱，回国单号在每件下面（可复制）。箱子发出后变成「回国中」。' },
   { title: '已打包，等付运费', statuses: ['packed'], note: '' },
   { title: '回国中', statuses: ['intl_transit', 'cn_arrived'], note: '' },
   { title: '到了，找群主拿', statuses: ['cn_stock'], note: '东西已经在群主手上，发货在群里找群主。' },
@@ -134,13 +143,14 @@ const PIPES = {
   group: [
     { name: '已下单', statuses: ['ordered', 'jp_warehouse'] },
     { name: '已分拣', statuses: ['sorted', 'packed'] },
+    { name: '已装箱', statuses: ['boxed'] },
     { name: '回国中', statuses: ['intl_transit', 'cn_arrived'] },
     { name: '到群主手上', statuses: ['cn_stock', 'shipped', 'delivered'] },
   ],
 };
 
 function pipeline(items, direct) {
-  const steps = PIPES[direct ? 'direct' : 'group'].map((st) => ({ ...st, n: items.filter((i) => st.statuses.includes(i.status)).length }));
+  const steps = PIPES[direct ? 'direct' : 'group'].map((st) => ({ ...st, n: items.filter((i) => st.statuses.includes(stageOf(i))).length }));
   if (!steps.some((st) => st.n)) return '';
   // 走得最远的那一件到了哪一站：这一站和之前的线都点亮
   let far = 0;
@@ -184,7 +194,7 @@ function itemCard(item) {
         </div>
         ${orderTag(item)}
         <div class="small row" style="gap:6px;margin-top:6px">
-          ${statusBadge(item.status)}${paid}${missing}
+          ${stageOf(item) === 'boxed' ? statusBadge('sorted', '已装箱') : statusBadge(item.status)}${paid}${missing}
           ${item.goodsFeeJpy ? `<span class="muted">应付 <span class="money">${yen(item.goodsFeeJpy)}</span></span>` : ''}
         </div>
         ${item.returnTrackingNo ? `<div class="small" style="margin-top:6px">回国单号 <button class="badge copy-chip mono" data-copy="${escapeHtml(item.returnTrackingNo)}">${escapeHtml(item.returnTrackingNo)}</button>${item.returnedAt ? ` <span class="muted">· ${escapeHtml(item.returnedAt)} 回国</span>` : ''}</div>` : ''}
@@ -253,10 +263,10 @@ function render(data) {
   const parcels = data.parcels || [];
   const direct = data.customer.shipMode === 'direct';
   const shownStatuses = new Set(GROUPS.flatMap((g) => g.statuses));
-  const closed = items.filter((i) => !shownStatuses.has(i.status));
+  const closed = items.filter((i) => !shownStatuses.has(stageOf(i)));
 
   const groupsHtml = GROUPS.map((group) => {
-    const list = items.filter((i) => group.statuses.includes(i.status));
+    const list = items.filter((i) => group.statuses.includes(stageOf(i)));
     if (list.length === 0) return '';
     return `
       <div class="card">
@@ -313,10 +323,13 @@ function render(data) {
        </div>`
     : '';
 
+  const boxed = items.filter((i) => stageOf(i) === 'boxed');
   const where = !items.length
     ? '群主还没把你买的东西放进来。付完货款、群主放行之后，这一页自己会更新。'
     : s.parcelsWaiting
       ? `仓库给你打好了 ${s.parcelsWaiting} 个包裹，等你付运费；付完群主放行，这里就有单号和平铺图。`
+      : boxed.length
+        ? `仓库已经把 ${boxed.length} 件装进拼邮箱${boxed.some((i) => i.returnTrackingNo) ? '，回国单号在下面可以复制' : '，回国单号填好后这里会显示'}。`
       : s.sortedCount
         ? `仓库已经分拣好 ${s.sortedCount} 件${direct ? '，下一步打包直邮给你' : '，下一步装进拼邮箱回国'}。`
         : '东西都在路上，有变化这一页会跟着变。';

@@ -71,6 +71,23 @@ function card(g, { selectable = false, selected = false, disabled = false, note 
     </div>`;
 }
 
+/** 「全选」按钮：这一组全勾上了就变成「取消全选」，再点一下全部取消。 */
+function pickAllButton(ids, picked) {
+  const all = ids.length > 0 && ids.every((x) => picked.has(x));
+  return `<button class="plain small${all ? ' on' : ''}" data-pickall="${ids.join(',')}" aria-pressed="${all}">${all ? '取消全选' : '全选'}</button>`;
+}
+
+function bindPickAll(root, picked, redraw) {
+  root.querySelectorAll('[data-pickall]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const ids = b.dataset.pickall.split(',').map(Number);
+      const all = ids.every((x) => picked.has(x));
+      ids.forEach((x) => (all ? picked.delete(x) : picked.add(x)));
+      redraw();
+    }),
+  );
+}
+
 function renderLogin(message = '') {
   nav.hidden = true;
   logoutBtn.hidden = true;
@@ -368,7 +385,7 @@ async function renderCustomer(id) {
       </div>
       ${cu.lane === 'direct' ? `
       <div class="card">
-        <h3>直邮箱</h3>
+        <h3>直邮箱 ${ready.length ? pickAllButton(ready.map((i) => i.id), picked) : ''}</h3>
         ${readyGroups.length ? `<div class="claim-grid wh-grid">${readyGroups.map((g) => card(g, { selectable: true, selected: g.ids.every((x) => picked.has(x)) })).join('')}</div>` : '<p class="empty">没有整理好待打包的东西</p>'}
         ${notYet.length ? `<details style="margin-top:10px"><summary class="small">还有 ${notYet.length} 件不能装</summary>
           <div class="claim-grid wh-grid">${groupSame(notYet).map((g) => card(g, { disabled: true, note: g.boxId ? '' : '<span class="badge">还没整理</span>' })).join('')}</div></details>` : ''}
@@ -381,7 +398,7 @@ async function renderCustomer(id) {
           <label>平铺图</label>
           <label class="btn ghost" style="display:inline-block">拍照 / 选图<input id="ph" type="file" accept="image/*" multiple hidden></label>
           <span id="phn" class="small muted">${photos.length ? `已选 ${photos.length} 张` : ''}</span>
-          <div class="actionbar" style="margin-top:12px"><button class="btn wh-big" type="submit">提交包裹（${picked.size} 件）</button></div>
+          <div class="actionbar" style="margin-top:12px"><button class="btn wh-big" type="submit" ${picked.size ? '' : 'disabled'}>提交包裹（${picked.size} 件）</button></div>
         </form>` : ''}
       </div>` : ''}
       <h3>他的包裹</h3>
@@ -400,6 +417,13 @@ async function renderCustomer(id) {
         if (gw) document.getElementById('gw').value = gw;
       }),
     );
+    bindPickAll(view, picked, () => {
+      const tn = document.getElementById('tn')?.value;
+      const gw = document.getElementById('gw')?.value;
+      draw();
+      if (tn) document.getElementById('tn').value = tn;
+      if (gw) document.getElementById('gw').value = gw;
+    });
     document.getElementById('ph')?.addEventListener('change', async (e) => {
       try {
         for (const f of e.target.files) photos.push(await compress(f));
@@ -517,7 +541,7 @@ async function renderBox(id) {
         ${byPerson(data.waiting)
           .map(
             (list) => `<h4 style="margin:10px 0 6px">${escapeHtml(list[0].nickname)} · ${list.length} 件
-                <button class="plain small" data-pickall="${list.map((i) => i.id).join(',')}">全选他</button>
+                ${pickAllButton(list.map((i) => i.id), picked)}
                 <button class="plain small" data-todirect="${list[0].customerId}" data-name="${escapeHtml(list[0].nickname)}">改直邮</button></h4>
               <div class="claim-grid wh-grid">${groupSame(list).map((g) => card(g, { selectable: true, selected: g.ids.every((x) => picked.has(x)) })).join('')}</div>`,
           )
@@ -542,12 +566,7 @@ async function renderBox(id) {
         draw();
       }),
     );
-    view.querySelectorAll('[data-pickall]').forEach((b) =>
-      b.addEventListener('click', () => {
-        b.dataset.pickall.split(',').forEach((x) => picked.add(Number(x)));
-        draw();
-      }),
-    );
+    bindPickAll(view, picked, draw);
     view.querySelectorAll('[data-todirect]').forEach((b) =>
       b.addEventListener('click', async () => {
         if (await switchLane(Number(b.dataset.todirect), b.dataset.name, 'direct')) location.hash = `#/customer/${b.dataset.todirect}`;
