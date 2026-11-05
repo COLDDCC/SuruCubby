@@ -3,7 +3,9 @@ import type { Env } from '../../lib/env.ts';
 import { badRequest, bound, notFound, optionalString, readJson, requireInt } from '../../lib/http.ts';
 import { nowIso, statusLogStmt } from '../../lib/db.ts';
 import { isItemStatus } from '../../lib/status.ts';
-import { surugaCode } from '../../lib/images.ts';
+import { cacheImage, isHttpUrl, liveImageUrl, surugaCode } from '../../lib/images.ts';
+import { storeUploadedImage } from '../../lib/imageJobs.ts';
+import { imageCache } from '../../lib/imageCache.ts';
 
 export const itemRoutes = new Hono<{ Bindings: Env }>();
 
@@ -118,4 +120,43 @@ itemRoutes.patch('/:id', async (c) => {
 
   if (statements.length > 0) await db.batch(statements);
   return c.json({ ok: true });
+});
+
+/**
+ * 手动给一件东西换封面：上传 / 粘贴图片（dataUrl），或者给一个图片地址（url，马上抓下来存好）。
+ * 自动抓不到图的时候兜底用。
+ */
+itemRoutes.post('/:id/image', async (c) => {
+  const id = requireInt(c.req.param('id'), '物品 ID');
+  const body = await readJson<{ dataUrl?: unknown; url?: unknown }>(c);
+  const item = await c.env.DB.prepare('SELECT id FROM items WHERE id = ?').bind(id).first<{ id: number }>();
+  if (!item) throw notFound('没有这件东西');
+  let path: string;
+  if (typeof body.dataUrl === 'string') {
+    try {
+      path = await storeUploadedImage(c.env, body.dataUrl);
+    } catch (err) {
+      throw badRequest((err as Error).message);
+    }
+  } else if (typeof body.url === 'string' && isHttpUrl(body.url.trim())) {
+    const url = body.url.trim();
+    if (c.env.IMAGES) {
+      const r = await cacheImage(c.env.IMAGES, url);
+      if (!r.path) throw badRequest(`这个地址抓不到图：${r.reason ?? ''}`);
+      path = r.path;
+    } else {
+      if (!(await liveImageUrl(url))) throw badRequest('这个地址抓不到图');
+      path = url;
+    }
+  } else {
+    throw badRequest('给一张图片，或者一个 http(s) 图片地址');
+  }
+  // 图片换了，/img/i/{id} 的磁盘 / 边缘缓存也要作废
+  await c.env.DB.prepare('UPDATE items SET image_url = ?, image_error = NULL, updated_at = ? WHERE id = ?').bind(path, nowIso(), id).run();
+  try {
+    await imageCache(c.env).delete?.(new Request(new URL(`/img/i/${id}`, c.req.url).toString()));
+  } catch {
+    /* 缓存删不掉也没关系，最多晚一点才换 */
+  }
+  return c.json({ ok: true, imageUrl: path });
 });

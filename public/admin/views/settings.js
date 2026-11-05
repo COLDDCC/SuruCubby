@@ -11,19 +11,26 @@ export async function render(view) {
   const [data, wh] = await Promise.all([api.get('/api/admin/settings'), api.get('/api/admin/warehouse-users')]);
   view.innerHTML = `
     <div class="card">
+      <h2>飞书表格</h2>
+      <div class="row">
+        <div><label for="fsId">App ID</label><input id="fsId" value="${escapeHtml(data.feishuAppId || '')}" placeholder="cli_…" autocomplete="off"></div>
+        <div><label for="fsSecret">App Secret</label><input id="fsSecret" type="password" autocomplete="new-password" placeholder="${data.feishuHasSecret ? '已保存，不改就留空' : ''}"></div>
+      </div>
+      <p>${data.feishuHasSecret ? '<span class="badge ok dot">已连上</span> ' : ''}<button id="saveFeishu">测试并保存</button></p>
+    </div>
+
+    <div class="card">
       <h2>直邮运费单价</h2>
-      <p class="small muted">这两个数只有你看得到：仓库那边一个价格都看不到，客户只看到「毛重 × 收客户的单价」算出来的运费。</p>
       <div class="row">
         <div><label for="cost">仓库收我的（元 / kg）</label><input id="cost" inputmode="decimal" value="${(data.whCostFenPerKg / 100).toFixed(2)}"></div>
         <div><label for="sale">我收客户的（元 / kg）</label><input id="sale" inputmode="decimal" value="${(data.directSaleFenPerKg / 100).toFixed(2)}"></div>
       </div>
-      <p class="small muted">仓库提交包裹那一刻按这里的数记下来；之后改这里不影响已经提交的包裹。单个包裹想给优惠，去「直邮包裹」页单独改。</p>
       <p><button id="saveDirect">保存直邮单价</button></p>
     </div>
 
     <div class="card">
       <h2>仓库账号</h2>
-      <p class="small muted">每个仓库人员一个账号，登录地址是 <code>${escapeHtml(location.origin)}/wh/</code>（首页点「我是仓库」也能进）。改密码或停用会让他当场掉线。</p>
+      <p class="small muted"><code>${escapeHtml(location.origin)}/wh/</code></p>
       <table>
         <thead><tr><th>账号</th><th>名字</th><th class="right">提交过的包裹</th><th></th></tr></thead>
         <tbody>${wh.users
@@ -49,7 +56,6 @@ export async function render(view) {
 
     <div class="card">
       <h2>清理走完的旧订单</h2>
-      <p class="small muted">只删每一件都已经寄出 / 回国 / 取消的订单，连同它们的直邮包裹和平铺图；还在路上的一件不碰。客户账号、地址、收款记录都留着。删了找不回来，先「看看会删什么」。</p>
       <div class="row">
         <label for="cleanBefore" style="margin:0">最后一次变动早于</label>
         <input id="cleanBefore" type="date" value="${firstOfMonth()}">
@@ -60,7 +66,6 @@ export async function render(view) {
 
     <div class="card">
       <h2>老流程的设置</h2>
-      <p class="small muted">「称重分摊 → 客户申请发货 → 你寄出」那套流程现在不用了，这两个数只在你还用老页面时才起作用。</p>
       <label for="fee">国内寄出每次收费（元）</label>
       <input id="fee" inputmode="decimal" value="${(data.domesticFeeFen / 100).toFixed(2)}">
       <label for="price">国际运费单价（元 / kg）</label>
@@ -74,6 +79,21 @@ export async function render(view) {
     try {
       const r = await api.post('/api/admin/settings', body());
       toast(done(r));
+      await render(view);
+    } catch (err) {
+      toast(err.message, true);
+      button.disabled = false;
+    }
+  };
+  document.getElementById('saveFeishu').onclick = async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      await api.post('/api/admin/settings/feishu', {
+        appId: document.getElementById('fsId').value.trim(),
+        appSecret: document.getElementById('fsSecret').value.trim(),
+      });
+      toast('飞书连上了');
       await render(view);
     } catch (err) {
       toast(err.message, true);

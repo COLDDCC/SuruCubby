@@ -101,7 +101,6 @@ function directRosterModal(view, params, query) {
   openModal((box, close) => {
     box.innerHTML = `
       <h3>导入直邮名单</h3>
-      <p class="small muted">表里一行一个直邮的人。认人用「名字」或「QQ」（有 QQ 更准）；地址可以是一整列，也可以分成收件人 / 电话 / 地址三列，会拼成一行给仓库看。只认已经在客户名单里的人。</p>
       <input type="file" id="drFile" accept=".xlsx,.xls,.csv">
       <div id="drMap" style="display:none">
         ${['名字', 'QQ', '收件人', '电话', '地址'].map((t, i) => `<label>${t}在哪一列</label><select data-col="${i}" style="width:100%"></select>`).join('')}
@@ -163,7 +162,6 @@ function rosterModal(view, params, query) {
   openModal((box, close) => {
     box.innerHTML = `
       <h3>导入客户名单</h3>
-      <p class="small muted">表里有「名字」和「QQ 号」两列就够，「真名」有就一起读进来，没有也能导。真名只有你在后台看得到，客户自己的页面不显示。</p>
       <input type="file" id="rosterFile" accept=".xlsx,.xls,.csv">
       <div id="rosterMap" style="display:none">
         <label>名字在哪一列</label><select id="mapNick" style="width:100%"></select>

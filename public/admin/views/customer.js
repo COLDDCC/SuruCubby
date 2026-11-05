@@ -43,7 +43,6 @@ export async function render(view, [id]) {
         <div class="stat"><div class="label">国内运费待付</div><div class="value money">${money(s.domesticUnpaidFen)}</div></div>
         <div class="stat big"><div class="label">运费待付</div><div class="value money">${money(s.freightUnpaidFen)}</div></div>
       </div>
-      <p class="small muted">货款按日元记，客户付款当天按汇率折成人民币；运费是人民币，两者不合并算总数。</p>
       <p class="small muted">别名：${data.aliases.map((a) => escapeHtml(a)).join('、') || '无'}
         <button class="small plain" data-action="addAlias">加别名</button></p>
       <p class="small ${data.customer.selfReturn ? '' : 'paid'}">拼邮：${
@@ -96,7 +95,7 @@ export async function render(view, [id]) {
       <h3>可发货（${stock.length} 件）</h3>
       ${
         data.customer.selfReturn
-          ? `<p class="small muted">这位不拼邮，国内快递不用我们寄，所以这一栏不动。他改回拼邮后这里才能操作；<strong>货已经当面给他了</strong>就点上面那行的「这几件已经当面给他了」，这几件直接结成的「已签收」。</p>`
+          ? `<p class="small muted">不拼邮</p>`
           : stock.length
           ? `<form id="shipForm">
           ${stock
@@ -111,7 +110,6 @@ export async function render(view, [id]) {
             )
             .join('')}
           <button type="button" data-action="ship">标成已发货 · 填单号</button>
-          <span class="small muted">每次固定收国内运费，与件数无关。点完会让你填快递单号，还没出单可以留空。</span>
         </form>`
           : empty('没有可发货物品')
       }

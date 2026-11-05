@@ -53,7 +53,6 @@ export async function shipModal(candidates, onDone) {
   openModal((box, close) => {
     box.innerHTML = `
       <h3>登记一次发货</h3>
-      <p class="small muted">勾上这一批要寄的商品，它们当场变「已寄出」，并记一笔国内运费。快递单号现在能填，忘了也能回头在列表里补。</p>
       <label>发给哪位客户</label>
       <select id="cust" style="width:100%">
         <option value="">选一位（只剩可发货的那些）</option>

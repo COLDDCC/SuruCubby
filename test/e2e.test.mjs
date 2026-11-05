@@ -1425,19 +1425,22 @@ test('图片：=IMAGE("...") 公式认得出来，抓下来存进 R2，之后只
       assignments: [{ cn, newCustomer: { qq: `${stamp + 7}`.slice(-9), nickname: cn } }],
     });
 
-    const result = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
-    // 没开 R2 时只需要处理「压根没有图」的那件；开了 R2 两件都要抓进桶
-    assert.equal(result.tried, result.r2 ? 2 : 1);
-    if (result.r2) {
-      assert.equal(result.cached, 2, `应该抓下来两张：${JSON.stringify(result.failures)}`);
+    // 导入后后台自动开抓；wait=1 等它抓完（同一单不会同时跑两个任务）
+    const result = await call('POST', `/api/admin/batches/${imported.batchId}/images?wait=1`);
+    const status = result.running ? await call('GET', `/api/admin/batches/${imported.batchId}/images`) : result;
+    assert.equal(status.total, 2);
+    if (status.storage) {
+      assert.equal(status.stored, 2, `应该两张都存进自己服务器：${JSON.stringify(status.failed)}`);
     } else {
-      assert.equal(result.linked, 1, '没绑 R2 时至少把 og:image 外链补上');
+      assert.ok(status.stored >= 1, '没有存储时至少把 og:image 外链补上');
     }
-    assert.equal(result.left, 0);
+    assert.equal(status.pending, 0);
+    assert.equal(status.failed.length, 0);
+    const r2 = status.storage;
 
     const detail = await call('GET', `/api/admin/batches/${imported.batchId}`);
     for (const item of detail.items) {
-      if (result.r2) {
+      if (r2) {
         assert.match(item.imageUrl, /^\/img\/[0-9a-f]{32}\.png$/, item.title);
         const res = await fetch(`${BASE}${item.imageUrl}`);
         assert.equal(res.status, 200);
@@ -1448,9 +1451,10 @@ test('图片：=IMAGE("...") 公式认得出来，抓下来存进 R2，之后只
       }
     }
 
-    // 再点一次不会重复抓
-    const again = await call('POST', `/api/admin/batches/${imported.batchId}/images`);
-    assert.equal(again.tried, 0, '处理过的不该再抓一遍');
+    // 再点一次：都存好了，什么也不用抓
+    const again = await call('POST', `/api/admin/batches/${imported.batchId}/images?wait=1`);
+    assert.equal(again.stored, 2);
+    assert.equal(again.pending, 0);
 
     // 页面用的是 /img/i/{id}：Worker 转一道 + 边缘缓存，不用开图床
     const first = detail.items.find((i) => i.title === '公式图片');

@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { startInBackground } from '../../lib/imageJobs.ts';
+import { FeishuError, parseFeishuUrl, readFeishuSheet } from '../../lib/feishu.ts';
 import type { Env } from '../../lib/env.ts';
 import { FIELD_LABELS, groupByCn, parseSheet, type RawSheet, type ParsedRow } from '../../lib/excel.ts';
 import { badRequest, bound, optionalString, readJson, requireString } from '../../lib/http.ts';
@@ -329,6 +331,7 @@ importRoutes.post('/commit', async (c) => {
       .bind(orderNo, shop, japanTrackingNo, batchId),
   );
   await db.batch(statements);
+  startInBackground(c, batchId);
 
   return c.json({
     batchId,
@@ -339,4 +342,26 @@ importRoutes.post('/commit', async (c) => {
     createdCustomers,
     skipped: parsed.skipped,
   });
+});
+
+/**
+ * 飞书表格：贴链接 → 读出 { headers, rows, urls }（单元格里的图片已经存进自己服务器），
+ * 前端拿去走和 Excel 一样的预览 / 列对应 / 确认流程。fileHash 用「链接 + 表头 + 行数据」算，
+ * 同一张表重复导入照样会被拦一下。
+ */
+importRoutes.post('/feishu', async (c) => {
+  const body = await readJson<{ url?: unknown }>(c);
+  const url = requireString(body.url, '飞书链接');
+  try {
+    const sheet = await readFeishuSheet(c.env, url);
+    const digest = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify([parseFeishuUrl(url)?.token, sheet.headers, sheet.rows])),
+    );
+    const fileHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return c.json({ ...sheet, fileHash });
+  } catch (err) {
+    if (err instanceof FeishuError) throw badRequest(err.message);
+    throw err;
+  }
 });

@@ -152,8 +152,125 @@ paymentRoutes.post('/', async (c) => {
 });
 
 /**
- * 一键按批收货款：这一批里每个还没付的客户各记一笔 JPY 收款，
- * 省掉「一个个客户点确认、再逐件勾选」。记录仍然按人按件留着，能单独撤销。
+ * 给一位客户在一个订单里记货款：他在这单里还没付的东西挂到一笔 JPY 收款上，
+ * 同时把他这单的东西放进他的仓库（收完钱就放行）。返回要执行的语句。
+ */
+async function goodsForCustomer(
+  db: D1Database,
+  batchId: number,
+  customerId: number,
+  paymentId: number,
+  note: string | null,
+  at: string,
+): Promise<{ stmts: D1PreparedStatement[]; itemCount: number; amountJpy: number }> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS itemCount, COALESCE(SUM(goods_fee_jpy), 0) AS amountJpy FROM items
+        WHERE batch_id = ? AND customer_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')`,
+    )
+    .bind(batchId, customerId)
+    .first<{ itemCount: number; amountJpy: number }>();
+  const itemCount = row?.itemCount ?? 0;
+  const amountJpy = row?.amountJpy ?? 0;
+  const stmts: D1PreparedStatement[] = [];
+  if (itemCount > 0) {
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO payments (id, customer_id, kind, currency, amount, ref_type, ref_id, note, paid_at)
+           VALUES (?, ?, 'goods', 'JPY', ?, 'batch', ?, ?, ?)`,
+        )
+        .bind(paymentId, customerId, amountJpy, batchId, note, at),
+      // 先把未付的物品挂到这笔收款上（撤销时才知道该退哪几件），再改状态
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO payment_items (payment_id, item_id)
+           SELECT ?, id FROM items
+            WHERE batch_id = ? AND customer_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')`,
+        )
+        .bind(paymentId, batchId, customerId),
+      db
+        .prepare(
+          `UPDATE items SET goods_paid = 1, updated_at = ?
+            WHERE batch_id = ? AND customer_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')`,
+        )
+        .bind(at, batchId, customerId),
+    );
+  }
+  stmts.push(
+    db
+      .prepare('UPDATE items SET released_at = ? WHERE batch_id = ? AND customer_id = ? AND released_at IS NULL')
+      .bind(at, batchId, customerId),
+  );
+  return { stmts, itemCount, amountJpy };
+}
+
+/**
+ * 订单页逐个人勾「已收款」：勾上 = 记这一笔并放行；取消勾 = 撤销他在这一单的货款记录
+ * （放行不动，要收回另点「收回」）。每勾一下就存进数据库，分几天收完也不丢进度。
+ */
+paymentRoutes.post('/batch-customer', async (c) => {
+  const body = await readJson<{ batchId?: unknown; customerId?: unknown; paid?: unknown; note?: string }>(c);
+  const batchId = requireInt(body.batchId, '订单');
+  const customerId = requireInt(body.customerId, '客户');
+  const db = c.env.DB;
+  const at = nowIso();
+
+  if (body.paid !== false) {
+    const r = await goodsForCustomer(db, batchId, customerId, await nextId(db, 'payments'), bound(optionalString(body.note), '备注', 200), at);
+    await db.batch(r.stmts);
+    return c.json({ ok: true, paid: true, itemCount: r.itemCount, amountJpy: r.amountJpy });
+  }
+
+  // 撤销：找出挂着他这一单物品的货款记录
+  const links = await db
+    .prepare(
+      `SELECT pi.payment_id AS paymentId, pi.item_id AS itemId, i.goods_fee_jpy AS fee,
+              (SELECT COUNT(*) FROM payment_items x JOIN items y ON y.id = x.item_id
+                WHERE x.payment_id = pi.payment_id AND (y.batch_id <> ? OR y.customer_id <> ?)) AS outside
+         FROM payment_items pi
+         JOIN items i ON i.id = pi.item_id
+         JOIN payments p ON p.id = pi.payment_id AND p.kind = 'goods'
+        WHERE i.batch_id = ? AND i.customer_id = ?`,
+    )
+    .bind(batchId, customerId, batchId, customerId)
+    .all<{ paymentId: number; itemId: number; fee: number; outside: number }>();
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `UPDATE items SET goods_paid = 0, updated_at = ?
+          WHERE batch_id = ? AND customer_id = ? AND goods_paid = 1 AND status NOT IN ('cancelled','refunded')`,
+      )
+      .bind(at, batchId, customerId),
+  ];
+  const byPayment = new Map<number, { outside: number; fee: number; itemIds: number[] }>();
+  for (const l of links.results) {
+    const e = byPayment.get(l.paymentId) ?? { outside: l.outside, fee: 0, itemIds: [] };
+    e.fee += l.fee;
+    e.itemIds.push(l.itemId);
+    byPayment.set(l.paymentId, e);
+  }
+  for (const [paymentId, e] of byPayment) {
+    if (e.outside === 0) {
+      stmts.push(db.prepare('DELETE FROM payment_items WHERE payment_id = ?').bind(paymentId));
+      stmts.push(db.prepare('DELETE FROM payments WHERE id = ?').bind(paymentId));
+    } else {
+      // 这笔收款还包含别的订单的东西：只把这一单的部分拆出来
+      stmts.push(
+        db
+          .prepare(`DELETE FROM payment_items WHERE payment_id = ? AND item_id IN (${placeholders(e.itemIds.length)})`)
+          .bind(paymentId, ...e.itemIds),
+      );
+      stmts.push(db.prepare('UPDATE payments SET amount = amount - ? WHERE id = ?').bind(e.fee, paymentId));
+    }
+  }
+  await db.batch(stmts);
+  return c.json({ ok: true, paid: false });
+});
+
+/**
+ * 一键按批收货款：这一批里每个还没付的客户各记一笔 JPY 收款，并放行。
+ * 记录仍然按人按件留着，能单独撤销。
  */
 paymentRoutes.post('/all-goods', async (c) => {
   const body = await readJson<{ batchId?: unknown; note?: string }>(c);
@@ -164,50 +281,28 @@ paymentRoutes.post('/all-goods', async (c) => {
 
   const rows = await db
     .prepare(
-      `SELECT customer_id AS customerId, COUNT(*) AS itemCount, SUM(goods_fee_jpy) AS amountJpy
-         FROM items
+      `SELECT DISTINCT customer_id AS customerId FROM items
         WHERE batch_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')
-        GROUP BY customer_id
         ORDER BY customer_id`,
     )
     .bind(batchId)
-    .all<{ customerId: number; itemCount: number; amountJpy: number }>();
+    .all<{ customerId: number }>();
   if (!rows.results.length) throw badRequest('这一批没有要收的货款');
 
   let paymentId = await nextId(db, 'payments');
   const statements: D1PreparedStatement[] = [];
+  let itemCount = 0;
+  let amountJpy = 0;
   for (const row of rows.results) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO payments (id, customer_id, kind, currency, amount, ref_type, ref_id, note, paid_at)
-           VALUES (?, ?, 'goods', 'JPY', ?, 'batch', ?, ?, ?)`,
-        )
-        .bind(paymentId, row.customerId, row.amountJpy, batchId, note, at),
-      // 先把这件批里未付的物品挂到这笔收款上（撤销时才知道该退哪几件），再改状态
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO payment_items (payment_id, item_id)
-           SELECT ?, id FROM items
-            WHERE batch_id = ? AND customer_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')`,
-        )
-        .bind(paymentId, batchId, row.customerId),
-      db
-        .prepare(
-          `UPDATE items SET goods_paid = 1, updated_at = ?
-            WHERE batch_id = ? AND customer_id = ? AND goods_paid = 0 AND status NOT IN ('cancelled','refunded')`,
-        )
-        .bind(at, batchId, row.customerId),
-    );
+    const r = await goodsForCustomer(db, batchId, row.customerId, paymentId, note, at);
+    statements.push(...r.stmts);
+    itemCount += r.itemCount;
+    amountJpy += r.amountJpy;
     paymentId += 1;
   }
   await db.batch(statements);
 
-  return c.json({
-    customers: rows.results.length,
-    itemCount: rows.results.reduce((sum, r) => sum + r.itemCount, 0),
-    amountJpy: rows.results.reduce((sum, r) => sum + r.amountJpy, 0),
-  });
+  return c.json({ customers: rows.results.length, itemCount, amountJpy });
 });
 
 /** 一键按批收国际运费：这个包裹里每一摞已分摊、还没收的运费各记一笔 CNY 收款。 */

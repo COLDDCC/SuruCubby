@@ -74,7 +74,9 @@ export async function render(view) {
             `${customerLink(r)} ${LANE[r.shipMode] || ''}`,
             `<a href="#/batches/${r.batchId}">${escapeHtml(r.orderNo || r.batchName)}</a> · ${r.count} 件 · ${yen(r.amountJpy)}`,
             r.goodsPaid ? '<span class="badge ok dot">货款已收</span>' : '<span class="badge dot">货款未收</span>',
-            `<button class="small${r.goodsPaid ? '' : ' ghost'}" data-action="release" data-batch="${r.batchId}" data-customer="${r.customerId}" data-name="${escapeHtml(r.nickname)}">放进他的仓库</button>`,
+            r.goodsPaid
+              ? `<button class="small" data-action="release" data-batch="${r.batchId}" data-customer="${r.customerId}" data-name="${escapeHtml(r.nickname)}">放进他的仓库</button>`
+              : `<button class="small" data-action="payGoods" data-batch="${r.batchId}" data-customer="${r.customerId}" data-name="${escapeHtml(r.nickname)}">已收款</button>`,
           ),
         )
       )
@@ -123,6 +125,13 @@ export async function render(view) {
         .join('')
     : emptyBox('没有开着的拼邮箱');
 
+  const needAddress = data.needAddress || [];
+  const addressHtml = capped(
+    needAddress.map((r) =>
+      row(customerLink(r), `${r.count} 件等着直邮`, '<span class="badge warn dot">没有地址</span>', `<a class="btn small" href="#/customers/${r.customerId}">填地址</a>`),
+    ),
+  );
+
   // ⑤ 货款未收（老逻辑不变）
   const goods = data.goodsUnpaid.length
     ? capped(
@@ -132,7 +141,7 @@ export async function render(view) {
             customerLink(r),
             `${escapeHtml(r.batchName)} · ${r.count} 件 · QQ ${escapeHtml(r.qq)}`,
             `<span class="unpaid money">${yen(r.amountJpy)}</span>`,
-            `<button class="small" data-action="payGoods" data-customer="${r.customerId}" data-batch="${r.batchId}">已收款</button>`,
+            `<button class="small" data-action="payGoods" data-customer="${r.customerId}" data-batch="${r.batchId}" data-name="${escapeHtml(r.nickname)}">已收款</button>`,
           ),
         )
       )
@@ -202,7 +211,6 @@ export async function render(view) {
     <div class="page-head">
       <div>
         <h1 class="page-title">待办</h1>
-        <p class="page-sub">按流程排：放行 → 仓库整理 → 直邮单号放行 / 拼邮箱发出 → 收货款</p>
       </div>
       <div class="page-actions">
         <a class="btn ghost" href="#/batches">全部订单</a>
@@ -211,7 +219,8 @@ export async function render(view) {
     </div>
     ${kpis}
     <div class="todo-grid">
-      ${todoCard('todo-release', '① 待放行', releasePeople, `<p class="small muted" style="margin:-6px 0 4px">先下单后收钱：放行之前他自己的页面上看不到这些东西。已收货款的排在前面。</p>${releaseHtml}`)}
+      ${needAddress.length ? todoCard('todo-address', '直邮待补地址', needAddress.length, addressHtml) : ''}
+      ${todoCard('todo-release', '① 待放行', releasePeople, releaseHtml)}
       ${todoCard('todo-parcels', '② 直邮包裹等单号放行', parcels.length, parcelHtml, '<a class="small" href="#/parcels">直邮包裹 →</a>')}
       ${todoCard('todo-goods', '③ 货款未收', data.goodsUnpaid.length, goods)}
       ${todoCard('todo-backlog', '④ 仓库还没整理', backlog.length, backlogHtml)}
@@ -230,14 +239,9 @@ export async function render(view) {
       toast(`放行了 ${r.count} 件，${name} 现在看得到了`);
       render(view);
     },
-    payGoods: async ({ customer, batch }) => {
-      if (!(await confirmBox('确认这一批货款已经收到？'))) return;
-      await api.post('/api/admin/payments', {
-        customerId: Number(customer),
-        kind: 'goods',
-        batchId: Number(batch),
-      });
-      toast('已记账');
+    payGoods: async ({ customer, batch, name }) => {
+      await api.post('/api/admin/payments/batch-customer', { customerId: Number(customer), batchId: Number(batch), paid: true });
+      toast(`${name || ''} 货款已记，东西已放进他的仓库`);
       render(view);
     },
     payIntl: async ({ customer, group }) => {

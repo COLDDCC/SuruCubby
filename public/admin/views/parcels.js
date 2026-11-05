@@ -43,7 +43,6 @@ export async function render(view) {
     view.innerHTML = `
       <div class="card">
         <h2>直邮包裹</h2>
-        <p class="small muted">仓库价和你收客户的价只在这一页同时出现：仓库那边看不到任何价格，客户只看到你收他的运费。</p>
         <div class="row">
           <label style="margin:0">仓库提交日期</label>
           <select id="day">

@@ -6,7 +6,7 @@ const input = document.getElementById('rail-q');
 const tip = document.getElementById('rail-tip');
 const box = document.getElementById('rail-results');
 
-const IDLE = '货号尾号、名称片段、客户名都认';
+const IDLE = '';
 let timer = 0;
 let seq = 0;
 

@@ -58,8 +58,8 @@ function card(g, { selectable = false, selected = false, disabled = false, note 
   const code = itemCode(g.productUrl);
   const count = g.ids.length;
   return `
-    <div class="claim wh-card${selected ? ' found' : ''}${disabled ? ' wh-off' : ''}" ${selectable && !disabled ? `data-pick="${g.ids.join(',')}"` : ''}>
-      <div class="claim-photo">${thumb(g)}</div>
+    <div class="claim wh-card${selected ? ' found' : ''}${disabled ? ' wh-off' : ''}" ${selectable && !disabled ? `data-pick="${g.ids.join(',')}" role="checkbox" aria-checked="${selected}"` : ''}>
+      <div class="claim-photo">${thumb(g)}${selectable && !disabled ? `<span class="pick-box${selected ? ' on' : ''}" aria-hidden="true"></span>` : ''}</div>
       <div class="wh-code">${code ? escapeHtml(code) : '<span class="muted small">没有货号</span>'}${count > 1 ? ` <b class="wh-count">×${count}</b>` : ''}</div>
       <div class="small wh-title" title="${escapeHtml(g.title)}">${escapeHtml(g.title)}</div>
       <div class="small row" style="gap:4px">
@@ -78,7 +78,6 @@ function renderLogin(message = '') {
   view.innerHTML = `
     <div class="card" style="max-width:380px;margin:40px auto">
       <h1>仓库登录</h1>
-      <p class="small muted">账号和密码找群主要，每个人一个。</p>
       <form id="login">
         <label for="u">账号</label><input id="u" autocomplete="username" style="width:100%">
         <label for="p">密码</label><input id="p" type="password" autocomplete="current-password" style="width:100%">
@@ -104,7 +103,6 @@ async function renderHome() {
   view.innerHTML = `
     <div class="card scan-card">
       <h2 style="margin:0 0 4px">货到了？输单号进门</h2>
-      <p class="small" style="margin:0 0 12px">日本订单号或日本运单号，输后几位也行</p>
       <form id="find" class="row">
         <input id="q" placeholder="例如 0042 或 7788" style="flex:1;min-width:200px" autocomplete="off" enterkeyhint="go">
         <button class="btn" type="submit">进入</button>
@@ -153,6 +151,22 @@ function batchList(batches) {
     .join('');
 }
 
+/** 拼邮 ⇄ 直邮。改了以后这位客户以后的单也默认这样走。成功返回 true。 */
+async function switchLane(customerId, nickname, lane) {
+  const text = lane === 'direct'
+    ? `把 ${nickname} 改成直邮？以后他的单也默认直邮。地址要群主补上才能打包。`
+    : `把 ${nickname} 改回拼邮？以后他的单也默认拼邮。`;
+  if (!confirm(text)) return false;
+  try {
+    const r = await api('POST', `/api/wh/customers/${customerId}/lane`, { lane });
+    toast(r.needAddress ? `已改成直邮，等群主补地址` : `已改成${lane === 'direct' ? '直邮' : '拼邮'}`);
+    return true;
+  } catch (err) {
+    if (!err.silent) toast(err.message, true);
+    return false;
+  }
+}
+
 // ───────── 订单操作台：点客户名字 → 他这一单的东西 ─────────
 async function renderOrder(id, openCustomer) {
   const data = await api('GET', `/api/wh/batches/${id}`);
@@ -165,7 +179,7 @@ async function renderOrder(id, openCustomer) {
         <b>${escapeHtml(c.nickname)}</b> ${LANE[c.lane]}<br><span class="small">${done ? '✓ 已整理' : `已整理 ${c.sortedCount}/${c.itemCount}`}</span>${meter(c.sortedCount, c.itemCount)}</a>`;
     })
     .join('');
-  let panel = '<p class="muted">点上面的名字，这位客户这一单买的东西会全部列出来。</p>';
+  let panel = '';
   if (current) {
     const groups = groupSame(current.items);
     const done = current.sortedCount >= current.itemCount;
@@ -182,9 +196,11 @@ async function renderOrder(id, openCustomer) {
       <div class="claim-grid wh-grid" style="margin-top:12px">${groups.map((g) => card(g)).join('')}</div>
       <div class="actionbar row" style="margin-top:12px">
         ${done ? '' : `<button class="btn wh-big" data-act="sort">整理完成（${current.itemCount - current.sortedCount} 件）</button>`}
-        ${done && current.lane === 'direct' ? `<a class="btn wh-big" href="#/customer/${current.id}">去打包直邮 →</a>` : ''}
-        ${done && current.lane === 'group' ? '<a class="btn wh-big" href="#/boxes">装进拼邮箱 →</a>' : ''}
-        ${done && current.lane === 'self' ? '<span class="small muted">这位自己带回，整理完就放着</span>' : ''}
+        ${done && current.lane === 'direct' ? `<a class="btn wh-big" href="#/customer/${current.id}">装进直邮箱 →</a>
+          <button class="btn ghost wh-big" data-lane="group">改拼邮，装拼邮箱</button>` : ''}
+        ${done && current.lane === 'group' ? `<a class="btn wh-big" href="#/boxes">装进拼邮箱 →</a>
+          <button class="btn ghost wh-big" data-lane="direct">改直邮，装直邮箱</button>` : ''}
+        ${done && current.lane === 'self' ? '<span class="badge">自己带回</span>' : ''}
       </div>`;
   }
   view.innerHTML = `
@@ -194,7 +210,7 @@ async function renderOrder(id, openCustomer) {
       <p class="small muted" style="margin:0">${escapeHtml(b.name)}${b.japanTrackingNo ? ` · 运单 ${escapeHtml(b.japanTrackingNo)}` : ''}${b.shop ? ` · ${escapeHtml(b.shop)}` : ''}</p>
       <div class="wh-people">${chips}</div>
     </div>
-    <div class="card">${panel}</div>`;
+    ${panel ? `<div class="card">${panel}</div>` : ''}`;
   view.querySelector('[data-act="sort"]')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try {
@@ -205,6 +221,11 @@ async function renderOrder(id, openCustomer) {
       e.target.disabled = false;
       if (!err.silent) toast(err.message, true);
     }
+  });
+  view.querySelector('[data-lane]')?.addEventListener('click', async (e) => {
+    const lane = e.currentTarget.dataset.lane;
+    if (!(await switchLane(current.id, current.nickname, lane))) return;
+    location.hash = lane === 'direct' ? `#/customer/${current.id}` : '#/boxes';
   });
   view.querySelector('[data-act="unsort"]')?.addEventListener('click', async () => {
     try {
@@ -326,8 +347,8 @@ function bindParcelActions(root, rerender) {
 async function renderCustomer(id) {
   const data = await api('GET', `/api/wh/customers/${id}`);
   const cu = data.customer;
-  const ready = data.items.filter((i) => i.status === 'sorted');
-  const notYet = data.items.filter((i) => i.status !== 'sorted');
+  const ready = data.items.filter((i) => i.status === 'sorted' && !i.boxId);
+  const notYet = data.items.filter((i) => i.status !== 'sorted' || i.boxId);
   const picked = new Set(ready.map((i) => i.id));
   const photos = [];
 
@@ -339,28 +360,28 @@ async function renderCustomer(id) {
         <h2 style="margin:6px 0">${escapeHtml(cu.nickname)} ${LANE[cu.lane]}</h2>
         ${cu.lane === 'direct'
           ? cu.directAddress
-            ? `<p>寄到：<button class="badge copy-chip" data-copy="${escapeHtml(cu.directAddress)}">${escapeHtml(cu.directAddress)}</button> <span class="small muted">点一下复制</span></p>`
-            : '<p class="unpaid">群主还没给这位直邮客户填地址，先问一下群主</p>'
-          : '<p class="unpaid">这位不是直邮客户，他的东西装拼邮箱</p>'}
+            ? `<p>寄到：<button class="badge copy-chip" data-copy="${escapeHtml(cu.directAddress)}">${escapeHtml(cu.directAddress)}</button></p>`
+            : '<p class="unpaid">等群主补地址</p>'
+          : ''}
+        ${cu.lane === 'group' ? '<button class="btn ghost" data-lane="direct">改直邮，装直邮箱</button>' : ''}
+        ${cu.lane === 'direct' ? '<button class="plain small" data-lane="group">改回拼邮</button>' : ''}
       </div>
       ${cu.lane === 'direct' ? `
       <div class="card">
-        <h3>打一个直邮包裹</h3>
-        <p class="small muted">下面是他所有订单里已经整理好、还没打包的东西，可以好几个订单合成一个包裹。点卡片可以取消勾选。</p>
+        <h3>直邮箱</h3>
         ${readyGroups.length ? `<div class="claim-grid wh-grid">${readyGroups.map((g) => card(g, { selectable: true, selected: g.ids.every((x) => picked.has(x)) })).join('')}</div>` : '<p class="empty">没有整理好待打包的东西</p>'}
-        ${notYet.length ? `<details style="margin-top:10px"><summary class="small">还有 ${notYet.length} 件没点【整理完成】（在别的订单里）</summary>
-          <div class="claim-grid wh-grid">${groupSame(notYet).map((g) => card(g, { disabled: true, note: '<span class="badge">还没整理</span>' })).join('')}</div></details>` : ''}
-        ${readyGroups.length ? `
+        ${notYet.length ? `<details style="margin-top:10px"><summary class="small">还有 ${notYet.length} 件不能装</summary>
+          <div class="claim-grid wh-grid">${groupSame(notYet).map((g) => card(g, { disabled: true, note: g.boxId ? '' : '<span class="badge">还没整理</span>' })).join('')}</div></details>` : ''}
+        ${readyGroups.length && cu.directAddress ? `
         <form id="pack" style="margin-top:12px">
           <div class="row">
             <div style="flex:2;min-width:200px"><label for="tn">快递单号</label><input id="tn" style="width:100%;font-size:18px" autocomplete="off" required></div>
             <div style="flex:1;min-width:120px"><label for="gw">毛重（克）</label><input id="gw" type="number" inputmode="numeric" min="1" style="width:100%;font-size:18px" required></div>
           </div>
-          <label>平铺图（可以先不传，打完包再补）</label>
+          <label>平铺图</label>
           <label class="btn ghost" style="display:inline-block">拍照 / 选图<input id="ph" type="file" accept="image/*" multiple hidden></label>
           <span id="phn" class="small muted">${photos.length ? `已选 ${photos.length} 张` : ''}</span>
           <div class="actionbar" style="margin-top:12px"><button class="btn wh-big" type="submit">提交包裹（${picked.size} 件）</button></div>
-          <p class="small muted">提交后客户那边显示「已打包」，单号要等群主放行后客户才看得到。放行之前你都还能改。</p>
         </form>` : ''}
       </div>` : ''}
       <h3>他的包裹</h3>
@@ -407,6 +428,9 @@ async function renderCustomer(id) {
         if (!err.silent) toast(err.message, true);
       }
     });
+    view.querySelector('[data-lane]')?.addEventListener('click', async (e) => {
+      if (await switchLane(cu.id, cu.nickname, e.currentTarget.dataset.lane)) renderCustomer(id);
+    });
     bindParcelActions(view, () => renderCustomer(id));
   };
   draw();
@@ -432,7 +456,6 @@ async function renderBoxes() {
   view.innerHTML = `
     <div class="card">
       <h2>拼邮箱</h2>
-      <p class="small muted">拼邮的人和群主一个箱子回国。把整理好的拼邮件装进箱子，填回国单号，点发出。</p>
       <button class="btn" id="newbox">新开一个拼邮箱</button>
     </div>
     ${data.boxes
@@ -478,7 +501,6 @@ async function renderBox(id) {
             ? `<span class="paid">${escapeHtml(box.returnedAt)} 已发出</span>`
             : `<label for="d" style="margin:0">回国日期</label><input id="d" type="date" value="${today()}"><button class="btn wh-big" id="ship">箱子发出</button>`}
         </div>
-        <p class="small muted">填了回国单号，拼邮的客户页上就能复制这个单号。</p>
       </div>
       <div class="card">
         <h3>箱子里（${data.items.length} 件）</h3>
@@ -492,11 +514,11 @@ async function renderBox(id) {
       </div>
       <div class="card">
         <h3>等着装箱的拼邮件</h3>
-        <p class="small muted">点过【整理完成】、客户走拼邮、还没进任何拼邮箱的。点卡片选中，再点下面的按钮。</p>
         ${byPerson(data.waiting)
           .map(
             (list) => `<h4 style="margin:10px 0 6px">${escapeHtml(list[0].nickname)} · ${list.length} 件
-                <button class="plain small" data-pickall="${list.map((i) => i.id).join(',')}">全选他</button></h4>
+                <button class="plain small" data-pickall="${list.map((i) => i.id).join(',')}">全选他</button>
+                <button class="plain small" data-todirect="${list[0].customerId}" data-name="${escapeHtml(list[0].nickname)}">改直邮</button></h4>
               <div class="claim-grid wh-grid">${groupSame(list).map((g) => card(g, { selectable: true, selected: g.ids.every((x) => picked.has(x)) })).join('')}</div>`,
           )
           .join('') || '<p class="empty">没有等着装箱的</p>'}
@@ -524,6 +546,11 @@ async function renderBox(id) {
       b.addEventListener('click', () => {
         b.dataset.pickall.split(',').forEach((x) => picked.add(Number(x)));
         draw();
+      }),
+    );
+    view.querySelectorAll('[data-todirect]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (await switchLane(Number(b.dataset.todirect), b.dataset.name, 'direct')) location.hash = `#/customer/${b.dataset.todirect}`;
       }),
     );
     view.querySelectorAll('[data-out]').forEach((b) =>

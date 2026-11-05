@@ -49,7 +49,6 @@ export async function render(view, [id]) {
         <button class="small plain" data-action="tracking">回国单号：${escapeHtml(pkg.trackingNo || '待填')}</button>
       </div>
       <p><button data-action="moveItems" class="small plain">拆包 / 合包：移动勾选商品</button></p>
-      <p class="small muted">改状态会同步包裹里所有物品，已取消 / 已退款 / 已经是「可发货」或已寄出的物品不受影响。</p>
       ${
         pkg.totalFeeFen === null
           ? '<p class="small muted">还没分摊国际运费。</p>'
@@ -80,12 +79,13 @@ export async function render(view, [id]) {
               : ''
           }
         <div class="scroll-x"><table>
-          <thead><tr><th>图</th><th>名称</th><th>状态</th><th class="right">应付</th><th class="right">重量</th><th class="right">国际运费</th><th></th></tr></thead>
+          <thead><tr><th></th><th>图</th><th>名称</th><th>状态</th><th class="right">应付</th><th class="right">重量</th><th class="right">国际运费</th><th></th></tr></thead>
           <tbody>${g.items
             .map(
               (i) => `<tr data-focus-item="${i.id}">
+              <td class="cell-pick"><input type="checkbox" data-move-item="${i.id}" aria-label="选中"></td>
               <td class="cell-thumb">${thumb(i)}</td>
-              <td><input type="checkbox" data-move-item="${i.id}"> ${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
+              <td>${escapeHtml(i.title)}${i.missing ? ' <span class="badge warn">缺件</span>' : ''}
                 <div>${codeTag(i)}</div>${orderTag(i)}</td>
               <td class="small">${escapeHtml(statusLabel(i.status))}</td>
               <td class="right money">${yen(i.goodsFeeJpy)}</td>
@@ -165,7 +165,6 @@ function pickStatus(current) {
             .map((s) => `<option value="${s}" ${s === current ? 'selected' : ''}>${statusLabel(s)}</option>`)
             .join('')}
         </select>
-        <p class="small muted">要变「可发货」请去称重台算分摊；要寄出请在发货申请里填单号。</p>
         <div class="row" style="justify-content:flex-end;margin-top:12px">
           <button class="plain" data-no>取消</button><button data-yes>保存</button>
         </div>`;

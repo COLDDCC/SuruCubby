@@ -55,6 +55,14 @@ export class DiskImageCache implements ImageCache {
     this.#sweep();
   }
 
+  async delete(request: Request): Promise<boolean> {
+    const p = this.#paths(request);
+    const existed = fs.existsSync(p.body);
+    fs.rmSync(p.body, { force: true });
+    fs.rmSync(p.meta, { force: true });
+    return existed;
+  }
+
   /** 最多每 10 分钟扫一次，总量超了就从最久没访问的开始删。 */
   #sweep(): void {
     const now = Date.now();
